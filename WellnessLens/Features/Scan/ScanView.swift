@@ -13,21 +13,43 @@ struct ScanView: View {
     @State private var showBarcodeScanner = false
     @State private var showPhotoPicker = false
     @State private var scannerPermissionState: ScannerPermissionState = .unknown
+    @State private var sampleReadsExpanded = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                headerCard
-                feedbackSection
-                liveScanSection
-                manualBarcodeSection
-                labelSection
-                demoScenarioPacksSection
-            }
-            .padding(20)
+        WLScreen {
+            ScanHeaderCard(lastDemoScenario: model.lastDemoScenario)
+
+            ScanPrimaryActionCard(
+                openScanner: requestLiveScan,
+                openPhotoSelection: requestPhotoSelection
+            )
+
+            ScanOtherWaysCard(
+                manualBarcode: $manualBarcode,
+                manualLabelText: $manualLabelText,
+                selectedProductType: $selectedProductType,
+                analyzeBarcode: {
+                    Task {
+                        await model.analyzeBarcode(manualBarcode)
+                    }
+                },
+                analyzeLabelText: {
+                    Task {
+                        await model.analyzeLabelText(manualLabelText, typeHint: selectedProductType)
+                    }
+                },
+                openPhotoSelection: requestPhotoSelection
+            )
+
+            feedbackSection
+
+            ScanSampleReadsSection(
+                packs: model.demoScenarioPacks,
+                isExpanded: $sampleReadsExpanded,
+                runScenario: runScenario
+            )
         }
-        .navigationTitle("Scan")
-        .background(Color(red: 0.98, green: 0.97, blue: 0.99))
+        .navigationTitle(WLProductCopy.Scan.title)
         .sheet(isPresented: $showBarcodeScanner) {
             BarcodeScannerView { barcode in
                 showBarcodeScanner = false
@@ -60,218 +82,42 @@ struct ScanView: View {
         }
     }
 
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Demo the full scan loop fast")
-                .font(.title2.bold())
-            Text("Choose a one-tap scenario, try barcode input, or simulate OCR with label text. The score stays deterministic and the guidance stays non-clinical.")
-                .foregroundStyle(.secondary)
-
-            if let lastDemoScenario = model.lastDemoScenario {
-                Label("Last demo: \(lastDemoScenario.title)", systemImage: "sparkles.rectangle.stack.fill")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-            }
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-    }
-
     @ViewBuilder
     private var feedbackSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if model.isAnalyzing {
-                scanStatusCard(
-                    symbol: "sparkles",
-                    title: "Analyzing",
-                    message: "We are running a deterministic read, then building the directional summary and swap suggestions."
-                )
-            }
+        if model.isAnalyzing || (scannerPermissionState != .unknown && scannerPermissionState != .ready) || model.scanFeedback != nil {
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                if model.isAnalyzing {
+                    ScanStatusCard(
+                        symbol: "sparkles",
+                        title: "Building your read",
+                        message: "Shaping the lens story, checking confidence, and looking for softer swaps."
+                    )
+                }
 
-            if scannerPermissionState != .unknown && scannerPermissionState != .ready {
-                scanStatusCard(
-                    symbol: scannerPermissionState.symbol,
-                    title: scannerPermissionState.title,
-                    message: scannerPermissionState.message
-                )
-            }
+                if scannerPermissionState != .unknown && scannerPermissionState != .ready {
+                    ScanStatusCard(
+                        symbol: scannerPermissionState.symbol,
+                        title: scannerPermissionState.title,
+                        message: scannerPermissionState.message
+                    )
+                }
 
-            if let scanFeedback = model.scanFeedback {
-                scanStatusCard(
-                    symbol: "exclamationmark.circle.fill",
-                    title: scanFeedback.title,
-                    message: scanFeedback.message,
-                    dismissAction: model.clearScanFeedback
-                )
+                if let scanFeedback = model.scanFeedback {
+                    ScanStatusCard(
+                        symbol: "exclamationmark.circle",
+                        title: scanFeedback.title,
+                        message: scanFeedback.message,
+                        dismissAction: model.clearScanFeedback
+                    )
+                }
             }
         }
     }
 
-    private var liveScanSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Live barcode scan")
-                .font(.headline)
-            Text("Use this on-device when camera access is available. For simulator demos, the one-tap scenarios below are the primary path.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Button {
-                requestLiveScan()
-            } label: {
-                Label("Open camera scanner", systemImage: "camera.viewfinder")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
+    private func runScenario(_ scenario: DemoScenario) {
+        Task {
+            await model.runDemoScenario(scenario)
         }
-        .padding(20)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-    }
-
-    private var manualBarcodeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Manual barcode")
-                .font(.headline)
-            TextField("Enter barcode", text: $manualBarcode)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-
-            Button("Analyze barcode") {
-                Task {
-                    await model.analyzeBarcode(manualBarcode)
-                }
-            }
-            .buttonStyle(.bordered)
-        }
-        .padding(20)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-    }
-
-    private var labelSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Label fallback")
-                .font(.headline)
-
-            Picker("Product type", selection: $selectedProductType) {
-                ForEach(ProductType.allCases) { type in
-                    Text(type.title).tag(type)
-                }
-            }
-            .pickerStyle(.menu)
-
-            TextEditor(text: $manualLabelText)
-                .frame(minHeight: 120)
-                .padding(10)
-                .background(Color(red: 0.97, green: 0.97, blue: 0.98), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            HStack(spacing: 12) {
-                Button("Analyze text") {
-                    Task {
-                        await model.analyzeLabelText(manualLabelText, typeHint: selectedProductType)
-                    }
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    requestPhotoSelection()
-                } label: {
-                    Label("Use a label photo", systemImage: "photo")
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-        .padding(20)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-    }
-
-    private var demoScenarioPacksSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("1-tap demo packs")
-                .font(.headline)
-
-            ForEach(model.demoScenarioPacks) { pack in
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(pack.title, systemImage: pack.icon)
-                        .font(.subheadline.weight(.bold))
-                    Text(pack.subtitle)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    ForEach(pack.scenarios) { scenario in
-                        Button {
-                            Task {
-                                await model.runDemoScenario(scenario)
-                            }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack(alignment: .top) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(scenario.title)
-                                            .font(.subheadline.weight(.bold))
-                                            .foregroundStyle(.primary)
-                                        Text(scenario.subtitle)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(scenario.productType.title)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-
-                                Text(scenario.expectedHighlight)
-                                    .font(.caption)
-                                    .foregroundStyle(.primary)
-
-                                Label(scenario.expectedLensBias.title, systemImage: scenario.expectedLensBias.icon)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Color.accentColor)
-                            }
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(red: 0.98, green: 0.97, blue: 0.99), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(20)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-            }
-        }
-    }
-
-    private func scanStatusCard(
-        symbol: String,
-        title: String,
-        message: String,
-        dismissAction: (() -> Void)? = nil
-    ) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.title3)
-                .foregroundStyle(Color.accentColor)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            if let dismissAction {
-                Button("Dismiss") {
-                    dismissAction()
-                }
-                .buttonStyle(.plain)
-                .font(.caption.weight(.semibold))
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private func requestLiveScan() {
@@ -330,169 +176,281 @@ struct ScanView: View {
     }
 }
 
-struct AnalysisView: View {
-    let analysis: ScanAnalysis
-    @Environment(\.dismiss) private var dismiss
+private struct ScanHeaderCard: View {
+    let lastDemoScenario: DemoScenario?
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    header
-                    confidenceCard
-                    lensGrid
-                    reasonsSection
-                    warningsSection
-                    alternativesSection
-                    disclaimerSection
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLStatusBadge(title: "Scan", systemImage: "viewfinder", tone: .accent)
+
+                Text(WLProductCopy.Scan.heroTitle)
+                    .font(WLTypography.title)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(WLProductCopy.Scan.heroSubtitle)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                if let lastDemoScenario {
+                    Text("Last sample read: \(lastDemoScenario.title)")
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.rose)
                 }
-                .padding(20)
             }
-            .navigationTitle("Analysis")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
+        }
+    }
+}
+
+private struct ScanPrimaryActionCard: View {
+    let openScanner: () -> Void
+    let openPhotoSelection: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: WLProductCopy.Scan.primaryTitle,
+                    subtitle: WLProductCopy.Scan.primarySubtitle,
+                    systemImage: "camera.viewfinder"
+                )
+
+                VStack(spacing: WLSpacing.s) {
+                    WLPrimaryButton(title: "Open camera scanner", systemImage: "camera.viewfinder") {
+                        openScanner()
+                    }
+
+                    WLSecondaryButton(title: "Use a label photo", systemImage: "photo") {
+                        openPhotoSelection()
                     }
                 }
             }
         }
     }
+}
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(analysis.resolvedProduct.name)
-                .font(.title2.bold())
-            Text(analysis.overallSummary)
-                .foregroundStyle(.secondary)
-            HStack {
-                Label(analysis.productType.title, systemImage: "tag")
-                Spacer()
-                Text("Source: \(analysis.source.title)")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .font(.footnote)
-        }
-        .padding(20)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-    }
+private struct ScanOtherWaysCard: View {
+    @Binding var manualBarcode: String
+    @Binding var manualLabelText: String
+    @Binding var selectedProductType: ProductType
+    let analyzeBarcode: () -> Void
+    let analyzeLabelText: () -> Void
+    let openPhotoSelection: () -> Void
 
-    private var confidenceCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Confidence: \(analysis.confidence.title)", systemImage: "scope")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(Color.accentColor)
-                Spacer()
-                Text("Directional only")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            Text(confidenceExplanation)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Text("This is consumer wellness guidance, not diagnosis or treatment advice.")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.primary)
-        }
-        .padding(18)
-        .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.l) {
+                WLSectionHeader(
+                    title: WLProductCopy.Scan.otherWaysTitle,
+                    subtitle: WLProductCopy.Scan.otherWaysSubtitle,
+                    systemImage: "ellipsis.circle"
+                )
 
-    private var lensGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-            ForEach(analysis.lensScores) { score in
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(score.lens.title, systemImage: score.lens.icon)
-                        .font(.footnote.weight(.semibold))
-                    Text("\(score.score)")
-                        .font(.title.bold())
-                    Text(score.summary)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: WLSpacing.m) {
+                    Text("Barcode")
+                        .font(WLTypography.bodyEmphasis)
+                        .foregroundStyle(WLPalette.ink)
+
+                    TextField("Enter barcode", text: $manualBarcode)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+
+                    WLSecondaryButton(title: "Analyze barcode", systemImage: "barcode") {
+                        analyzeBarcode()
+                    }
                 }
-                .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading)
-                .padding(16)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            }
-        }
-    }
 
-    private var reasonsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Why this read landed here")
-                .font(.headline)
-            ForEach(analysis.topReasons) { reason in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(reason.title)
-                        .font(.subheadline.bold())
-                    Text(reason.detail)
-                        .foregroundStyle(.secondary)
+                Divider()
+                    .overlay(WLPalette.strokeStrong)
+
+                VStack(alignment: .leading, spacing: WLSpacing.m) {
+                    Text("Label text")
+                        .font(WLTypography.bodyEmphasis)
+                        .foregroundStyle(WLPalette.ink)
+
+                    Picker("Product type", selection: $selectedProductType) {
+                        ForEach(ProductType.allCases) { type in
+                            Text(type.title).tag(type)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $manualLabelText)
+                            .frame(minHeight: 130)
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                                    .fill(WLPalette.surfaceMuted)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                                    .stroke(WLPalette.stroke)
+                            )
+
+                        if manualLabelText.isEmpty {
+                            Text("Ingredients, claims, or any key label text")
+                                .font(WLTypography.body)
+                                .foregroundStyle(WLPalette.inkSoft)
+                                .padding(.horizontal, 24)
+                                .padding(.vertical, 24)
+                                .allowsHitTesting(false)
+                        }
+                    }
+
+                    HStack(spacing: WLSpacing.s) {
+                        WLSecondaryButton(title: "Analyze text", systemImage: "text.page") {
+                            analyzeLabelText()
+                        }
+
+                        WLSecondaryButton(title: "Use a label photo", systemImage: "photo") {
+                            openPhotoSelection()
+                        }
+                    }
                 }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(reason.impact == .positive ? Color.green.opacity(0.08) : Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
     }
+}
 
-    @ViewBuilder
-    private var warningsSection: some View {
-        if !analysis.warnings.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Caution")
-                    .font(.headline)
-                ForEach(analysis.warnings, id: \.self) { warning in
-                    Text(warning)
-                        .padding(14)
+private struct ScanStatusCard: View {
+    let symbol: String
+    let title: String
+    let message: String
+    var dismissAction: (() -> Void)? = nil
+
+    var body: some View {
+        WLCompactCard {
+            HStack(alignment: .top, spacing: WLSpacing.s) {
+                WLIcon(systemName: symbol, color: WLPalette.rose, size: 15)
+
+                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                    Text(title)
+                        .font(WLTypography.bodyEmphasis)
+                        .foregroundStyle(WLPalette.ink)
+
+                    Text(message)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                Spacer()
+
+                if let dismissAction {
+                    Button("Dismiss", action: dismissAction)
+                        .font(WLTypography.captionStrong)
+                }
+            }
+        }
+    }
+}
+
+private struct ScanSampleReadsSection: View {
+    let packs: [DemoScenarioPack]
+    @Binding var isExpanded: Bool
+    let runScenario: (DemoScenario) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            Button {
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: WLSpacing.s) {
+                    WLSectionHeader(
+                        title: WLProductCopy.Scan.sampleReadsTitle,
+                        subtitle: WLProductCopy.Scan.sampleReadsSubtitle,
+                        systemImage: "sparkles"
+                    )
+
+                    Spacer()
+
+                    WLIcon(systemName: isExpanded ? "chevron.up" : "chevron.down", color: WLPalette.inkSoft, size: 14)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                ForEach(packs) { pack in
+                    ScanDemoPackCard(pack: pack, runScenario: runScenario)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+    }
+}
+
+private struct ScanDemoPackCard: View {
+    let pack: DemoScenarioPack
+    let runScenario: (DemoScenario) -> Void
+
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                Label(pack.title, systemImage: pack.icon)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(pack.subtitle)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                ForEach(pack.scenarios) { scenario in
+                    Button(action: { runScenario(scenario) }) {
+                        VStack(alignment: .leading, spacing: WLSpacing.s) {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                                    Text(scenario.title)
+                                        .font(WLTypography.bodyEmphasis)
+                                        .foregroundStyle(WLPalette.ink)
+                                        .multilineTextAlignment(.leading)
+
+                                    Text(scenario.subtitle)
+                                        .font(WLTypography.caption)
+                                        .foregroundStyle(WLPalette.inkSoft)
+                                        .multilineTextAlignment(.leading)
+                                }
+
+                                Spacer(minLength: WLSpacing.s)
+
+                                WLPill(title: scenario.productType.title, tone: .soft)
+                            }
+
+                            WLStatusBadge(
+                                title: scenario.expectedLensBias.title,
+                                systemImage: scenario.expectedLensBias.icon,
+                                tone: .accent
+                            )
+                        }
+                        .padding(WLSpacing.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var alternativesSection: some View {
-        if !analysis.alternatives.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Better swaps")
-                    .font(.headline)
-                ForEach(analysis.alternatives) { suggestion in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(suggestion.productName)
-                            .font(.subheadline.bold())
-                        Text(suggestion.whyBetter)
-                            .foregroundStyle(.secondary)
-                        Text(suggestion.improvedLenses.map(\.title).joined(separator: " · "))
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Color.accentColor)
+                        .background(
+                            RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.98), WLPalette.canvasWarm],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                                .stroke(WLPalette.stroke)
+                        )
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .buttonStyle(.plain)
                 }
             }
         }
     }
+}
 
-    private var disclaimerSection: some View {
-        Text(analysis.disclaimer)
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .padding(.top, 8)
-    }
-
-    private var confidenceExplanation: String {
-        switch analysis.confidence {
-        case .high:
-            "This product was matched with strong confidence, so the summary should be a stable directional read."
-        case .medium:
-            "This scan matched with partial confidence, so use the score as directional context rather than a final verdict."
-        case .low:
-            "This scan was inferred from limited input, so double-check the label before acting on the guidance."
-        }
+#Preview("Scan") {
+    NavigationStack {
+        ScanView()
+            .environment(AppModel())
     }
 }

@@ -1,8 +1,14 @@
 import SwiftUI
+import UIKit
 
 @main
 struct WellnessLensApp: App {
     @State private var model = AppModel()
+
+    @MainActor
+    init() {
+        AppearanceConfigurator.configure()
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -38,17 +44,44 @@ struct RootView: View {
         }
         .preferredColorScheme(.light)
         .fontDesign(.rounded)
-        .tint(Color(red: 0.84, green: 0.32, blue: 0.54))
+        .tint(WLPalette.tint)
     }
 }
 
 struct MainTabView: View {
     @Environment(AppModel.self) private var model
 
+    private let orderedTabs: [AppTab] = [.home, .history, .scan, .checkIn, .profile]
+
     var body: some View {
         @Bindable var model = model
 
-        TabView(selection: $model.selectedTab) {
+        shellContent(selectedTab: $model.selectedTab)
+            .sheet(item: $model.latestAnalysis, onDismiss: {
+                model.dismissAnalysis()
+            }) { analysis in
+                AnalysisView(analysis: analysis)
+            }
+    }
+
+    @ViewBuilder
+    private func shellContent(selectedTab: Binding<AppTab>) -> some View {
+        if #available(iOS 26, *) {
+            tabContent(selectedTab: selectedTab)
+        } else {
+            tabContent(selectedTab: selectedTab)
+                .toolbar(.hidden, for: .tabBar)
+                .safeAreaInset(edge: .bottom) {
+                    WLTabBar(selection: selectedTab, tabs: orderedTabs)
+                        .padding(.horizontal, WLSpacing.l)
+                        .padding(.top, WLSpacing.xs)
+                        .background(Color.clear)
+                }
+        }
+    }
+
+    private func tabContent(selectedTab: Binding<AppTab>) -> some View {
+        TabView(selection: selectedTab) {
             NavigationStack {
                 HomeView()
             }
@@ -58,20 +91,20 @@ struct MainTabView: View {
             .tag(AppTab.home)
 
             NavigationStack {
-                ScanView()
-            }
-            .tabItem {
-                Label(AppTab.scan.title, systemImage: AppTab.scan.icon)
-            }
-            .tag(AppTab.scan)
-
-            NavigationStack {
                 HistoryView()
             }
             .tabItem {
                 Label(AppTab.history.title, systemImage: AppTab.history.icon)
             }
             .tag(AppTab.history)
+
+            NavigationStack {
+                ScanView()
+            }
+            .tabItem {
+                Label(AppTab.scan.title, systemImage: AppTab.scan.icon)
+            }
+            .tag(AppTab.scan)
 
             NavigationStack {
                 CheckInView()
@@ -89,11 +122,6 @@ struct MainTabView: View {
             }
             .tag(AppTab.profile)
         }
-        .sheet(item: $model.latestAnalysis, onDismiss: {
-            model.dismissAnalysis()
-        }) { analysis in
-            AnalysisView(analysis: analysis)
-        }
     }
 }
 
@@ -107,115 +135,171 @@ struct OnboardingFlowView: View {
     @State private var dietStyle: DietStyle = .flexitarian
     @State private var lifeStage: LifeStage = .everyDay
 
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 12)]
+    private let columns = [GridItem(.adaptive(minimum: 148), spacing: WLSpacing.s)]
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 1.0, green: 0.96, blue: 0.97),
-                    Color(red: 0.95, green: 0.97, blue: 1.0)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            WLScreenBackground()
 
-            VStack(alignment: .leading, spacing: 24) {
-                Text("WellnessLens")
-                    .font(.largeTitle.bold())
-                Text("From pantry to vanity, in one clear read.")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: WLSpacing.xl) {
+                    WLHeroSurface {
+                        VStack(alignment: .leading, spacing: WLSpacing.m) {
+                            WLStatusBadge(title: "WellnessLens", systemImage: "sparkles")
 
-                if step == 0 {
-                    Text("Choose the outcomes that matter most right now.")
-                        .font(.headline)
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(UserGoal.allCases) { goal in
-                            SelectionChip(
-                                title: goal.title,
-                                isSelected: selectedGoals.contains(goal)
-                            ) {
-                                toggle(goal, in: &selectedGoals)
-                            }
+                            Text(WLProductCopy.Onboarding.heroTitle)
+                                .font(WLTypography.hero)
+                                .foregroundStyle(.white)
+
+                            Text(WLProductCopy.Onboarding.heroSubtitle)
+                                .font(WLTypography.body)
+                                .foregroundStyle(Color.white.opacity(0.90))
+
+                            OnboardingProgress(step: step)
                         }
                     }
-                } else if step == 1 {
-                    Text("Pick sensitivities we should protect by default.")
-                        .font(.headline)
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(SensitivityFlag.allCases) { flag in
-                            SelectionChip(
-                                title: flag.title,
-                                isSelected: selectedSensitivities.contains(flag)
-                            ) {
-                                toggle(flag, in: &selectedSensitivities)
-                            }
-                        }
-                    }
-                } else {
-                    Text("Add just enough context to personalize the first week.")
-                        .font(.headline)
-                    Picker("Diet style", selection: $dietStyle) {
-                        ForEach(DietStyle.allCases) { style in
-                            Text(style.title).tag(style)
-                        }
-                    }
-                    .pickerStyle(.menu)
 
-                    Picker("Life stage", selection: $lifeStage) {
-                        ForEach(LifeStage.allCases) { stage in
-                            Text(stage.title).tag(stage)
-                        }
-                    }
-                    .pickerStyle(.menu)
+                    WLSurfaceCard {
+                        VStack(alignment: .leading, spacing: WLSpacing.l) {
+                            stepContent
 
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(SkinConcern.allCases) { concern in
-                            SelectionChip(
-                                title: concern.title,
-                                isSelected: selectedSkinConcerns.contains(concern)
-                            ) {
-                                toggle(concern, in: &selectedSkinConcerns)
+                            HStack(spacing: WLSpacing.s) {
+                                if step > 0 {
+                                    WLSecondaryButton(title: "Back") {
+                                        withAnimation(.spring(response: 0.38, dampingFraction: 0.88)) {
+                                            step -= 1
+                                        }
+                                    }
+                                }
+
+                                WLPrimaryButton(title: step == 2 ? "Start your first scan" : "Continue") {
+                                    advance()
+                                }
+                                .disabled(step == 0 && selectedGoals.isEmpty)
                             }
                         }
                     }
                 }
+                .padding(.horizontal, WLSpacing.l)
+                .padding(.vertical, WLSpacing.l)
+            }
+        }
+    }
 
-                Spacer()
-
-                HStack {
-                    if step > 0 {
-                        Button("Back") {
-                            step -= 1
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    Spacer()
-
-                    Button(step == 2 ? "Start Scanning" : "Continue") {
-                        if step < 2 {
-                            step += 1
-                        } else {
-                            let context = UserContext(
-                                goals: Array(selectedGoals),
-                                sensitivities: Array(selectedSensitivities),
-                                dietStyle: dietStyle,
-                                skinConcerns: Array(selectedSkinConcerns),
-                                lifeStage: lifeStage,
-                                optInCycleAware: false
-                            )
-                            model.completeOnboarding(with: context)
+    @ViewBuilder
+    private var stepContent: some View {
+        switch step {
+        case 0:
+            onboardingSection(
+                title: WLProductCopy.Onboarding.stepOneTitle,
+                subtitle: WLProductCopy.Onboarding.stepOneSubtitle
+            ) {
+                LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                    ForEach(UserGoal.allCases) { goal in
+                        SelectionChip(
+                            title: goal.title,
+                            isSelected: selectedGoals.contains(goal)
+                        ) {
+                            toggle(goal, in: &selectedGoals)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(step == 0 && selectedGoals.isEmpty)
                 }
             }
-            .padding(24)
+        case 1:
+            onboardingSection(
+                title: WLProductCopy.Onboarding.stepTwoTitle,
+                subtitle: WLProductCopy.Onboarding.stepTwoSubtitle
+            ) {
+                LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                    ForEach(SensitivityFlag.allCases) { flag in
+                        SelectionChip(
+                            title: flag.title,
+                            isSelected: selectedSensitivities.contains(flag)
+                        ) {
+                            toggle(flag, in: &selectedSensitivities)
+                        }
+                    }
+                }
+            }
+        default:
+            onboardingSection(
+                title: WLProductCopy.Onboarding.stepThreeTitle,
+                subtitle: WLProductCopy.Onboarding.stepThreeSubtitle
+            ) {
+                VStack(alignment: .leading, spacing: WLSpacing.l) {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Diet style")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+                        Picker("Diet style", selection: $dietStyle) {
+                            ForEach(DietStyle.allCases) { style in
+                                Text(style.title).tag(style)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Life stage")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+                        Picker("Life stage", selection: $lifeStage) {
+                            ForEach(LifeStage.allCases) { stage in
+                                Text(stage.title).tag(stage)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Skin concerns")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                            ForEach(SkinConcern.allCases) { concern in
+                                SelectionChip(
+                                    title: concern.title,
+                                    isSelected: selectedSkinConcerns.contains(concern)
+                                ) {
+                                    toggle(concern, in: &selectedSkinConcerns)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    private func onboardingSection<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: WLSpacing.l) {
+            WLSectionHeader(title: title, subtitle: subtitle)
+            content()
+        }
+    }
+
+    private func advance() {
+        if step < 2 {
+            withAnimation(.spring(response: 0.40, dampingFraction: 0.88)) {
+                step += 1
+            }
+            return
+        }
+
+        let context = UserContext(
+            goals: Array(selectedGoals),
+            sensitivities: Array(selectedSensitivities),
+            dietStyle: dietStyle,
+            skinConcerns: Array(selectedSkinConcerns),
+            lifeStage: lifeStage,
+            optInCycleAware: false
+        )
+        model.completeOnboarding(with: context)
     }
 
     private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
@@ -227,6 +311,21 @@ struct OnboardingFlowView: View {
     }
 }
 
+private struct OnboardingProgress: View {
+    let step: Int
+
+    var body: some View {
+        HStack(spacing: WLSpacing.xs) {
+            ForEach(0..<3, id: \.self) { index in
+                Capsule(style: .continuous)
+                    .fill(index <= step ? Color.white : Color.white.opacity(0.26))
+                    .frame(width: index == step ? 42 : 24, height: 6)
+                    .animation(.spring(response: 0.26, dampingFraction: 0.88), value: step)
+            }
+        }
+    }
+}
+
 struct SelectionChip: View {
     let title: String
     let isSelected: Bool
@@ -234,19 +333,81 @@ struct SelectionChip: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isSelected ? .white : .primary)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(isSelected ? Color.accentColor : Color.white.opacity(0.8))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.black.opacity(0.05))
-                )
+            HStack(spacing: WLSpacing.s) {
+                Text(title)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(isSelected ? WLPalette.rose : WLPalette.ink)
+                    .multilineTextAlignment(.leading)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isSelected ? WLPalette.rose : WLPalette.strokeStrong)
+            }
+            .padding(.horizontal, WLSpacing.m)
+            .padding(.vertical, 15)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? LinearGradient(
+                                colors: [WLPalette.rose.opacity(0.12), WLPalette.lavender.opacity(0.18)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            : LinearGradient(
+                                colors: [Color.white.opacity(0.94), WLPalette.canvasWarm],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                    .stroke(isSelected ? WLPalette.rose.opacity(0.18) : WLPalette.stroke)
+            )
         }
         .buttonStyle(.plain)
+    }
+}
+
+private enum AppearanceConfigurator {
+    @MainActor
+    static func configure() {
+        if #available(iOS 26, *) {
+            return
+        }
+
+        let navigationAppearance = UINavigationBarAppearance()
+        navigationAppearance.configureWithTransparentBackground()
+        navigationAppearance.titleTextAttributes = [
+            .foregroundColor: UIColor(WLPalette.ink)
+        ]
+        navigationAppearance.largeTitleTextAttributes = [
+            .foregroundColor: UIColor(WLPalette.ink)
+        ]
+
+        UINavigationBar.appearance().standardAppearance = navigationAppearance
+        UINavigationBar.appearance().scrollEdgeAppearance = navigationAppearance
+        UINavigationBar.appearance().compactAppearance = navigationAppearance
+
+        let tabAppearance = UITabBarAppearance()
+        tabAppearance.configureWithTransparentBackground()
+        tabAppearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterialLight)
+        tabAppearance.backgroundColor = UIColor.white.withAlphaComponent(0.78)
+        tabAppearance.shadowColor = UIColor.black.withAlphaComponent(0.05)
+
+        let normal = tabAppearance.stackedLayoutAppearance.normal
+        normal.iconColor = UIColor(WLPalette.inkSoft)
+        normal.titleTextAttributes = [.foregroundColor: UIColor(WLPalette.inkSoft)]
+
+        let selected = tabAppearance.stackedLayoutAppearance.selected
+        selected.iconColor = UIColor(WLPalette.tint)
+        selected.titleTextAttributes = [.foregroundColor: UIColor(WLPalette.tint)]
+
+        UITabBar.appearance().standardAppearance = tabAppearance
+        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
     }
 }

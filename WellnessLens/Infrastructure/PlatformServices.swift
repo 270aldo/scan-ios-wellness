@@ -394,7 +394,7 @@ struct WellnessLensShortcuts: AppShortcutsProvider {
             intent: OpenWellnessDestinationIntent(destination: .insights),
             phrases: ["Open \(.applicationName) insights", "Show my weekly insight in \(.applicationName)"],
             shortTitle: "Open Insights",
-            systemImageName: "sparkles.rectangle.stack"
+            systemImageName: "waveform.path.ecg"
         )
     ]
 }

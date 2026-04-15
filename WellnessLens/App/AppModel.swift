@@ -12,23 +12,51 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .home: "Home"
-        case .scan: "Scan"
-        case .history: "History"
-        case .checkIn: "Check-In"
-        case .profile: "Profile"
+        case .home: WLProductCopy.Tabs.home
+        case .scan: WLProductCopy.Tabs.scan
+        case .history: WLProductCopy.Tabs.history
+        case .checkIn: WLProductCopy.Tabs.checkIn
+        case .profile: WLProductCopy.Tabs.profile
         }
     }
 
     var icon: String {
         switch self {
-        case .home: "house.fill"
-        case .scan: "barcode.viewfinder"
-        case .history: "clock.arrow.circlepath"
-        case .checkIn: "heart.text.square.fill"
-        case .profile: "person.crop.circle"
+        case .home: "house"
+        case .scan: "viewfinder"
+        case .history: "square.stack"
+        case .checkIn: "heart.text.square"
+        case .profile: "person"
         }
     }
+
+    var tabRole: AppTabRole {
+        switch self {
+        case .scan:
+            .primaryAction
+        case .home, .history, .checkIn, .profile:
+            .destination
+        }
+    }
+
+    var visualPriority: AppTabVisualPriority {
+        switch self {
+        case .scan:
+            .primary
+        case .home, .history, .checkIn, .profile:
+            .standard
+        }
+    }
+}
+
+enum AppTabRole {
+    case destination
+    case primaryAction
+}
+
+enum AppTabVisualPriority {
+    case standard
+    case primary
 }
 
 enum ScanFeedback: Equatable {

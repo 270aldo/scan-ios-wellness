@@ -17,6 +17,7 @@
 		6277E2486316BDEEEA6D20DB /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 02BFE443FB71719B06665D79 /* FirebaseFunctions */; };
 		665BAA4D75C65877B80AE257 /* CheckInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9643C0420015DF557FD9130D /* CheckInView.swift */; };
 		6B6CFA82DCF043760FD2D67C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 966FC64265A514DFC21B066E /* Assets.xcassets */; };
+		6E87A830860093E967DA607D /* AnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C81B99045E87C56B92E4F7 /* AnalysisView.swift */; };
 		793AADE26C27D5490DEF4FB3 /* WellnessCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1513C5DEDB58335F5A27C0A /* WellnessCore.swift */; };
 		7976E18A0A9AB5A8501B6714 /* WellnessLensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */; };
 		7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FEB953B498E112C8A8A8C2 /* ProfileView.swift */; };
@@ -27,6 +28,8 @@
 		B67DA6B8F16E8289E30A1E46 /* FirebaseBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABA94F5FF50A0A71014CB46 /* FirebaseBootstrap.swift */; };
 		C13819161F4CDB39D7D7F1FD /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 588E67EAD9F41F6BB704F863 /* FirebaseStorage */; };
 		DCA681F5EE7D1D8941B9FC7B /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 89EF23150A79016F248FEA7A /* FirebaseFirestore */; };
+		EB55155764DA6021D23181C2 /* WLComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD6712C15F39C0CD038D10CA /* WLComponents.swift */; };
+		EBBD7CC716D20A290D9C705E /* WLTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 359AAE5E6E967C33DE26BBAE /* WLTheme.swift */; };
 		F7EB906E862918FFFA888D61 /* WellnessLensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0398CC19DEE7CAF2EFA50157 /* WellnessLensTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -44,6 +47,7 @@
 		0398CC19DEE7CAF2EFA50157 /* WellnessLensTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WellnessLensTests.swift; sourceTree = "<group>"; };
 		07FEB953B498E112C8A8A8C2 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		300C0E719D0C64482CD38604 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		359AAE5E6E967C33DE26BBAE /* WLTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WLTheme.swift; sourceTree = "<group>"; };
 		469BF12952A26C207D0E9B7A /* WellnessLens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = WellnessLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E35F98CCE0A1C7EA497D4D4 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		4F74457045D6349B913AC3BB /* RuntimeConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeConfiguration.swift; sourceTree = "<group>"; };
@@ -54,6 +58,8 @@
 		966FC64265A514DFC21B066E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		982F5BB9AAA1191AAFDB489F /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		A97FFBBF38A437575C99A169 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		A9C81B99045E87C56B92E4F7 /* AnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisView.swift; sourceTree = "<group>"; };
+		AD6712C15F39C0CD038D10CA /* WLComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WLComponents.swift; sourceTree = "<group>"; };
 		D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WellnessLensApp.swift; sourceTree = "<group>"; };
 		DBB2A5D3A12EF2FB096035F9 /* GoogleService-Info.plist.example */ = {isa = PBXFileReference; path = "GoogleService-Info.plist.example"; sourceTree = "<group>"; };
 		E1EA1030BB7C1D45922895FE /* BackendServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendServices.swift; sourceTree = "<group>"; };
@@ -135,12 +141,21 @@
 			path = Domain;
 			sourceTree = "<group>";
 		};
+		73FBA8C5C6A65550AE291090 /* Analysis */ = {
+			isa = PBXGroup;
+			children = (
+				A9C81B99045E87C56B92E4F7 /* AnalysisView.swift */,
+			);
+			path = Analysis;
+			sourceTree = "<group>";
+		};
 		851E9745EFAD62C973B80262 /* WellnessLens */ = {
 			isa = PBXGroup;
 			children = (
 				966FC64265A514DFC21B066E /* Assets.xcassets */,
 				D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */,
 				420C3D8E01097500D34B4BEA /* App */,
+				A9E951FCCB606A3C304F74DD /* DesignSystem */,
 				6D33EE34D265C10C42FBCFA3 /* Domain */,
 				9EA00F4D7C2D412DBFE77A72 /* Features */,
 				913F59EC472C0A5F7C0DC168 /* Infrastructure */,
@@ -170,6 +185,7 @@
 		9EA00F4D7C2D412DBFE77A72 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				73FBA8C5C6A65550AE291090 /* Analysis */,
 				8E47AA0525117B10BBD52B98 /* CheckIn */,
 				2F727920CB165A4040126664 /* History */,
 				2C629F0185D15229C905A293 /* Home */,
@@ -177,6 +193,15 @@
 				20CB929814C001E3C50FC8DE /* Scan */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		A9E951FCCB606A3C304F74DD /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				AD6712C15F39C0CD038D10CA /* WLComponents.swift */,
+				359AAE5E6E967C33DE26BBAE /* WLTheme.swift */,
+			);
+			path = DesignSystem;
 			sourceTree = "<group>";
 		};
 		AC2797B7473A6CEE83C8F990 = {
@@ -306,6 +331,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6E87A830860093E967DA607D /* AnalysisView.swift in Sources */,
 				5740401144D52621D46BB4D9 /* AppModel.swift in Sources */,
 				96B1028840C4D1A1A132F0A7 /* BackendServices.swift in Sources */,
 				665BAA4D75C65877B80AE257 /* CheckInView.swift in Sources */,
@@ -316,6 +342,8 @@
 				7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */,
 				A8E0571DAAA922DAE49231DF /* RuntimeConfiguration.swift in Sources */,
 				40C38D67D482D90AD54E8114 /* ScanView.swift in Sources */,
+				EB55155764DA6021D23181C2 /* WLComponents.swift in Sources */,
+				EBBD7CC716D20A290D9C705E /* WLTheme.swift in Sources */,
 				793AADE26C27D5490DEF4FB3 /* WellnessCore.swift in Sources */,
 				7976E18A0A9AB5A8501B6714 /* WellnessLensApp.swift in Sources */,
 			);

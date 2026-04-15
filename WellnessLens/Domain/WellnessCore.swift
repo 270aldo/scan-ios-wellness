@@ -58,10 +58,10 @@ enum WellnessLensKind: String, Codable, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .glowSkin: "sparkles"
-        case .hormoneBalance: "waveform.path.ecg"
+        case .hormoneBalance: "waveform"
         case .gutComfort: "leaf"
-        case .energyMood: "bolt.heart"
-        case .bodyCompositionStrength: "figure.strengthtraining.traditional"
+        case .energyMood: "sun.max"
+        case .bodyCompositionStrength: "figure.pilates"
         }
     }
 }
@@ -374,8 +374,8 @@ enum DemoScenarioPackKind: String, Codable, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .food: "fork.knife"
-        case .supplement: "pills.fill"
-        case .skincarePersonalCare: "sparkles"
+        case .supplement: "capsule"
+        case .skincarePersonalCare: "drop"
         }
     }
 }
