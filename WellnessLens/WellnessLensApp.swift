@@ -129,13 +129,20 @@ struct OnboardingFlowView: View {
     @Environment(AppModel.self) private var model
 
     @State private var step = 0
-    @State private var selectedGoals = Set<UserGoal>([.clearSkin, .steadyEnergy])
-    @State private var selectedSensitivities = Set<SensitivityFlag>([.fragranceSensitive])
-    @State private var selectedSkinConcerns = Set<SkinConcern>([.dryness])
+    @State private var selectedGoals = Set<UserGoal>()
+    @State private var selectedFrictions = Set<UserFriction>()
+    @State private var selectedSensitivities = Set<SensitivityFlag>()
+    @State private var selectedSkinConcerns = Set<SkinConcern>()
     @State private var dietStyle: DietStyle = .flexitarian
     @State private var lifeStage: LifeStage = .everyDay
+    @State private var eatingRhythm: EatingRhythm = .flexible
+    @State private var supplementStyle: SupplementRoutineStyle = .simple
+    @State private var guidanceStyle: GuidanceStyle = .calmAndDirect
+    @State private var memoryEnabled = true
+    @State private var optInCycleAware = false
 
     private let columns = [GridItem(.adaptive(minimum: 148), spacing: WLSpacing.s)]
+    private let totalSteps = 5
 
     var body: some View {
         ZStack {
@@ -155,7 +162,7 @@ struct OnboardingFlowView: View {
                                 .font(WLTypography.body)
                                 .foregroundStyle(Color.white.opacity(0.90))
 
-                            OnboardingProgress(step: step)
+                            OnboardingProgress(step: step, totalSteps: totalSteps)
                         }
                     }
 
@@ -172,10 +179,10 @@ struct OnboardingFlowView: View {
                                     }
                                 }
 
-                                WLPrimaryButton(title: step == 2 ? "Start your first scan" : "Continue") {
+                                WLPrimaryButton(title: step == totalSteps - 1 ? "Start your strategist" : "Continue") {
                                     advance()
                                 }
-                                .disabled(step == 0 && selectedGoals.isEmpty)
+                                .disabled(!canAdvance)
                             }
                         }
                     }
@@ -191,40 +198,49 @@ struct OnboardingFlowView: View {
         switch step {
         case 0:
             onboardingSection(
-                title: WLProductCopy.Onboarding.stepOneTitle,
-                subtitle: WLProductCopy.Onboarding.stepOneSubtitle
+                title: "What should WellnessLens optimize first?",
+                subtitle: "Choose the outcomes and frictions that should shape your daily decisions, not just your scans."
             ) {
-                LazyVGrid(columns: columns, spacing: WLSpacing.s) {
-                    ForEach(UserGoal.allCases) { goal in
-                        SelectionChip(
-                            title: goal.title,
-                            isSelected: selectedGoals.contains(goal)
-                        ) {
-                            toggle(goal, in: &selectedGoals)
+                VStack(alignment: .leading, spacing: WLSpacing.l) {
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Goals")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                            ForEach(UserGoal.allCases) { goal in
+                                SelectionChip(
+                                    title: goal.title,
+                                    isSelected: selectedGoals.contains(goal)
+                                ) {
+                                    toggle(goal, in: &selectedGoals)
+                                }
+                            }
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Current friction")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                            ForEach(UserFriction.allCases) { friction in
+                                SelectionChip(
+                                    title: friction.title,
+                                    isSelected: selectedFrictions.contains(friction)
+                                ) {
+                                    toggle(friction, in: &selectedFrictions)
+                                }
+                            }
                         }
                     }
                 }
             }
         case 1:
             onboardingSection(
-                title: WLProductCopy.Onboarding.stepTwoTitle,
-                subtitle: WLProductCopy.Onboarding.stepTwoSubtitle
-            ) {
-                LazyVGrid(columns: columns, spacing: WLSpacing.s) {
-                    ForEach(SensitivityFlag.allCases) { flag in
-                        SelectionChip(
-                            title: flag.title,
-                            isSelected: selectedSensitivities.contains(flag)
-                        ) {
-                            toggle(flag, in: &selectedSensitivities)
-                        }
-                    }
-                }
-            }
-        default:
-            onboardingSection(
-                title: WLProductCopy.Onboarding.stepThreeTitle,
-                subtitle: WLProductCopy.Onboarding.stepThreeSubtitle
+                title: "How does your routine actually work?",
+                subtitle: "This lets Home and the strategist adapt to real-life rhythm instead of idealized behavior."
             ) {
                 VStack(alignment: .leading, spacing: WLSpacing.l) {
                     VStack(alignment: .leading, spacing: WLSpacing.xs) {
@@ -237,6 +253,51 @@ struct OnboardingFlowView: View {
                             }
                         }
                         .pickerStyle(.menu)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Eating rhythm")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+                        Picker("Eating rhythm", selection: $eatingRhythm) {
+                            ForEach(EatingRhythm.allCases) { rhythm in
+                                Text(rhythm.title).tag(rhythm)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Supplement routine")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+                        Picker("Supplement routine", selection: $supplementStyle) {
+                            ForEach(SupplementRoutineStyle.allCases) { style in
+                                Text(style.title).tag(style)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    Toggle("Use cycle-aware framing when relevant", isOn: $optInCycleAware)
+                        .tint(WLPalette.tint)
+                }
+            }
+        case 2:
+            onboardingSection(
+                title: "What should the app be more careful with?",
+                subtitle: "These are the sensitivities and body contexts that should bias decisions toward caution."
+            ) {
+                VStack(alignment: .leading, spacing: WLSpacing.l) {
+                    LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                        ForEach(SensitivityFlag.allCases) { flag in
+                            SelectionChip(
+                                title: flag.title,
+                                isSelected: selectedSensitivities.contains(flag)
+                            ) {
+                                toggle(flag, in: &selectedSensitivities)
+                            }
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: WLSpacing.xs) {
@@ -269,6 +330,85 @@ struct OnboardingFlowView: View {
                     }
                 }
             }
+        case 3:
+            onboardingSection(
+                title: "How should your strategist show up?",
+                subtitle: "Tone and memory are part of the product, not an afterthought."
+            ) {
+                VStack(alignment: .leading, spacing: WLSpacing.l) {
+                    LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                        ForEach(GuidanceStyle.allCases) { style in
+                            SelectionChip(
+                                title: style.title,
+                                isSelected: guidanceStyle == style
+                            ) {
+                                guidanceStyle = style
+                            }
+                        }
+                    }
+
+                    Toggle("Let WellnessLens remember what helps, what hurts, and what you already decided", isOn: $memoryEnabled)
+                        .tint(WLPalette.tint)
+
+                    WLCompactCard {
+                        VStack(alignment: .leading, spacing: WLSpacing.s) {
+                            Text("What memory means here")
+                                .font(WLTypography.captionStrong)
+                                .foregroundStyle(WLPalette.ink)
+
+                            Text("It stores goals, routines, product decisions, body-signal notes, and strategist takeaways so Home becomes more personal every day.")
+                                .font(WLTypography.body)
+                                .foregroundStyle(WLPalette.inkSoft)
+                        }
+                    }
+                }
+            }
+        default:
+            let previewProfile = builtProfile()
+            let previewPlan = OnboardingPlanner().build(profile: previewProfile)
+
+            onboardingSection(
+                title: "Your strategist is about to start with a real point of view.",
+                subtitle: "This setup should change what Home, scan actions, and memory prioritize from day one."
+            ) {
+                VStack(alignment: .leading, spacing: WLSpacing.l) {
+                    WLPrimaryCard {
+                        VStack(alignment: .leading, spacing: WLSpacing.m) {
+                            WLStatusBadge(title: "Primary focus", systemImage: "sparkles", tone: .accent)
+
+                            Text(previewPlan.activeGoals.first?.title ?? "Build a clearer daily rhythm")
+                                .font(WLTypography.title)
+                                .foregroundStyle(WLPalette.ink)
+
+                            Text(previewPlan.activeGoals.first?.summary ?? "Use one real scan and one real body signal to establish your first pattern.")
+                                .font(WLTypography.body)
+                                .foregroundStyle(WLPalette.inkSoft)
+                        }
+                    }
+
+                    WLCompactCard {
+                        VStack(alignment: .leading, spacing: WLSpacing.s) {
+                            Text("Your first-week loop")
+                                .font(WLTypography.captionStrong)
+                                .foregroundStyle(WLPalette.ink)
+
+                            ForEach(previewPlan.firstWeekPlan.steps) { planStep in
+                                HStack(alignment: .top, spacing: WLSpacing.s) {
+                                    WLIcon(systemName: "circle.dashed", color: WLPalette.rose, size: 15)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(planStep.title)
+                                            .font(WLTypography.bodyEmphasis)
+                                            .foregroundStyle(WLPalette.ink)
+                                        Text(planStep.detail)
+                                            .font(WLTypography.caption)
+                                            .foregroundStyle(WLPalette.inkSoft)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -283,23 +423,45 @@ struct OnboardingFlowView: View {
         }
     }
 
+    private var canAdvance: Bool {
+        switch step {
+        case 0:
+            !selectedGoals.isEmpty && !selectedFrictions.isEmpty
+        default:
+            true
+        }
+    }
+
     private func advance() {
-        if step < 2 {
+        if step < totalSteps - 1 {
             withAnimation(.spring(response: 0.40, dampingFraction: 0.88)) {
                 step += 1
             }
             return
         }
 
+        model.completeOnboarding(with: builtProfile())
+    }
+
+    private func builtProfile() -> UserProfile {
         let context = UserContext(
             goals: Array(selectedGoals),
             sensitivities: Array(selectedSensitivities),
             dietStyle: dietStyle,
             skinConcerns: Array(selectedSkinConcerns),
             lifeStage: lifeStage,
-            optInCycleAware: false
+            optInCycleAware: optInCycleAware
         )
-        model.completeOnboarding(with: context)
+
+        return UserProfile(
+            userContext: context,
+            frictions: Array(selectedFrictions),
+            guidanceStyle: guidanceStyle,
+            eatingRhythm: eatingRhythm,
+            supplementStyle: supplementStyle,
+            memoryEnabled: memoryEnabled,
+            createdAt: .now
+        )
     }
 
     private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
@@ -313,10 +475,11 @@ struct OnboardingFlowView: View {
 
 private struct OnboardingProgress: View {
     let step: Int
+    let totalSteps: Int
 
     var body: some View {
         HStack(spacing: WLSpacing.xs) {
-            ForEach(0..<3, id: \.self) { index in
+            ForEach(0..<totalSteps, id: \.self) { index in
                 Capsule(style: .continuous)
                     .fill(index <= step ? Color.white : Color.white.opacity(0.26))
                     .frame(width: index == step ? 42 : 24, height: 6)

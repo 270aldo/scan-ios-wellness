@@ -184,11 +184,11 @@ private struct ScanHeaderCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLStatusBadge(title: "Scan", systemImage: "viewfinder", tone: .accent)
 
-                Text(WLProductCopy.Scan.heroTitle)
+                Text("Scan for a decision, not just a score.")
                     .font(WLTypography.title)
                     .foregroundStyle(WLPalette.ink)
 
-                Text(WLProductCopy.Scan.heroSubtitle)
+                Text("Use scan when you need to decide what stays, what gets distance, what should swap, or what the strategist should remember next.")
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
 
@@ -211,7 +211,7 @@ private struct ScanPrimaryActionCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: WLProductCopy.Scan.primaryTitle,
-                    subtitle: WLProductCopy.Scan.primarySubtitle,
+                    subtitle: "The fastest path into a real recommendation and a new memory signal.",
                     systemImage: "camera.viewfinder"
                 )
 
@@ -242,7 +242,7 @@ private struct ScanOtherWaysCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.l) {
                 WLSectionHeader(
                     title: WLProductCopy.Scan.otherWaysTitle,
-                    subtitle: WLProductCopy.Scan.otherWaysSubtitle,
+                    subtitle: "Fallback inputs still feed the same strategist loop and decision flow.",
                     systemImage: "ellipsis.circle"
                 )
 

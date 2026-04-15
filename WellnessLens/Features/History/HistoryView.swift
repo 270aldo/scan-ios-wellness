@@ -12,43 +12,36 @@ struct HistoryView: View {
         @Bindable var model = model
 
         WLScreen {
-            if model.history.isEmpty {
+            HistorySummaryCard(
+                timelineCount: model.historyTimelineEntries.count,
+                readCount: model.history.count,
+                favoriteCount: favoriteCount,
+                routineCount: model.routines.count,
+                selectedCount: selectedRecordIDs.count,
+                compareSelected: compareSelected
+            )
+
+            if model.historyTimelineEntries.isEmpty {
                 WLPrimaryCard {
                     VStack(alignment: .leading, spacing: WLSpacing.m) {
-                        WLStatusBadge(title: WLProductCopy.History.emptyTitle, systemImage: "sparkles", tone: .accent)
+                        WLStatusBadge(title: "No memory yet", systemImage: "sparkles", tone: .accent)
 
-                        Text(WLProductCopy.History.emptySubtitle)
+                        Text("History becomes valuable once scans, body signals, and decisions start connecting.")
                             .font(WLTypography.body)
                             .foregroundStyle(WLPalette.inkSoft)
                     }
                 }
             } else {
-                VStack(alignment: .leading, spacing: WLSpacing.m) {
-                    WLSectionHeader(
-                        title: WLProductCopy.History.title,
-                        subtitle: selectedRecordIDs.count == 2
-                            ? WLProductCopy.History.compareReadySubtitle
-                            : WLProductCopy.History.defaultSubtitle,
-                        systemImage: "clock.arrow.circlepath"
-                    )
+                HistoryTimelineSection(entries: model.historyTimelineEntries)
+            }
 
-                    HistorySummaryCard(
-                        readCount: model.history.count,
-                        favoriteCount: favoriteCount,
-                        selectedCount: selectedRecordIDs.count,
-                        compareSelected: compareSelected
-                    )
-
-                    ForEach(model.history) { record in
-                        HistoryRecordCard(
-                            record: record,
-                            isSelectedForComparison: selectedRecordIDs.contains(record.id),
-                            openRead: { model.latestAnalysis = record.analysis },
-                            toggleFavorite: { model.toggleFavorite(for: record.id) },
-                            toggleComparison: { toggleComparisonSelection(for: record.id) }
-                        )
-                    }
-                }
+            if !model.history.isEmpty {
+                HistoryScansSection(
+                    records: model.history,
+                    selectedRecordIDs: $selectedRecordIDs,
+                    openRead: { model.latestAnalysis = $0.analysis },
+                    toggleFavorite: { model.toggleFavorite(for: $0.id) }
+                )
             }
         }
         .navigationTitle("History")
@@ -59,19 +52,6 @@ struct HistoryView: View {
         }
     }
 
-    private func toggleComparisonSelection(for id: UUID) {
-        if selectedRecordIDs.contains(id) {
-            selectedRecordIDs.remove(id)
-            return
-        }
-
-        if selectedRecordIDs.count == 2, let first = selectedRecordIDs.first {
-            selectedRecordIDs.remove(first)
-        }
-
-        selectedRecordIDs.insert(id)
-    }
-
     private func compareSelected() {
         let selectedRecords = model.history.filter { selectedRecordIDs.contains($0.id) }
         model.compare(selectedRecords)
@@ -79,38 +59,37 @@ struct HistoryView: View {
 }
 
 private struct HistorySummaryCard: View {
+    let timelineCount: Int
     let readCount: Int
     let favoriteCount: Int
+    let routineCount: Int
     let selectedCount: Int
     let compareSelected: () -> Void
 
     var body: some View {
         WLPrimaryCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Memory timeline",
+                    subtitle: "Scans, body signals, strategist notes, and saved routine decisions all live here now.",
+                    systemImage: "clock.arrow.circlepath"
+                )
+
                 HStack(spacing: WLSpacing.s) {
-                    HistoryMetricCard(
-                        title: "Reads",
-                        value: "\(readCount)",
-                        systemImage: "book.closed"
-                    )
-
-                    HistoryMetricCard(
-                        title: "Favorites",
-                        value: "\(favoriteCount)",
-                        systemImage: "star"
-                    )
-
-                    HistoryMetricCard(
-                        title: "Selected",
-                        value: "\(selectedCount)",
-                        systemImage: "square.split.2x1"
-                    )
+                    HistoryMetricCard(title: "Events", value: "\(timelineCount)", systemImage: "clock")
+                    HistoryMetricCard(title: "Reads", value: "\(readCount)", systemImage: "viewfinder")
+                    HistoryMetricCard(title: "Favorites", value: "\(favoriteCount)", systemImage: "star")
+                    HistoryMetricCard(title: "Routine", value: "\(routineCount)", systemImage: "tray.full")
                 }
 
                 if selectedCount == 2 {
                     WLPrimaryButton(title: "Compare selected reads", systemImage: "square.split.2x1") {
                         compareSelected()
                     }
+                } else {
+                    Text("Select two reads below whenever you want a direct side-by-side comparison.")
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
                 }
             }
         }
@@ -150,6 +129,129 @@ private struct HistoryMetricCard: View {
             RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
                 .stroke(WLPalette.stroke)
         )
+    }
+}
+
+private struct HistoryTimelineSection: View {
+    let entries: [HistoryTimelineEntry]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Timeline",
+                subtitle: "This is the product’s working memory, not just a log of scans.",
+                systemImage: "line.3.horizontal"
+            )
+
+            ForEach(entries) { entry in
+                WLCompactCard {
+                    HStack(alignment: .top, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: badgeTitle(for: entry.kind),
+                            systemImage: badgeSymbol(for: entry.kind),
+                            tone: badgeTone(for: entry.kind)
+                        )
+
+                        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                            Text(entry.title)
+                                .font(WLTypography.bodyEmphasis)
+                                .foregroundStyle(WLPalette.ink)
+
+                            Text(entry.summary)
+                                .font(WLTypography.body)
+                                .foregroundStyle(WLPalette.inkSoft)
+
+                            Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(WLTypography.caption)
+                                .foregroundStyle(WLPalette.inkSoft)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func badgeTitle(for kind: HistoryTimelineKind) -> String {
+        switch kind {
+        case .scan:
+            "Scan"
+        case .decision:
+            "Decision"
+        case .checkIn:
+            "Check-in"
+        case .memory:
+            "Memory"
+        case .conversation:
+            "Strategist"
+        }
+    }
+
+    private func badgeSymbol(for kind: HistoryTimelineKind) -> String {
+        switch kind {
+        case .scan:
+            "viewfinder"
+        case .decision:
+            "checkmark.circle"
+        case .checkIn:
+            "heart.text.square"
+        case .memory:
+            "brain.head.profile"
+        case .conversation:
+            "message"
+        }
+    }
+
+    private func badgeTone(for kind: HistoryTimelineKind) -> WLStatusBadge.Tone {
+        switch kind {
+        case .scan, .memory:
+            .accent
+        case .decision:
+            .success
+        case .checkIn:
+            .caution
+        case .conversation:
+            .accent
+        }
+    }
+}
+
+private struct HistoryScansSection: View {
+    let records: [ScanRecord]
+    @Binding var selectedRecordIDs: Set<UUID>
+    let openRead: (ScanRecord) -> Void
+    let toggleFavorite: (ScanRecord) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Saved reads",
+                subtitle: "Reads still matter, but now they sit inside a bigger memory system.",
+                systemImage: "square.stack"
+            )
+
+            ForEach(records) { record in
+                HistoryRecordCard(
+                    record: record,
+                    isSelectedForComparison: selectedRecordIDs.contains(record.id),
+                    openRead: { openRead(record) },
+                    toggleFavorite: { toggleFavorite(record) },
+                    toggleComparison: { toggleComparisonSelection(for: record.id) }
+                )
+            }
+        }
+    }
+
+    private func toggleComparisonSelection(for id: UUID) {
+        if selectedRecordIDs.contains(id) {
+            selectedRecordIDs.remove(id)
+            return
+        }
+
+        if selectedRecordIDs.count == 2, let first = selectedRecordIDs.first {
+            selectedRecordIDs.remove(first)
+        }
+
+        selectedRecordIDs.insert(id)
     }
 }
 
@@ -320,12 +422,5 @@ struct ComparisonView: View {
                     .foregroundStyle(WLPalette.inkSoft)
             }
         }
-    }
-}
-
-#Preview("History") {
-    NavigationStack {
-        HistoryView()
-            .environment(AppModel())
     }
 }

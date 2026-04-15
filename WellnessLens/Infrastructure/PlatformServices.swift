@@ -12,6 +12,14 @@ struct StoredAppState: Codable {
     var checkIns: [CheckInEntry]
     var subscriptionStatus: SubscriptionStatus
     var lastDemoScenarioID: String?
+    var userProfile: UserProfile?
+    var activeGoals: [ActiveGoal]
+    var firstWeekPlan: FirstWeekPlan?
+    var routines: [RoutineItem]
+    var memoryItems: [MemoryItem]
+    var scanDecisions: [ScanDecision]
+    var experiments: [Experiment]
+    var conversationThreads: [ConversationThread]
 
     static let `default` = StoredAppState(
         hasCompletedOnboarding: false,
@@ -19,8 +27,101 @@ struct StoredAppState: Codable {
         history: [],
         checkIns: [],
         subscriptionStatus: .free,
-        lastDemoScenarioID: nil
+        lastDemoScenarioID: nil,
+        userProfile: nil,
+        activeGoals: [],
+        firstWeekPlan: nil,
+        routines: [],
+        memoryItems: [],
+        scanDecisions: [],
+        experiments: [],
+        conversationThreads: []
     )
+
+    enum CodingKeys: String, CodingKey {
+        case hasCompletedOnboarding
+        case userContext
+        case history
+        case checkIns
+        case subscriptionStatus
+        case lastDemoScenarioID
+        case userProfile
+        case activeGoals
+        case firstWeekPlan
+        case routines
+        case memoryItems
+        case scanDecisions
+        case experiments
+        case conversationThreads
+    }
+
+    init(
+        hasCompletedOnboarding: Bool,
+        userContext: UserContext,
+        history: [ScanRecord],
+        checkIns: [CheckInEntry],
+        subscriptionStatus: SubscriptionStatus,
+        lastDemoScenarioID: String?,
+        userProfile: UserProfile?,
+        activeGoals: [ActiveGoal],
+        firstWeekPlan: FirstWeekPlan?,
+        routines: [RoutineItem],
+        memoryItems: [MemoryItem],
+        scanDecisions: [ScanDecision],
+        experiments: [Experiment],
+        conversationThreads: [ConversationThread]
+    ) {
+        self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.userContext = userContext
+        self.history = history
+        self.checkIns = checkIns
+        self.subscriptionStatus = subscriptionStatus
+        self.lastDemoScenarioID = lastDemoScenarioID
+        self.userProfile = userProfile
+        self.activeGoals = activeGoals
+        self.firstWeekPlan = firstWeekPlan
+        self.routines = routines
+        self.memoryItems = memoryItems
+        self.scanDecisions = scanDecisions
+        self.experiments = experiments
+        self.conversationThreads = conversationThreads
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        userContext = try container.decodeIfPresent(UserContext.self, forKey: .userContext) ?? .starter
+        history = try container.decodeIfPresent([ScanRecord].self, forKey: .history) ?? []
+        checkIns = try container.decodeIfPresent([CheckInEntry].self, forKey: .checkIns) ?? []
+        subscriptionStatus = try container.decodeIfPresent(SubscriptionStatus.self, forKey: .subscriptionStatus) ?? .free
+        lastDemoScenarioID = try container.decodeIfPresent(String.self, forKey: .lastDemoScenarioID)
+        userProfile = try container.decodeIfPresent(UserProfile.self, forKey: .userProfile)
+        activeGoals = try container.decodeIfPresent([ActiveGoal].self, forKey: .activeGoals) ?? []
+        firstWeekPlan = try container.decodeIfPresent(FirstWeekPlan.self, forKey: .firstWeekPlan)
+        routines = try container.decodeIfPresent([RoutineItem].self, forKey: .routines) ?? []
+        memoryItems = try container.decodeIfPresent([MemoryItem].self, forKey: .memoryItems) ?? []
+        scanDecisions = try container.decodeIfPresent([ScanDecision].self, forKey: .scanDecisions) ?? []
+        experiments = try container.decodeIfPresent([Experiment].self, forKey: .experiments) ?? []
+        conversationThreads = try container.decodeIfPresent([ConversationThread].self, forKey: .conversationThreads) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
+        try container.encode(userContext, forKey: .userContext)
+        try container.encode(history, forKey: .history)
+        try container.encode(checkIns, forKey: .checkIns)
+        try container.encode(subscriptionStatus, forKey: .subscriptionStatus)
+        try container.encode(lastDemoScenarioID, forKey: .lastDemoScenarioID)
+        try container.encode(userProfile, forKey: .userProfile)
+        try container.encode(activeGoals, forKey: .activeGoals)
+        try container.encode(firstWeekPlan, forKey: .firstWeekPlan)
+        try container.encode(routines, forKey: .routines)
+        try container.encode(memoryItems, forKey: .memoryItems)
+        try container.encode(scanDecisions, forKey: .scanDecisions)
+        try container.encode(experiments, forKey: .experiments)
+        try container.encode(conversationThreads, forKey: .conversationThreads)
+    }
 }
 
 protocol AppDataStore {
@@ -205,8 +306,15 @@ final class DemoScanService: ScanService, @unchecked Sendable {
     }
 }
 
+struct WellnessFeatureFlags: Codable, Hashable {
+    var newOnboarding = true
+    var newHome = true
+    var strategist = true
+}
+
 struct AppServices {
     var configuration: RuntimeConfiguration
+    var featureFlags: WellnessFeatureFlags
     var store: AppDataStore
     var scanService: ScanService
     var subscription: SubscriptionClient
@@ -263,6 +371,7 @@ struct AppServices {
 
         return AppServices(
             configuration: configuration,
+            featureFlags: WellnessFeatureFlags(),
             store: store,
             scanService: scanService,
             subscription: subscription,

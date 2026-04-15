@@ -3,7 +3,9 @@ import SwiftUI
 struct AnalysisView: View {
     let analysis: ScanAnalysis
 
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var showStrategist = false
 
     private var strongestLens: LensScore? {
         analysis.lensScores.max(by: { $0.score < $1.score })
@@ -79,6 +81,18 @@ struct AnalysisView: View {
                     }
                 }
 
+                AnalysisDecisionCard(
+                    analysis: analysis,
+                    saveToRoutine: { commitDecision(.saveToRoutine) },
+                    avoidForNow: { commitDecision(.avoidForNow) },
+                    swapProduct: { commitDecision(.swapInstead) },
+                    trackAgain: { commitDecision(.trackAgain) },
+                    askStrategist: {
+                        commitDecision(.askStrategist, dismissAfter: false)
+                        showStrategist = true
+                    }
+                )
+
                 Text(analysis.disclaimer)
                     .font(WLTypography.caption)
                     .foregroundStyle(WLPalette.inkSoft)
@@ -93,6 +107,9 @@ struct AnalysisView: View {
                 }
             }
         }
+        .sheet(isPresented: $showStrategist) {
+            StrategistChatView(entryPoint: .scan, linkedAnalysis: analysis)
+        }
     }
 
     private var confidenceExplanation: String {
@@ -103,6 +120,13 @@ struct AnalysisView: View {
             "This read is still useful, but treat it as directional context rather than a final verdict."
         case .low:
             "This was inferred from thinner input. Double-check the label before acting on it."
+        }
+    }
+
+    private func commitDecision(_ kind: ScanDecisionKind, dismissAfter: Bool = true) {
+        model.recordScanDecision(kind, for: analysis)
+        if dismissAfter {
+            dismiss()
         }
     }
 }
@@ -241,6 +265,60 @@ private struct AnalysisConfidenceCard: View {
                 Text("This is consumer wellness guidance, not medical advice.")
                     .font(WLTypography.captionStrong)
                     .foregroundStyle(WLPalette.ink)
+            }
+        }
+    }
+}
+
+private struct AnalysisDecisionCard: View {
+    let analysis: ScanAnalysis
+    let saveToRoutine: () -> Void
+    let avoidForNow: () -> Void
+    let swapProduct: () -> Void
+    let trackAgain: () -> Void
+    let askStrategist: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Decide what happens next",
+                    subtitle: "A scan should change the routine, not just produce a score.",
+                    systemImage: "point.bottomleft.forward.to.point.topright.scurvepath"
+                )
+
+                Text("Use the read to keep, avoid, swap, or escalate into a strategist conversation.")
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                VStack(spacing: WLSpacing.s) {
+                    WLPrimaryButton(title: "Save to routine", systemImage: "checkmark.circle") {
+                        saveToRoutine()
+                    }
+
+                    HStack(spacing: WLSpacing.s) {
+                        WLSecondaryButton(title: "Avoid for now", systemImage: "minus.circle") {
+                            avoidForNow()
+                        }
+
+                        WLSecondaryButton(title: "Track this again", systemImage: "clock.arrow.circlepath") {
+                            trackAgain()
+                        }
+                    }
+
+                    HStack(spacing: WLSpacing.s) {
+                        WLSecondaryButton(
+                            title: analysis.alternatives.isEmpty ? "Find a softer swap" : "Choose the swap",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        ) {
+                            swapProduct()
+                        }
+
+                        WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
+                            askStrategist()
+                        }
+                    }
+                }
             }
         }
     }

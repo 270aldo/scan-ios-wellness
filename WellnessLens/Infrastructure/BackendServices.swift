@@ -50,6 +50,33 @@ struct WeeklyInsightsResponse: Codable {
     let insights: [WeeklyInsight]
 }
 
+struct CompleteOnboardingRequest: Codable {
+    let profile: UserProfile
+    let activeGoals: [ActiveGoal]
+    let firstWeekPlan: FirstWeekPlan?
+    let installID: String
+}
+
+struct SaveScanDecisionRequest: Codable {
+    let decision: ScanDecision
+    let installID: String
+}
+
+struct UpsertMemoryRequest: Codable {
+    let memoryItems: [MemoryItem]
+    let installID: String
+}
+
+struct DailyHomeRequest: Codable {
+    let profile: UserProfile
+    let activeGoals: [ActiveGoal]
+    let installID: String
+}
+
+struct DailyHomeResponse: Codable {
+    let payload: DailyHomePayload
+}
+
 struct AlternativesRequest: Codable {
     let analysis: ScanAnalysis
     let userContext: UserContext
@@ -75,8 +102,12 @@ protocol WellnessBackendAPI: Sendable {
     func resolveScan(input: ScanInput) async throws -> ResolveScanResponse
     func compareProducts(left: ScanAnalysis, right: ScanAnalysis) async throws -> ProductComparison
     func saveCheckIn(_ checkIn: CheckInEntry, userContext: UserContext) async throws
+    func completeOnboarding(profile: UserProfile, activeGoals: [ActiveGoal], firstWeekPlan: FirstWeekPlan?) async throws
     func getWeeklyInsights(userContext: UserContext) async throws -> [WeeklyInsight]
+    func fetchDailyHome(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyHomePayload
     func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion]
+    func saveScanDecision(_ decision: ScanDecision) async throws
+    func upsertMemoryItems(_ memoryItems: [MemoryItem]) async throws
 }
 
 enum BackendClientError: LocalizedError {
@@ -220,21 +251,70 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
     func getWeeklyInsights(userContext: UserContext) async throws -> [WeeklyInsight] {
         let installID = await identityProvider.installID()
         let response: WeeklyInsightsResponse = try await send(
-            path: "getWeeklyInsights",
+            path: "v1/home/weekly-insights",
             method: "POST",
             body: WeeklyInsightsRequest(userContext: userContext, installID: installID)
         )
         return response.insights
     }
 
+    func completeOnboarding(
+        profile: UserProfile,
+        activeGoals: [ActiveGoal],
+        firstWeekPlan: FirstWeekPlan?
+    ) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/onboarding/complete",
+            method: "POST",
+            body: CompleteOnboardingRequest(
+                profile: profile,
+                activeGoals: activeGoals,
+                firstWeekPlan: firstWeekPlan,
+                installID: installID
+            )
+        )
+    }
+
+    func fetchDailyHome(
+        profile: UserProfile,
+        activeGoals: [ActiveGoal]
+    ) async throws -> DailyHomePayload {
+        let installID = await identityProvider.installID()
+        let response: DailyHomeResponse = try await send(
+            path: "v1/home",
+            method: "POST",
+            body: DailyHomeRequest(profile: profile, activeGoals: activeGoals, installID: installID)
+        )
+        return response.payload
+    }
+
     func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion] {
         let installID = await identityProvider.installID()
         let response: AlternativesResponse = try await send(
-            path: "listAlternatives",
+            path: "v1/scans/alternatives",
             method: "POST",
             body: AlternativesRequest(analysis: analysis, userContext: userContext, installID: installID)
         )
         return response.alternatives
+    }
+
+    func saveScanDecision(_ decision: ScanDecision) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/scans/decision",
+            method: "POST",
+            body: SaveScanDecisionRequest(decision: decision, installID: installID)
+        )
+    }
+
+    func upsertMemoryItems(_ memoryItems: [MemoryItem]) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/memory/upsert",
+            method: "POST",
+            body: UpsertMemoryRequest(memoryItems: memoryItems, installID: installID)
+        )
     }
 
     private func send<RequestBody: Encodable, ResponseBody: Decodable>(

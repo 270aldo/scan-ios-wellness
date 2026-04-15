@@ -22,9 +22,11 @@
 		7976E18A0A9AB5A8501B6714 /* WellnessLensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */; };
 		7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FEB953B498E112C8A8A8C2 /* ProfileView.swift */; };
 		7F75B63604552039C797C6B6 /* PlatformServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0D30805104A44656D733B57 /* PlatformServices.swift */; };
+		8FE6A01DB8E0C300099AB65B /* StrategistChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A25C06B295C2E81EF98B81 /* StrategistChatView.swift */; };
 		96B1028840C4D1A1A132F0A7 /* BackendServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1EA1030BB7C1D45922895FE /* BackendServices.swift */; };
 		984D5A167E12791003212505 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = B9CC1EC0B38DE47492FABDD9 /* FirebaseAuth */; };
 		A8E0571DAAA922DAE49231DF /* RuntimeConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F74457045D6349B913AC3BB /* RuntimeConfiguration.swift */; };
+		B40830763A30FADDB9EF46D1 /* StrategistDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45830359EBEEA92645E5869D /* StrategistDomain.swift */; };
 		B67DA6B8F16E8289E30A1E46 /* FirebaseBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABA94F5FF50A0A71014CB46 /* FirebaseBootstrap.swift */; };
 		C13819161F4CDB39D7D7F1FD /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 588E67EAD9F41F6BB704F863 /* FirebaseStorage */; };
 		DCA681F5EE7D1D8941B9FC7B /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 89EF23150A79016F248FEA7A /* FirebaseFirestore */; };
@@ -48,6 +50,7 @@
 		07FEB953B498E112C8A8A8C2 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		300C0E719D0C64482CD38604 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		359AAE5E6E967C33DE26BBAE /* WLTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WLTheme.swift; sourceTree = "<group>"; };
+		45830359EBEEA92645E5869D /* StrategistDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategistDomain.swift; sourceTree = "<group>"; };
 		469BF12952A26C207D0E9B7A /* WellnessLens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = WellnessLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4E35F98CCE0A1C7EA497D4D4 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		4F74457045D6349B913AC3BB /* RuntimeConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeConfiguration.swift; sourceTree = "<group>"; };
@@ -60,6 +63,7 @@
 		A97FFBBF38A437575C99A169 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
 		A9C81B99045E87C56B92E4F7 /* AnalysisView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisView.swift; sourceTree = "<group>"; };
 		AD6712C15F39C0CD038D10CA /* WLComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WLComponents.swift; sourceTree = "<group>"; };
+		D0A25C06B295C2E81EF98B81 /* StrategistChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategistChatView.swift; sourceTree = "<group>"; };
 		D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WellnessLensApp.swift; sourceTree = "<group>"; };
 		DBB2A5D3A12EF2FB096035F9 /* GoogleService-Info.plist.example */ = {isa = PBXFileReference; path = "GoogleService-Info.plist.example"; sourceTree = "<group>"; };
 		E1EA1030BB7C1D45922895FE /* BackendServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendServices.swift; sourceTree = "<group>"; };
@@ -136,6 +140,7 @@
 		6D33EE34D265C10C42FBCFA3 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				45830359EBEEA92645E5869D /* StrategistDomain.swift */,
 				F1513C5DEDB58335F5A27C0A /* WellnessCore.swift */,
 			);
 			path = Domain;
@@ -147,6 +152,14 @@
 				A9C81B99045E87C56B92E4F7 /* AnalysisView.swift */,
 			);
 			path = Analysis;
+			sourceTree = "<group>";
+		};
+		797D4AA67BBA0E7869026D58 /* Strategist */ = {
+			isa = PBXGroup;
+			children = (
+				D0A25C06B295C2E81EF98B81 /* StrategistChatView.swift */,
+			);
+			path = Strategist;
 			sourceTree = "<group>";
 		};
 		851E9745EFAD62C973B80262 /* WellnessLens */ = {
@@ -191,6 +204,7 @@
 				2C629F0185D15229C905A293 /* Home */,
 				DFE5116DDC51FC5B5E2FD919 /* Profile */,
 				20CB929814C001E3C50FC8DE /* Scan */,
+				797D4AA67BBA0E7869026D58 /* Strategist */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -342,6 +356,8 @@
 				7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */,
 				A8E0571DAAA922DAE49231DF /* RuntimeConfiguration.swift in Sources */,
 				40C38D67D482D90AD54E8114 /* ScanView.swift in Sources */,
+				8FE6A01DB8E0C300099AB65B /* StrategistChatView.swift in Sources */,
+				B40830763A30FADDB9EF46D1 /* StrategistDomain.swift in Sources */,
 				EB55155764DA6021D23181C2 /* WLComponents.swift in Sources */,
 				EBBD7CC716D20A290D9C705E /* WLTheme.swift in Sources */,
 				793AADE26C27D5490DEF4FB3 /* WellnessCore.swift in Sources */,
