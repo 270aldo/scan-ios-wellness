@@ -1,0 +1,615 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0889A20242ED03504D5DBB1C /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FF6415C6E8AF88EF626C0A8 /* HistoryView.swift */; };
+		08D82F5F9B562167110EF52F /* GoogleService-Info.plist.example in Resources */ = {isa = PBXBuildFile; fileRef = DBB2A5D3A12EF2FB096035F9 /* GoogleService-Info.plist.example */; };
+		260FBA4E154C01BBC06B66F6 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = C48074434D973B8D0D26B8BB /* FirebaseCore */; };
+		40C38D67D482D90AD54E8114 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A97FFBBF38A437575C99A169 /* ScanView.swift */; };
+		412CB506EE0B374552B1867A /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E35F98CCE0A1C7EA497D4D4 /* HomeView.swift */; };
+		5740401144D52621D46BB4D9 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 982F5BB9AAA1191AAFDB489F /* AppModel.swift */; };
+		5EB3F8A96C35F32780D3F4D2 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 537C5C0045BADDB1235F942C /* FirebaseAppCheck */; };
+		6277E2486316BDEEEA6D20DB /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 02BFE443FB71719B06665D79 /* FirebaseFunctions */; };
+		665BAA4D75C65877B80AE257 /* CheckInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9643C0420015DF557FD9130D /* CheckInView.swift */; };
+		6B6CFA82DCF043760FD2D67C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 966FC64265A514DFC21B066E /* Assets.xcassets */; };
+		793AADE26C27D5490DEF4FB3 /* WellnessCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1513C5DEDB58335F5A27C0A /* WellnessCore.swift */; };
+		7976E18A0A9AB5A8501B6714 /* WellnessLensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */; };
+		7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FEB953B498E112C8A8A8C2 /* ProfileView.swift */; };
+		7F75B63604552039C797C6B6 /* PlatformServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0D30805104A44656D733B57 /* PlatformServices.swift */; };
+		96B1028840C4D1A1A132F0A7 /* BackendServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1EA1030BB7C1D45922895FE /* BackendServices.swift */; };
+		984D5A167E12791003212505 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = B9CC1EC0B38DE47492FABDD9 /* FirebaseAuth */; };
+		A8E0571DAAA922DAE49231DF /* RuntimeConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F74457045D6349B913AC3BB /* RuntimeConfiguration.swift */; };
+		B67DA6B8F16E8289E30A1E46 /* FirebaseBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABA94F5FF50A0A71014CB46 /* FirebaseBootstrap.swift */; };
+		C13819161F4CDB39D7D7F1FD /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 588E67EAD9F41F6BB704F863 /* FirebaseStorage */; };
+		DCA681F5EE7D1D8941B9FC7B /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 89EF23150A79016F248FEA7A /* FirebaseFirestore */; };
+		F7EB906E862918FFFA888D61 /* WellnessLensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0398CC19DEE7CAF2EFA50157 /* WellnessLensTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1D9CEFC4A9D25F35846AB407 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CD6F32E868C3701854D5E7BD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 82B52C51FC0FE21B4D0A731A;
+			remoteInfo = WellnessLens;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0398CC19DEE7CAF2EFA50157 /* WellnessLensTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WellnessLensTests.swift; sourceTree = "<group>"; };
+		07FEB953B498E112C8A8A8C2 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
+		300C0E719D0C64482CD38604 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		469BF12952A26C207D0E9B7A /* WellnessLens.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = WellnessLens.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4E35F98CCE0A1C7EA497D4D4 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		4F74457045D6349B913AC3BB /* RuntimeConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeConfiguration.swift; sourceTree = "<group>"; };
+		5ABA94F5FF50A0A71014CB46 /* FirebaseBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseBootstrap.swift; sourceTree = "<group>"; };
+		5FF6415C6E8AF88EF626C0A8 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		671438695ACE7EF933EF01E3 /* WellnessLensTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = WellnessLensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9643C0420015DF557FD9130D /* CheckInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckInView.swift; sourceTree = "<group>"; };
+		966FC64265A514DFC21B066E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		982F5BB9AAA1191AAFDB489F /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		A97FFBBF38A437575C99A169 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WellnessLensApp.swift; sourceTree = "<group>"; };
+		DBB2A5D3A12EF2FB096035F9 /* GoogleService-Info.plist.example */ = {isa = PBXFileReference; path = "GoogleService-Info.plist.example"; sourceTree = "<group>"; };
+		E1EA1030BB7C1D45922895FE /* BackendServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendServices.swift; sourceTree = "<group>"; };
+		F0D30805104A44656D733B57 /* PlatformServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformServices.swift; sourceTree = "<group>"; };
+		F1513C5DEDB58335F5A27C0A /* WellnessCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WellnessCore.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		DA403008F279A1FCBDF66965 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				260FBA4E154C01BBC06B66F6 /* FirebaseCore in Frameworks */,
+				984D5A167E12791003212505 /* FirebaseAuth in Frameworks */,
+				DCA681F5EE7D1D8941B9FC7B /* FirebaseFirestore in Frameworks */,
+				6277E2486316BDEEEA6D20DB /* FirebaseFunctions in Frameworks */,
+				C13819161F4CDB39D7D7F1FD /* FirebaseStorage in Frameworks */,
+				5EB3F8A96C35F32780D3F4D2 /* FirebaseAppCheck in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1BF785FA5B5E41D2447781A9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				469BF12952A26C207D0E9B7A /* WellnessLens.app */,
+				671438695ACE7EF933EF01E3 /* WellnessLensTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		20CB929814C001E3C50FC8DE /* Scan */ = {
+			isa = PBXGroup;
+			children = (
+				A97FFBBF38A437575C99A169 /* ScanView.swift */,
+			);
+			path = Scan;
+			sourceTree = "<group>";
+		};
+		2C629F0185D15229C905A293 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				4E35F98CCE0A1C7EA497D4D4 /* HomeView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		2F727920CB165A4040126664 /* History */ = {
+			isa = PBXGroup;
+			children = (
+				5FF6415C6E8AF88EF626C0A8 /* HistoryView.swift */,
+			);
+			path = History;
+			sourceTree = "<group>";
+		};
+		30FD4CD8AE8C5096105F0D63 /* WellnessLensTests */ = {
+			isa = PBXGroup;
+			children = (
+				0398CC19DEE7CAF2EFA50157 /* WellnessLensTests.swift */,
+			);
+			path = WellnessLensTests;
+			sourceTree = "<group>";
+		};
+		420C3D8E01097500D34B4BEA /* App */ = {
+			isa = PBXGroup;
+			children = (
+				982F5BB9AAA1191AAFDB489F /* AppModel.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		6D33EE34D265C10C42FBCFA3 /* Domain */ = {
+			isa = PBXGroup;
+			children = (
+				F1513C5DEDB58335F5A27C0A /* WellnessCore.swift */,
+			);
+			path = Domain;
+			sourceTree = "<group>";
+		};
+		851E9745EFAD62C973B80262 /* WellnessLens */ = {
+			isa = PBXGroup;
+			children = (
+				966FC64265A514DFC21B066E /* Assets.xcassets */,
+				D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */,
+				420C3D8E01097500D34B4BEA /* App */,
+				6D33EE34D265C10C42FBCFA3 /* Domain */,
+				9EA00F4D7C2D412DBFE77A72 /* Features */,
+				913F59EC472C0A5F7C0DC168 /* Infrastructure */,
+				D41BCC49EA7FCD3A707BB48C /* Support */,
+			);
+			path = WellnessLens;
+			sourceTree = "<group>";
+		};
+		8E47AA0525117B10BBD52B98 /* CheckIn */ = {
+			isa = PBXGroup;
+			children = (
+				9643C0420015DF557FD9130D /* CheckInView.swift */,
+			);
+			path = CheckIn;
+			sourceTree = "<group>";
+		};
+		913F59EC472C0A5F7C0DC168 /* Infrastructure */ = {
+			isa = PBXGroup;
+			children = (
+				E1EA1030BB7C1D45922895FE /* BackendServices.swift */,
+				5ABA94F5FF50A0A71014CB46 /* FirebaseBootstrap.swift */,
+				F0D30805104A44656D733B57 /* PlatformServices.swift */,
+			);
+			path = Infrastructure;
+			sourceTree = "<group>";
+		};
+		9EA00F4D7C2D412DBFE77A72 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				8E47AA0525117B10BBD52B98 /* CheckIn */,
+				2F727920CB165A4040126664 /* History */,
+				2C629F0185D15229C905A293 /* Home */,
+				DFE5116DDC51FC5B5E2FD919 /* Profile */,
+				20CB929814C001E3C50FC8DE /* Scan */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		AC2797B7473A6CEE83C8F990 = {
+			isa = PBXGroup;
+			children = (
+				851E9745EFAD62C973B80262 /* WellnessLens */,
+				30FD4CD8AE8C5096105F0D63 /* WellnessLensTests */,
+				1BF785FA5B5E41D2447781A9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D41BCC49EA7FCD3A707BB48C /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				DBB2A5D3A12EF2FB096035F9 /* GoogleService-Info.plist.example */,
+				300C0E719D0C64482CD38604 /* Info.plist */,
+				4F74457045D6349B913AC3BB /* RuntimeConfiguration.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		DFE5116DDC51FC5B5E2FD919 /* Profile */ = {
+			isa = PBXGroup;
+			children = (
+				07FEB953B498E112C8A8A8C2 /* ProfileView.swift */,
+			);
+			path = Profile;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		82B52C51FC0FE21B4D0A731A /* WellnessLens */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 036CD1BD34F4D3CE2B6F87B9 /* Build configuration list for PBXNativeTarget "WellnessLens" */;
+			buildPhases = (
+				6BD9D8C20B58E0E17BDBFBB6 /* Sources */,
+				03F919249141EFFC2DC131E2 /* Resources */,
+				DA403008F279A1FCBDF66965 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WellnessLens;
+			packageProductDependencies = (
+				C48074434D973B8D0D26B8BB /* FirebaseCore */,
+				B9CC1EC0B38DE47492FABDD9 /* FirebaseAuth */,
+				89EF23150A79016F248FEA7A /* FirebaseFirestore */,
+				02BFE443FB71719B06665D79 /* FirebaseFunctions */,
+				588E67EAD9F41F6BB704F863 /* FirebaseStorage */,
+				537C5C0045BADDB1235F942C /* FirebaseAppCheck */,
+			);
+			productName = WellnessLens;
+			productReference = 469BF12952A26C207D0E9B7A /* WellnessLens.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B55A678BC09EA146599CF451 /* WellnessLensTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 54E187FC2ABCB02EE2C70BD7 /* Build configuration list for PBXNativeTarget "WellnessLensTests" */;
+			buildPhases = (
+				C794DC787829DE0EBE85650F /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				96DF9C081666FE7A69011A53 /* PBXTargetDependency */,
+			);
+			name = WellnessLensTests;
+			packageProductDependencies = (
+			);
+			productName = WellnessLensTests;
+			productReference = 671438695ACE7EF933EF01E3 /* WellnessLensTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CD6F32E868C3701854D5E7BD /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					82B52C51FC0FE21B4D0A731A = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = EA5B2CCCC55156DA33A446DB /* Build configuration list for PBXProject "WellnessLens" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = AC2797B7473A6CEE83C8F990;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D4D01578E2E800FC664A54DD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1BF785FA5B5E41D2447781A9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				82B52C51FC0FE21B4D0A731A /* WellnessLens */,
+				B55A678BC09EA146599CF451 /* WellnessLensTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		03F919249141EFFC2DC131E2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6B6CFA82DCF043760FD2D67C /* Assets.xcassets in Resources */,
+				08D82F5F9B562167110EF52F /* GoogleService-Info.plist.example in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6BD9D8C20B58E0E17BDBFBB6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5740401144D52621D46BB4D9 /* AppModel.swift in Sources */,
+				96B1028840C4D1A1A132F0A7 /* BackendServices.swift in Sources */,
+				665BAA4D75C65877B80AE257 /* CheckInView.swift in Sources */,
+				B67DA6B8F16E8289E30A1E46 /* FirebaseBootstrap.swift in Sources */,
+				0889A20242ED03504D5DBB1C /* HistoryView.swift in Sources */,
+				412CB506EE0B374552B1867A /* HomeView.swift in Sources */,
+				7F75B63604552039C797C6B6 /* PlatformServices.swift in Sources */,
+				7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */,
+				A8E0571DAAA922DAE49231DF /* RuntimeConfiguration.swift in Sources */,
+				40C38D67D482D90AD54E8114 /* ScanView.swift in Sources */,
+				793AADE26C27D5490DEF4FB3 /* WellnessCore.swift in Sources */,
+				7976E18A0A9AB5A8501B6714 /* WellnessLensApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C794DC787829DE0EBE85650F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F7EB906E862918FFFA888D61 /* WellnessLensTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		96DF9C081666FE7A69011A53 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 82B52C51FC0FE21B4D0A731A /* WellnessLens */;
+			targetProxy = 1D9CEFC4A9D25F35846AB407 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		3FCB4B55C1A30780B54F2676 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aldoolivas.WellnessLensTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WellnessLens.app/WellnessLens";
+			};
+			name = Release;
+		};
+		5A0E6741C70FD78FB9C0C0A4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		74145A2A4BD2E59163A57DE6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aldoolivas.WellnessLensTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WellnessLens.app/WellnessLens";
+			};
+			name = Debug;
+		};
+		77FA069BC6EBFC6B560830BA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		79A1DC54C82AB27CF2CEDA23 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = WellnessLens/Support/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aldoolivas.WellnessLens;
+				PRODUCT_NAME = WellnessLens;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		89174B061A5D234DC2DA6B3D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				INFOPLIST_FILE = WellnessLens/Support/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aldoolivas.WellnessLens;
+				PRODUCT_NAME = WellnessLens;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		036CD1BD34F4D3CE2B6F87B9 /* Build configuration list for PBXNativeTarget "WellnessLens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				79A1DC54C82AB27CF2CEDA23 /* Debug */,
+				89174B061A5D234DC2DA6B3D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		54E187FC2ABCB02EE2C70BD7 /* Build configuration list for PBXNativeTarget "WellnessLensTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				74145A2A4BD2E59163A57DE6 /* Debug */,
+				3FCB4B55C1A30780B54F2676 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EA5B2CCCC55156DA33A446DB /* Build configuration list for PBXProject "WellnessLens" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				77FA069BC6EBFC6B560830BA /* Debug */,
+				5A0E6741C70FD78FB9C0C0A4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D4D01578E2E800FC664A54DD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.7.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		02BFE443FB71719B06665D79 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4D01578E2E800FC664A54DD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
+		};
+		537C5C0045BADDB1235F942C /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4D01578E2E800FC664A54DD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
+		};
+		588E67EAD9F41F6BB704F863 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4D01578E2E800FC664A54DD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+		89EF23150A79016F248FEA7A /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4D01578E2E800FC664A54DD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		B9CC1EC0B38DE47492FABDD9 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4D01578E2E800FC664A54DD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		C48074434D973B8D0D26B8BB /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D4D01578E2E800FC664A54DD /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = CD6F32E868C3701854D5E7BD /* Project object */;
+}

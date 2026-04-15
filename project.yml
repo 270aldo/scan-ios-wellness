@@ -1,0 +1,74 @@
+name: WellnessLens
+options:
+  bundleIdPrefix: com.aldoolivas
+  minimumXcodeGenVersion: 2.45.0
+packages:
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk.git
+    from: 12.7.0
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    IPHONEOS_DEPLOYMENT_TARGET: 17.0
+    TARGETED_DEVICE_FAMILY: 1
+targets:
+  WellnessLens:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WellnessLens
+    info:
+      path: WellnessLens/Support/Info.plist
+      properties:
+        CFBundleDisplayName: WellnessLens
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - wellnesslens
+        LSApplicationCategoryType: public.app-category.healthcare-fitness
+        NSCameraUsageDescription: WellnessLens uses the camera to scan barcodes and read product labels.
+        NSPhotoLibraryUsageDescription: WellnessLens uses your photo library so you can analyze ingredient labels from photos.
+        UIApplicationSupportsIndirectInputEvents: true
+        UILaunchScreen: {}
+        WLBackendBaseURL: ""
+        WLFirebaseEnabled: false
+        WLStoreKitEnabled: false
+        WLUseDemoData: true
+        WLUseAppCheckDebugProvider: true
+        WLPlusProductID: com.aldoolivas.wellnesslens.plus
+        WLProProductID: com.aldoolivas.wellnesslens.pro
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aldoolivas.WellnessLens
+        PRODUCT_NAME: WellnessLens
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - package: Firebase
+        product: FirebaseCore
+      - package: Firebase
+        product: FirebaseAuth
+      - package: Firebase
+        product: FirebaseFirestore
+      - package: Firebase
+        product: FirebaseFunctions
+      - package: Firebase
+        product: FirebaseStorage
+      - package: Firebase
+        product: FirebaseAppCheck
+    scheme:
+      gatherCoverageData: true
+      testTargets:
+        - WellnessLensTests
+  WellnessLensTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: WellnessLensTests
+    dependencies:
+      - target: WellnessLens
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        PRODUCT_BUNDLE_IDENTIFIER: com.aldoolivas.WellnessLensTests
