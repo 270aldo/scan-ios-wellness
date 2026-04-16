@@ -19,6 +19,9 @@
 		6B6CFA82DCF043760FD2D67C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 966FC64265A514DFC21B066E /* Assets.xcassets */; };
 		6E87A830860093E967DA607D /* AnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9C81B99045E87C56B92E4F7 /* AnalysisView.swift */; };
 		793AADE26C27D5490DEF4FB3 /* WellnessCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1513C5DEDB58335F5A27C0A /* WellnessCore.swift */; };
+		7D0F4C1A9B2E4300A1C7D101 /* DailyAssistantContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0F4C1A9B2E4300A1C7D001 /* DailyAssistantContracts.swift */; };
+		7D0F4C1A9B2E4300A1C7D102 /* DailyAssistantOrchestration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0F4C1A9B2E4300A1C7D002 /* DailyAssistantOrchestration.swift */; };
+		7D0F4C1A9B2E4300A1C7D201 /* PantryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D0F4C1A9B2E4300A1C7D202 /* PantryView.swift */; };
 		7976E18A0A9AB5A8501B6714 /* WellnessLensApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */; };
 		7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07FEB953B498E112C8A8A8C2 /* ProfileView.swift */; };
 		7F75B63604552039C797C6B6 /* PlatformServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0D30805104A44656D733B57 /* PlatformServices.swift */; };
@@ -56,6 +59,9 @@
 		4F74457045D6349B913AC3BB /* RuntimeConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeConfiguration.swift; sourceTree = "<group>"; };
 		5ABA94F5FF50A0A71014CB46 /* FirebaseBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseBootstrap.swift; sourceTree = "<group>"; };
 		5FF6415C6E8AF88EF626C0A8 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		7D0F4C1A9B2E4300A1C7D001 /* DailyAssistantContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyAssistantContracts.swift; sourceTree = "<group>"; };
+		7D0F4C1A9B2E4300A1C7D002 /* DailyAssistantOrchestration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyAssistantOrchestration.swift; sourceTree = "<group>"; };
+		7D0F4C1A9B2E4300A1C7D202 /* PantryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryView.swift; sourceTree = "<group>"; };
 		671438695ACE7EF933EF01E3 /* WellnessLensTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = WellnessLensTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9643C0420015DF557FD9130D /* CheckInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CheckInView.swift; sourceTree = "<group>"; };
 		966FC64265A514DFC21B066E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -140,6 +146,8 @@
 		6D33EE34D265C10C42FBCFA3 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				7D0F4C1A9B2E4300A1C7D001 /* DailyAssistantContracts.swift */,
+				7D0F4C1A9B2E4300A1C7D002 /* DailyAssistantOrchestration.swift */,
 				45830359EBEEA92645E5869D /* StrategistDomain.swift */,
 				F1513C5DEDB58335F5A27C0A /* WellnessCore.swift */,
 			);
@@ -160,6 +168,14 @@
 				D0A25C06B295C2E81EF98B81 /* StrategistChatView.swift */,
 			);
 			path = Strategist;
+			sourceTree = "<group>";
+		};
+		7D0F4C1A9B2E4300A1C7D203 /* Pantry */ = {
+			isa = PBXGroup;
+			children = (
+				7D0F4C1A9B2E4300A1C7D202 /* PantryView.swift */,
+			);
+			path = Pantry;
 			sourceTree = "<group>";
 		};
 		851E9745EFAD62C973B80262 /* WellnessLens */ = {
@@ -202,6 +218,7 @@
 				8E47AA0525117B10BBD52B98 /* CheckIn */,
 				2F727920CB165A4040126664 /* History */,
 				2C629F0185D15229C905A293 /* Home */,
+				7D0F4C1A9B2E4300A1C7D203 /* Pantry */,
 				DFE5116DDC51FC5B5E2FD919 /* Profile */,
 				20CB929814C001E3C50FC8DE /* Scan */,
 				797D4AA67BBA0E7869026D58 /* Strategist */,
@@ -349,9 +366,12 @@
 				5740401144D52621D46BB4D9 /* AppModel.swift in Sources */,
 				96B1028840C4D1A1A132F0A7 /* BackendServices.swift in Sources */,
 				665BAA4D75C65877B80AE257 /* CheckInView.swift in Sources */,
+				7D0F4C1A9B2E4300A1C7D101 /* DailyAssistantContracts.swift in Sources */,
+				7D0F4C1A9B2E4300A1C7D102 /* DailyAssistantOrchestration.swift in Sources */,
 				B67DA6B8F16E8289E30A1E46 /* FirebaseBootstrap.swift in Sources */,
 				0889A20242ED03504D5DBB1C /* HistoryView.swift in Sources */,
 				412CB506EE0B374552B1867A /* HomeView.swift in Sources */,
+				7D0F4C1A9B2E4300A1C7D201 /* PantryView.swift in Sources */,
 				7F75B63604552039C797C6B6 /* PlatformServices.swift in Sources */,
 				7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */,
 				A8E0571DAAA922DAE49231DF /* RuntimeConfiguration.swift in Sources */,

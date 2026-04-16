@@ -24,6 +24,8 @@ enum ScanSource: String, Codable, CaseIterable {
     case liveBarcode
     case manualBarcode
     case labelPhoto
+    case mealPhoto
+    case menuPhoto
     case manualLabel
 
     var title: String {
@@ -31,6 +33,8 @@ enum ScanSource: String, Codable, CaseIterable {
         case .liveBarcode: "Live barcode"
         case .manualBarcode: "Manual barcode"
         case .labelPhoto: "Label photo"
+        case .mealPhoto: "Meal snapshot"
+        case .menuPhoto: "Menu photo"
         case .manualLabel: "Manual label"
         }
     }
@@ -345,6 +349,10 @@ enum SubscriptionStatus: String, Codable, CaseIterable {
         case .plus: "Plus"
         case .pro: "Pro"
         }
+    }
+
+    var upgradeTargets: [SubscriptionStatus] {
+        SubscriptionStatus.allCases.filter { $0.rank > rank }
     }
 }
 

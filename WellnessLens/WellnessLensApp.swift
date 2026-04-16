@@ -62,6 +62,9 @@ struct MainTabView: View {
             }) { analysis in
                 AnalysisView(analysis: analysis)
             }
+            .sheet(item: $model.activePaywall) { context in
+                PhaseTwoPaywallSheet(context: context)
+            }
     }
 
     @ViewBuilder
@@ -125,6 +128,105 @@ struct MainTabView: View {
     }
 }
 
+private struct PhaseTwoPaywallSheet: View {
+    let context: PaywallContext
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            WLScreen {
+                WLPrimaryCard {
+                    VStack(alignment: .leading, spacing: WLSpacing.m) {
+                        WLStatusBadge(title: context.title, systemImage: "sparkles", tone: .accent)
+
+                        Text(context.feature.title)
+                            .font(WLTypography.title)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(context.message)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                            Text("Preview")
+                                .font(WLTypography.captionStrong)
+                                .foregroundStyle(WLPalette.ink)
+
+                            ForEach(context.previewLines, id: \.self) { line in
+                                Text("• \(line)")
+                                    .font(WLTypography.body)
+                                    .foregroundStyle(WLPalette.inkSoft)
+                            }
+                        }
+
+                        if !model.activeEntitlements.isEmpty {
+                            VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                                Text("Already unlocked")
+                                    .font(WLTypography.captionStrong)
+                                    .foregroundStyle(WLPalette.ink)
+
+                                Text(model.activeEntitlements.map(\.title).joined(separator: ", "))
+                                    .font(WLTypography.caption)
+                                    .foregroundStyle(WLPalette.inkSoft)
+                            }
+                        }
+
+                        VStack(spacing: WLSpacing.s) {
+                            WLPrimaryButton(
+                                title: context.targetTier == .pro ? "Unlock Pro" : "Unlock Plus",
+                                systemImage: "arrow.up.right.circle"
+                            ) {
+                                Task {
+                                    await model.purchase(from: context)
+                                    if model.activePaywall == nil {
+                                        dismiss()
+                                    }
+                                }
+                            }
+
+                            if context.targetTier == .plus {
+                                WLSecondaryButton(title: "Unlock Pro", systemImage: "sparkles.rectangle.stack") {
+                                    Task {
+                                        await model.purchase(.pro)
+                                        if model.hasAccess(to: context.feature) {
+                                            model.dismissPaywall()
+                                            dismiss()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Button("Restore purchases") {
+                            Task {
+                                await model.restorePurchases()
+                                if model.hasAccess(to: context.feature) {
+                                    model.dismissPaywall()
+                                    dismiss()
+                                }
+                            }
+                        }
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.rose)
+                    }
+                }
+            }
+            .navigationTitle("Premium")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") {
+                        model.dismissPaywall()
+                        dismiss()
+                    }
+                    .font(WLTypography.captionStrong)
+                }
+            }
+        }
+    }
+}
+
 struct OnboardingFlowView: View {
     @Environment(AppModel.self) private var model
 
@@ -133,13 +235,19 @@ struct OnboardingFlowView: View {
     @State private var selectedFrictions = Set<UserFriction>()
     @State private var selectedSensitivities = Set<SensitivityFlag>()
     @State private var selectedSkinConcerns = Set<SkinConcern>()
+    @State private var selectedPriorities = Set<DailyNutritionPriority>([.energy, .digestion, .skin])
     @State private var dietStyle: DietStyle = .flexitarian
     @State private var lifeStage: LifeStage = .everyDay
     @State private var eatingRhythm: EatingRhythm = .flexible
     @State private var supplementStyle: SupplementRoutineStyle = .simple
     @State private var guidanceStyle: GuidanceStyle = .calmAndDirect
+    @State private var ageRange: AgeRange = .thirties
+    @State private var restaurantFrequency: RestaurantFrequency = .balanced
     @State private var memoryEnabled = true
     @State private var optInCycleAware = false
+    @State private var aiProcessingConsent = true
+    @State private var analyticsConsent = false
+    @State private var notificationsConsent = false
 
     private let columns = [GridItem(.adaptive(minimum: 148), spacing: WLSpacing.s)]
     private let totalSteps = 5
@@ -235,6 +343,19 @@ struct OnboardingFlowView: View {
                             }
                         }
                     }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Age range")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        Picker("Age range", selection: $ageRange) {
+                            ForEach(AgeRange.allCases) { range in
+                                Text(range.title).tag(range)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
                 }
             }
         case 1:
@@ -279,8 +400,38 @@ struct OnboardingFlowView: View {
                         .pickerStyle(.menu)
                     }
 
-                    Toggle("Use cycle-aware framing when relevant", isOn: $optInCycleAware)
+                        Toggle("Use cycle-aware framing when relevant", isOn: $optInCycleAware)
                         .tint(WLPalette.tint)
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Restaurant vs home")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        Picker("Restaurant frequency", selection: $restaurantFrequency) {
+                            ForEach(RestaurantFrequency.allCases) { frequency in
+                                Text(frequency.title).tag(frequency)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Daily priorities")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                            ForEach(DailyNutritionPriority.allCases) { priority in
+                                SelectionChip(
+                                    title: priority.title,
+                                    isSelected: selectedPriorities.contains(priority)
+                                ) {
+                                    toggle(priority, in: &selectedPriorities)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         case 2:
@@ -350,6 +501,15 @@ struct OnboardingFlowView: View {
                     Toggle("Let WellnessLens remember what helps, what hurts, and what you already decided", isOn: $memoryEnabled)
                         .tint(WLPalette.tint)
 
+                    Toggle("Allow AI processing for structured analysis", isOn: $aiProcessingConsent)
+                        .tint(WLPalette.tint)
+
+                    Toggle("Allow product analytics that do not include private notes", isOn: $analyticsConsent)
+                        .tint(WLPalette.tint)
+
+                    Toggle("Enable Daily Brief notifications later", isOn: $notificationsConsent)
+                        .tint(WLPalette.tint)
+
                     WLCompactCard {
                         VStack(alignment: .leading, spacing: WLSpacing.s) {
                             Text("What memory means here")
@@ -407,6 +567,18 @@ struct OnboardingFlowView: View {
                             }
                         }
                     }
+
+                    WLCompactCard {
+                        VStack(alignment: .leading, spacing: WLSpacing.s) {
+                            Text("First mission")
+                                .font(WLTypography.captionStrong)
+                                .foregroundStyle(WLPalette.ink)
+
+                            Text("Scan or snapshot something real today so the assistant starts from an actual decision, not a generic profile.")
+                                .font(WLTypography.body)
+                                .foregroundStyle(WLPalette.inkSoft)
+                        }
+                    }
                 }
             }
         }
@@ -445,21 +617,33 @@ struct OnboardingFlowView: View {
 
     private func builtProfile() -> UserProfile {
         let context = UserContext(
-            goals: Array(selectedGoals),
-            sensitivities: Array(selectedSensitivities),
+            goals: orderedSelections(selectedGoals, using: UserGoal.allCases),
+            sensitivities: orderedSelections(selectedSensitivities, using: SensitivityFlag.allCases),
             dietStyle: dietStyle,
-            skinConcerns: Array(selectedSkinConcerns),
+            skinConcerns: orderedSelections(selectedSkinConcerns, using: SkinConcern.allCases),
             lifeStage: lifeStage,
             optInCycleAware: optInCycleAware
         )
 
         return UserProfile(
             userContext: context,
-            frictions: Array(selectedFrictions),
+            frictions: orderedSelections(selectedFrictions, using: UserFriction.allCases),
             guidanceStyle: guidanceStyle,
             eatingRhythm: eatingRhythm,
             supplementStyle: supplementStyle,
             memoryEnabled: memoryEnabled,
+            ageRange: ageRange,
+            restaurantFrequency: restaurantFrequency,
+            nutritionPriorities: orderedSelections(
+                selectedPriorities.isEmpty ? [.energy] : selectedPriorities,
+                using: DailyNutritionPriority.allCases
+            ),
+            consentFlags: ConsentFlags(
+                aiProcessing: aiProcessingConsent,
+                analytics: analyticsConsent,
+                notifications: notificationsConsent,
+                healthDataProcessing: true
+            ),
             createdAt: .now
         )
     }
@@ -470,6 +654,11 @@ struct OnboardingFlowView: View {
         } else {
             set.insert(value)
         }
+    }
+
+    private func orderedSelections<T>(_ selection: Set<T>, using orderedValues: T.AllCases) -> [T]
+    where T: CaseIterable & Hashable, T.AllCases: Collection, T.AllCases.Element == T {
+        orderedValues.filter { selection.contains($0) }
     }
 }
 

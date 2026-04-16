@@ -5,6 +5,7 @@ struct ProfileView: View {
 
     @State private var showProfileEditor = false
     @State private var strategistEntryPoint: StrategistEntryPoint?
+    @State private var showPantry = false
 
     var body: some View {
         WLScreen {
@@ -12,6 +13,9 @@ struct ProfileView: View {
             goalsCard
             memoryCard
             subscriptionCard
+            if model.services.featureFlags.pantryMVP {
+                pantryCard
+            }
         }
         .navigationTitle("Profile")
         .sheet(isPresented: $showProfileEditor) {
@@ -23,41 +27,75 @@ struct ProfileView: View {
         .sheet(item: $strategistEntryPoint) { entryPoint in
             StrategistChatView(entryPoint: entryPoint)
         }
+        .sheet(isPresented: $showPantry) {
+            PantryView()
+        }
     }
 
     private var strategistIdentityCard: some View {
         WLPrimaryCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
-                HStack(alignment: .top) {
-                    WLSectionHeader(
-                        title: "Your strategist profile",
-                        subtitle: "This is the operating context behind Home, scans, memory, and recommendations.",
-                        systemImage: "person.text.rectangle"
-                    )
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: WLSpacing.s) {
+                        WLSectionHeader(
+                            title: "Your strategist profile",
+                            subtitle: "The context behind Home, scans, memory, and recommendations.",
+                            systemImage: "person.text.rectangle"
+                        )
 
-                    Spacer()
+                        Spacer(minLength: WLSpacing.s)
 
-                    WLSecondaryButton(title: "Edit") {
-                        showProfileEditor = true
+                        WLSecondaryButton(title: "Edit") {
+                            showProfileEditor = true
+                        }
+                        .frame(maxWidth: 96)
                     }
-                    .frame(maxWidth: 96)
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLSectionHeader(
+                            title: "Your strategist profile",
+                            subtitle: "The context behind Home, scans, memory, and recommendations.",
+                            systemImage: "person.text.rectangle"
+                        )
+
+                        WLSecondaryButton(title: "Edit") {
+                            showProfileEditor = true
+                        }
+                        .frame(maxWidth: 148)
+                    }
                 }
 
                 profileRow(label: "Guidance style", value: model.userProfile.guidanceStyle.title)
+                profileRow(label: "Age range", value: model.userProfile.ageRange.title)
                 profileRow(label: "Eating rhythm", value: model.userProfile.eatingRhythm.title)
+                profileRow(label: "Restaurant rhythm", value: model.userProfile.restaurantFrequency.title)
                 profileRow(label: "Supplement routine", value: model.userProfile.supplementStyle.title)
                 profileRow(label: "Diet style", value: model.userContext.dietStyle.title)
                 profileRow(label: "Life stage", value: model.userContext.lifeStage.title)
                 profileRow(label: "Memory", value: model.userProfile.memoryEnabled ? "Enabled" : "Limited")
 
-                HStack(spacing: WLSpacing.s) {
-                    WLSecondaryButton(title: "Open strategist", systemImage: "message") {
-                        strategistEntryPoint = .profile
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: WLSpacing.s) {
+                        WLPrimaryButton(title: "Open strategist", systemImage: "message") {
+                            strategistEntryPoint = .profile
+                        }
+
+                        WLSecondaryButton(title: "Back to Home", systemImage: "house") {
+                            withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                                model.selectedTab = .home
+                            }
+                        }
                     }
 
-                    WLPrimaryButton(title: "Go to Home", systemImage: "house") {
-                        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
-                            model.selectedTab = .home
+                    VStack(spacing: WLSpacing.s) {
+                        WLPrimaryButton(title: "Open strategist", systemImage: "message") {
+                            strategistEntryPoint = .profile
+                        }
+
+                        WLSecondaryButton(title: "Back to Home", systemImage: "house") {
+                            withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                                model.selectedTab = .home
+                            }
                         }
                     }
                 }
@@ -70,11 +108,12 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "What you’re optimizing",
-                    subtitle: "These goals and frictions should be explicit, because they change the whole product.",
+                    subtitle: "These goals and frictions change the whole product.",
                     systemImage: "target"
                 )
 
                 profileRow(label: "Goals", value: model.userContext.goals.map(\.title).joined(separator: ", "))
+                profileRow(label: "Daily priorities", value: model.userProfile.nutritionPriorities.map(\.title).joined(separator: ", "))
                 profileRow(label: "Frictions", value: model.userProfile.frictions.map(\.title).joined(separator: ", "))
                 profileRow(label: "Sensitivities", value: model.userContext.sensitivities.map(\.title).joined(separator: ", "))
                 profileRow(label: "Skin concerns", value: model.userContext.skinConcerns.map(\.title).joined(separator: ", "))
@@ -87,7 +126,7 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "Memory and routine",
-                    subtitle: "The app should feel more intimate because it keeps the right kind of memory, not because it chats more.",
+                    subtitle: "The app should feel more personal because it remembers the right things.",
                     systemImage: "brain.head.profile"
                 )
 
@@ -112,20 +151,32 @@ struct ProfileView: View {
                     .font(WLTypography.title)
                     .foregroundStyle(WLPalette.ink)
 
-                Text("Premium should unlock deeper strategist context, richer memory, and more refined daily coaching surfaces over time.")
+                Text("Premium unlocks history-based pattern reads, weekly narrative guidance, menu scanning, and pantry actions without replacing the deterministic fallback.")
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
 
-                HStack(spacing: WLSpacing.s) {
-                    WLSecondaryButton(title: "Unlock Plus") {
-                        Task {
-                            await model.purchase(.plus)
-                        }
-                    }
+                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                    Text("Unlocked now")
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.ink)
 
-                    WLPrimaryButton(title: "Unlock Pro") {
-                        Task {
-                            await model.purchase(.pro)
+                    Text(
+                        model.activeEntitlements.isEmpty
+                            ? "Core Fase 1 flows only."
+                            : model.activeEntitlements.map(\.title).joined(separator: ", ")
+                    )
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                if !model.subscriptionStatus.upgradeTargets.isEmpty {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: WLSpacing.s) {
+                            subscriptionUpgradeButtons
+                        }
+
+                        VStack(spacing: WLSpacing.s) {
+                            subscriptionUpgradeButtons
                         }
                     }
                 }
@@ -137,6 +188,94 @@ struct ProfileView: View {
                 }
                 .font(WLTypography.captionStrong)
                 .foregroundStyle(WLPalette.rose)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var subscriptionUpgradeButtons: some View {
+        ForEach(model.subscriptionStatus.upgradeTargets, id: \.self) { target in
+            if target == .pro {
+                WLPrimaryButton(title: "Unlock Pro") {
+                    Task {
+                        await model.purchase(.pro)
+                    }
+                }
+            } else {
+                WLSecondaryButton(title: "Unlock Plus") {
+                    Task {
+                        await model.purchase(.plus)
+                    }
+                }
+            }
+        }
+    }
+
+    private var pantryCard: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Pantry",
+                    subtitle: "A minimal saved-default system seeded from scans, favorites, and routines.",
+                    systemImage: "shippingbox"
+                )
+
+                if model.visiblePantryItems.isEmpty {
+                    Text("Run a few stronger scans or save one repeat choice. Pantry will seed itself from what already looks reusable.")
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.inkSoft)
+                } else {
+                    ForEach(Array(model.visiblePantryItems.prefix(2))) { item in
+                        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                            Text(item.title)
+                                .font(WLTypography.bodyEmphasis)
+                                .foregroundStyle(WLPalette.ink)
+
+                            Text(item.summary)
+                                .font(WLTypography.caption)
+                                .foregroundStyle(WLPalette.inkSoft)
+
+                            Text(item.sourceKind.title)
+                                .font(WLTypography.captionStrong)
+                                .foregroundStyle(WLPalette.rose)
+                        }
+                    }
+                }
+
+                let hasSuggestion = model.hasAccess(to: .pantrySuggestions) && !model.pantrySuggestions.isEmpty
+
+                if hasSuggestion, let suggestion = model.pantrySuggestions.first {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Suggestion")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+
+                        Text(suggestion.title)
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(suggestion.summary)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                } else if let supportingMessage = PantryPresentationCopy.supportingMessage(
+                    isUnlocked: model.hasAccess(to: .pantryMVP),
+                    hasSuggestion: hasSuggestion
+                ) {
+                    Text(supportingMessage)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                if model.hasAccess(to: .pantryMVP) {
+                    WLSecondaryButton(title: "Open pantry", systemImage: "shippingbox") {
+                        showPantry = true
+                    }
+                } else {
+                    WLSecondaryButton(title: "Preview pantry", systemImage: "shippingbox") {
+                        showPantry = true
+                    }
+                }
             }
         }
     }
@@ -164,13 +303,19 @@ private struct ProfileStrategistEditor: View {
     @State private var selectedFrictions: Set<UserFriction>
     @State private var selectedSensitivities: Set<SensitivityFlag>
     @State private var selectedSkinConcerns: Set<SkinConcern>
+    @State private var selectedPriorities: Set<DailyNutritionPriority>
     @State private var dietStyle: DietStyle
     @State private var lifeStage: LifeStage
     @State private var guidanceStyle: GuidanceStyle
     @State private var eatingRhythm: EatingRhythm
     @State private var supplementStyle: SupplementRoutineStyle
+    @State private var ageRange: AgeRange
+    @State private var restaurantFrequency: RestaurantFrequency
     @State private var memoryEnabled: Bool
     @State private var optInCycleAware: Bool
+    @State private var aiProcessingConsent: Bool
+    @State private var analyticsConsent: Bool
+    @State private var notificationsConsent: Bool
 
     private let columns = [GridItem(.adaptive(minimum: 148), spacing: WLSpacing.s)]
     private let createdAt: Date
@@ -182,13 +327,19 @@ private struct ProfileStrategistEditor: View {
         _selectedFrictions = State(initialValue: Set(profile.frictions))
         _selectedSensitivities = State(initialValue: Set(profile.userContext.sensitivities))
         _selectedSkinConcerns = State(initialValue: Set(profile.userContext.skinConcerns))
+        _selectedPriorities = State(initialValue: Set(profile.nutritionPriorities))
         _dietStyle = State(initialValue: profile.userContext.dietStyle)
         _lifeStage = State(initialValue: profile.userContext.lifeStage)
         _guidanceStyle = State(initialValue: profile.guidanceStyle)
         _eatingRhythm = State(initialValue: profile.eatingRhythm)
         _supplementStyle = State(initialValue: profile.supplementStyle)
+        _ageRange = State(initialValue: profile.ageRange)
+        _restaurantFrequency = State(initialValue: profile.restaurantFrequency)
         _memoryEnabled = State(initialValue: profile.memoryEnabled)
         _optInCycleAware = State(initialValue: profile.userContext.optInCycleAware)
+        _aiProcessingConsent = State(initialValue: profile.consentFlags.aiProcessing)
+        _analyticsConsent = State(initialValue: profile.consentFlags.analytics)
+        _notificationsConsent = State(initialValue: profile.consentFlags.notifications)
     }
 
     var body: some View {
@@ -275,6 +426,20 @@ private struct ProfileStrategistEditor: View {
                         }
                         .pickerStyle(.menu)
 
+                        Picker("Age range", selection: $ageRange) {
+                            ForEach(AgeRange.allCases) { range in
+                                Text(range.title).tag(range)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        Picker("Restaurant rhythm", selection: $restaurantFrequency) {
+                            ForEach(RestaurantFrequency.allCases) { frequency in
+                                Text(frequency.title).tag(frequency)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
                         Picker("Life stage", selection: $lifeStage) {
                             ForEach(LifeStage.allCases) { stage in
                                 Text(stage.title).tag(stage)
@@ -287,6 +452,31 @@ private struct ProfileStrategistEditor: View {
 
                         Toggle("Allow cycle-aware framing", isOn: $optInCycleAware)
                             .tint(WLPalette.tint)
+
+                        Toggle("Allow AI processing", isOn: $aiProcessingConsent)
+                            .tint(WLPalette.tint)
+
+                        Toggle("Allow analytics", isOn: $analyticsConsent)
+                            .tint(WLPalette.tint)
+
+                        Toggle("Allow notifications", isOn: $notificationsConsent)
+                            .tint(WLPalette.tint)
+                    }
+                }
+
+                editorSection(
+                    title: "Daily priorities",
+                    subtitle: "These should sharpen the Daily Brief and the visible assistant voice."
+                ) {
+                    LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                        ForEach(DailyNutritionPriority.allCases) { priority in
+                            SelectionChip(
+                                title: priority.title,
+                                isSelected: selectedPriorities.contains(priority)
+                            ) {
+                                toggle(priority, in: &selectedPriorities)
+                            }
+                        }
                     }
                 }
 
@@ -343,18 +533,30 @@ private struct ProfileStrategistEditor: View {
     private func makeProfile() -> UserProfile {
         UserProfile(
             userContext: UserContext(
-                goals: Array(selectedGoals),
-                sensitivities: Array(selectedSensitivities),
+                goals: orderedSelections(selectedGoals, using: UserGoal.allCases),
+                sensitivities: orderedSelections(selectedSensitivities, using: SensitivityFlag.allCases),
                 dietStyle: dietStyle,
-                skinConcerns: Array(selectedSkinConcerns),
+                skinConcerns: orderedSelections(selectedSkinConcerns, using: SkinConcern.allCases),
                 lifeStage: lifeStage,
                 optInCycleAware: optInCycleAware
             ),
-            frictions: Array(selectedFrictions),
+            frictions: orderedSelections(selectedFrictions, using: UserFriction.allCases),
             guidanceStyle: guidanceStyle,
             eatingRhythm: eatingRhythm,
             supplementStyle: supplementStyle,
             memoryEnabled: memoryEnabled,
+            ageRange: ageRange,
+            restaurantFrequency: restaurantFrequency,
+            nutritionPriorities: orderedSelections(
+                selectedPriorities.isEmpty ? [.energy] : selectedPriorities,
+                using: DailyNutritionPriority.allCases
+            ),
+            consentFlags: ConsentFlags(
+                aiProcessing: aiProcessingConsent,
+                analytics: analyticsConsent,
+                notifications: notificationsConsent,
+                healthDataProcessing: true
+            ),
             createdAt: createdAt
         )
     }
@@ -365,6 +567,11 @@ private struct ProfileStrategistEditor: View {
         } else {
             set.insert(value)
         }
+    }
+
+    private func orderedSelections<T>(_ selection: Set<T>, using orderedValues: T.AllCases) -> [T]
+    where T: CaseIterable & Hashable, T.AllCases: Collection, T.AllCases.Element == T {
+        orderedValues.filter { selection.contains($0) }
     }
 }
 

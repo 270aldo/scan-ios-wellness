@@ -1,5 +1,23 @@
 import SwiftUI
 
+private struct StrategistSurfacePlan {
+    let badgeTitle: String
+    let headline: String
+    let summary: String
+    let composerSeedTitle: String
+    let composerSeedPrompt: String
+    let composerPlaceholder: String
+}
+
+private struct StrategistContextCardData: Identifiable {
+    let id = UUID()
+    let badgeTitle: String
+    let badgeSymbol: String
+    let badgeTone: WLStatusBadge.Tone
+    let title: String
+    let summary: String
+}
+
 struct StrategistChatView: View {
     let entryPoint: StrategistEntryPoint
     var linkedAnalysis: ScanAnalysis? = nil
@@ -13,8 +31,121 @@ struct StrategistChatView: View {
         model.conversationThread(for: entryPoint)
     }
 
-    private var relevantMemory: [MemoryItem] {
-        Array(model.memoryItems.prefix(3))
+    private var linkedScanEvent: ScanEvent? {
+        linkedAnalysis.flatMap { model.scanEvent(for: $0) }
+    }
+
+    private var latestPattern: PatternInsight? {
+        if let linkedAnalysis {
+            return model.leadingPatternInsight(for: linkedAnalysis)
+        }
+        return model.patternInsights.first
+    }
+
+    private var latestCheckIn: CheckInEvent? {
+        model.checkInEvents.first
+    }
+
+    private var starterPrompts: [String] {
+        model.strategistStarterPrompts(for: entryPoint, linkedAnalysis: linkedAnalysis)
+    }
+
+    private var contextCards: [StrategistContextCardData] {
+        var cards = [StrategistContextCardData]()
+
+        if let linkedAnalysis {
+            cards.append(
+                StrategistContextCardData(
+                    badgeTitle: linkedVerdictTitle,
+                    badgeSymbol: "viewfinder",
+                    badgeTone: linkedVerdictTone,
+                    title: linkedReadTitle(for: linkedAnalysis),
+                    summary: linkedScanEvent?.analysis.whyToday.first ?? linkedAnalysis.overallSummary
+                )
+            )
+        }
+
+        if let weeklyNarrative = model.weeklyNarrative {
+            cards.append(
+                StrategistContextCardData(
+                    badgeTitle: "Weekly layer",
+                    badgeSymbol: "sparkles",
+                    badgeTone: .accent,
+                    title: weeklyNarrative.headline,
+                    summary: weeklyNarrative.patternSummary
+                )
+            )
+        }
+
+        if let latestPattern {
+            cards.append(
+                StrategistContextCardData(
+                    badgeTitle: latestPattern.signal.title,
+                    badgeSymbol: "waveform.path.ecg.rectangle",
+                    badgeTone: .accent,
+                    title: latestPattern.title,
+                    summary: latestPattern.summary
+                )
+            )
+        }
+
+        if let latestCheckIn {
+            cards.append(
+                StrategistContextCardData(
+                    badgeTitle: "Latest body signal",
+                    badgeSymbol: "heart.text.square",
+                    badgeTone: .caution,
+                    title: latestCheckIn.readHelpful == false ? "Recent read still feels off" : "Recent body signal",
+                    summary: "Energy \(latestCheckIn.energy)/5 • Mood \(latestCheckIn.mood)/5 • Digestion \(latestCheckIn.bloating)/5 • Satiety \(latestCheckIn.satiety)/5"
+                )
+            )
+        }
+
+        return Array(cards.prefix(3))
+    }
+
+    private var presentation: StrategistSurfacePlan {
+        if let linkedAnalysis {
+            return StrategistSurfacePlan(
+                badgeTitle: "Linked read",
+                headline: "Turn this read into a real decision.",
+                summary: "Ask whether \(linkedReadTitle(for: linkedAnalysis)) should stay, swap, or wait once today’s signal and weekly memory are taken into account.",
+                composerSeedTitle: "Use linked read",
+                composerSeedPrompt: "What is the single best next step for \(linkedAnalysis.resolvedProduct.name)?",
+                composerPlaceholder: "Ask whether this should stay, swap, avoid, or get one more real-world repeat."
+            )
+        }
+
+        if let weeklyNarrative = model.weeklyNarrative {
+            return StrategistSurfacePlan(
+                badgeTitle: "Weekly layer",
+                headline: weeklyNarrative.headline,
+                summary: weeklyNarrative.patternSummary,
+                composerSeedTitle: "Use weekly focus",
+                composerSeedPrompt: "What decision best protects \(weeklyNarrative.headline.lowercased()) today?",
+                composerPlaceholder: "Ask what to protect, reduce, or test next based on the weekly layer."
+            )
+        }
+
+        if let latestPattern {
+            return StrategistSurfacePlan(
+                badgeTitle: "Pattern signal",
+                headline: latestPattern.title,
+                summary: latestPattern.summary,
+                composerSeedTitle: "Use latest pattern",
+                composerSeedPrompt: "How should I use the \(latestPattern.signal.title.lowercased()) pattern in my next decision?",
+                composerPlaceholder: "Ask what matters most now, what to avoid, or which choice deserves a calmer repeat."
+            )
+        }
+
+        return StrategistSurfacePlan(
+            badgeTitle: "Shared strategist",
+            headline: "Ask for the next decision, not more noise.",
+            summary: "This thread carries context across Home, Scan, Check-in, and Profile so the recommendation stays cumulative instead of resetting by surface.",
+            composerSeedTitle: "Use today’s focus",
+            composerSeedPrompt: "What’s the one decision that matters most today?",
+            composerPlaceholder: "Ask for one action, one reason, or one swap recommendation."
+        )
     }
 
     var body: some View {
@@ -22,59 +153,14 @@ struct StrategistChatView: View {
             WLScreen {
                 hero
 
-                if !relevantMemory.isEmpty {
-                    memoryStrip
+                if !contextCards.isEmpty {
+                    contextSection
                 }
 
-                VStack(alignment: .leading, spacing: WLSpacing.m) {
-                    WLSectionHeader(
-                        title: "Conversation",
-                        subtitle: "Grounded in your active goals, recent signals, and saved decisions.",
-                        systemImage: "message"
-                    )
+                conversationSection
 
-                    ForEach(thread.messages) { message in
-                        StrategistMessageBubble(message: message)
-                    }
-                }
-
-                if !model.strategistStarterPrompts(for: entryPoint).isEmpty {
-                    VStack(alignment: .leading, spacing: WLSpacing.m) {
-                        WLSectionHeader(
-                            title: "Suggested prompts",
-                            subtitle: "Use these when you want a sharper recommendation instead of a blank chat box.",
-                            systemImage: "sparkles"
-                        )
-
-                        ForEach(model.strategistStarterPrompts(for: entryPoint), id: \.self) { prompt in
-                            Button {
-                                draft = prompt
-                            } label: {
-                                HStack(spacing: WLSpacing.s) {
-                                    Text(prompt)
-                                        .font(WLTypography.body)
-                                        .foregroundStyle(WLPalette.ink)
-                                        .multilineTextAlignment(.leading)
-
-                                    Spacer(minLength: 0)
-
-                                    WLIcon(systemName: "arrow.up.left", color: WLPalette.rose, size: 14)
-                                }
-                                .padding(WLSpacing.m)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .wlCardSurface(
-                                    fill: LinearGradient(
-                                        colors: [Color.white.opacity(0.98), WLPalette.surfaceMuted],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    shadowColor: WLElevation.shadow.opacity(0.30),
-                                    radius: WLCorner.m
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+                if !starterPrompts.isEmpty {
+                    promptSection
                 }
 
                 composer
@@ -92,24 +178,37 @@ struct StrategistChatView: View {
 
     private var hero: some View {
         WLHeroSurface {
-            VStack(alignment: .leading, spacing: WLSpacing.l) {
-                HStack(spacing: WLSpacing.s) {
-                    WLStatusBadge(
-                        title: "Trusted strategist",
-                        systemImage: "sparkles",
-                        tone: .accent,
-                        style: .heroGlass
-                    )
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: presentation.badgeTitle,
+                            systemImage: "sparkles",
+                            tone: .accent,
+                            style: .heroGlass
+                        )
 
-                    WLPill(title: model.dailyHomePayload.state.title, tone: .neutral, style: .heroGlass)
+                        WLPill(title: "Shared thread", tone: .neutral, style: .heroGlass)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: presentation.badgeTitle,
+                            systemImage: "sparkles",
+                            tone: .accent,
+                            style: .heroGlass
+                        )
+
+                        WLPill(title: "Shared thread", tone: .neutral, style: .heroGlass)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: WLSpacing.s) {
-                    Text("Ask for a recommendation that uses your real context.")
+                    Text(presentation.headline)
                         .font(WLTypography.hero)
                         .foregroundStyle(.white)
 
-                    Text(heroSubtitle)
+                    Text(presentation.summary)
                         .font(WLTypography.body)
                         .foregroundStyle(Color.white.opacity(0.88))
                 }
@@ -117,40 +216,69 @@ struct StrategistChatView: View {
         }
     }
 
-    private var heroSubtitle: String {
-        if let linkedAnalysis {
-            return "This thread can reference \(linkedAnalysis.resolvedProduct.name), your current goals, and what the app already remembers."
-        }
-        return "The strategist should interpret what matters now, not restate your last scan."
-    }
-
-    private var memoryStrip: some View {
+    private var contextSection: some View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
             WLSectionHeader(
-                title: "What I’m remembering",
-                subtitle: "Signals and decisions already shaping the recommendation.",
+                title: "What strategist is using right now",
+                subtitle: "Ground the answer in live context, not just the surface that opened chat.",
                 systemImage: "brain.head.profile"
             )
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: WLSpacing.s) {
-                    ForEach(relevantMemory) { item in
-                        WLCompactCard {
-                            VStack(alignment: .leading, spacing: WLSpacing.xs) {
-                                Text(item.title)
-                                    .font(WLTypography.captionStrong)
-                                    .foregroundStyle(WLPalette.ink)
+            ForEach(contextCards) { card in
+                StrategistContextCard(card: card)
+            }
+        }
+    }
 
-                                Text(item.summary)
-                                    .font(WLTypography.caption)
-                                    .foregroundStyle(WLPalette.inkSoft)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            .frame(width: 220, alignment: .leading)
-                        }
+    private var conversationSection: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Conversation",
+                subtitle: "One shared strategist thread across Home, Scan, Check-in, and Profile.",
+                systemImage: "message"
+            )
+
+            ForEach(thread.messages) { message in
+                StrategistMessageBubble(message: message)
+            }
+        }
+    }
+
+    private var promptSection: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Suggested prompts",
+                subtitle: "Tuned to the current read, weekly layer, and latest body signal.",
+                systemImage: "sparkles"
+            )
+
+            ForEach(starterPrompts, id: \.self) { prompt in
+                Button {
+                    draft = prompt
+                } label: {
+                    HStack(spacing: WLSpacing.s) {
+                        Text(prompt)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.ink)
+                            .multilineTextAlignment(.leading)
+
+                        Spacer(minLength: 0)
+
+                        WLIcon(systemName: "arrow.up.left", color: WLPalette.rose, size: 14)
                     }
+                    .padding(WLSpacing.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .wlCardSurface(
+                        fill: LinearGradient(
+                            colors: [Color.white.opacity(0.98), WLPalette.surfaceMuted],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        shadowColor: WLElevation.shadow.opacity(0.30),
+                        radius: WLCorner.m
+                    )
                 }
-                .padding(.vertical, 2)
+                .buttonStyle(.plain)
             }
         }
     }
@@ -160,7 +288,7 @@ struct StrategistChatView: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "Ask something specific",
-                    subtitle: "The tighter the question, the more useful the recommendation.",
+                    subtitle: "Ask for one action, one reason, or one swap.",
                     systemImage: "text.bubble"
                 )
 
@@ -178,7 +306,7 @@ struct StrategistChatView: View {
                         )
 
                     if draft.isEmpty {
-                        Text("Should this stay in my routine, what matters most today, or what should I avoid next?")
+                        Text(presentation.composerPlaceholder)
                             .font(WLTypography.body)
                             .foregroundStyle(WLPalette.inkSoft)
                             .padding(.horizontal, 24)
@@ -187,17 +315,69 @@ struct StrategistChatView: View {
                     }
                 }
 
-                HStack(spacing: WLSpacing.s) {
-                    WLSecondaryButton(title: "Use strategist note") {
-                        draft = model.dailyHomePayload.strategistNote.summary
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: WLSpacing.s) {
+                        WLSecondaryButton(title: presentation.composerSeedTitle) {
+                            draft = presentation.composerSeedPrompt
+                        }
+
+                        WLPrimaryButton(title: "Send", systemImage: "arrow.up.circle.fill") {
+                            sendMessage()
+                        }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
-                    WLPrimaryButton(title: "Send", systemImage: "arrow.up.circle.fill") {
-                        sendMessage()
+                    VStack(spacing: WLSpacing.s) {
+                        WLPrimaryButton(title: "Send", systemImage: "arrow.up.circle.fill") {
+                            sendMessage()
+                        }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        WLSecondaryButton(title: presentation.composerSeedTitle) {
+                            draft = presentation.composerSeedPrompt
+                        }
                     }
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+        }
+    }
+
+    private var linkedVerdictTitle: String {
+        switch linkedScanEvent?.analysis.verdict {
+        case .good:
+            return "Strong fit"
+        case .adjust:
+            return "Adjustable fit"
+        case .avoid:
+            return "Lower-fit"
+        case .needsMoreInfo:
+            return "Needs more input"
+        case nil:
+            return "Current read"
+        }
+    }
+
+    private var linkedVerdictTone: WLStatusBadge.Tone {
+        switch linkedScanEvent?.analysis.verdict {
+        case .good:
+            return .success
+        case .adjust, .needsMoreInfo:
+            return .accent
+        case .avoid:
+            return .caution
+        case nil:
+            return .accent
+        }
+    }
+
+    private func linkedReadTitle(for analysis: ScanAnalysis) -> String {
+        switch analysis.source {
+        case .mealPhoto:
+            return "Meal Snapshot"
+        case .menuPhoto:
+            return "Menu Scanner"
+        default:
+            return analysis.resolvedProduct.name
         }
     }
 
@@ -206,6 +386,30 @@ struct StrategistChatView: View {
         guard !trimmed.isEmpty else { return }
         model.sendStrategistMessage(trimmed, entryPoint: entryPoint, linkedAnalysis: linkedAnalysis)
         draft = ""
+    }
+}
+
+private struct StrategistContextCard: View {
+    let card: StrategistContextCardData
+
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                WLStatusBadge(
+                    title: card.badgeTitle,
+                    systemImage: card.badgeSymbol,
+                    tone: card.badgeTone
+                )
+
+                Text(card.title)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(card.summary)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+            }
+        }
     }
 }
 

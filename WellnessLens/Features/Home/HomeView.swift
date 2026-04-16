@@ -4,10 +4,20 @@ struct HomeView: View {
     @Environment(AppModel.self) private var model
 
     @State private var strategistEntryPoint: StrategistEntryPoint?
+    @State private var showPantry = false
+    @State private var contextExpanded = false
     @State private var sampleReadsExpanded = false
 
     private var payload: DailyHomePayload {
         model.dailyHomePayload
+    }
+
+    private var brief: DailyBrief {
+        model.dailyBrief
+    }
+
+    private var surfaceContract: DailyHomePayloadV2 {
+        model.dailyHomePayloadV2
     }
 
     var body: some View {
@@ -16,53 +26,56 @@ struct HomeView: View {
                 payload: payload,
                 primaryGoal: model.activeGoals.first,
                 primaryAction: handleNextAction,
-                openStrategist: { strategistEntryPoint = .home }
+                secondaryActionTitle: heroSecondaryActionTitle,
+                secondaryActionSystemImage: heroSecondaryActionSystemImage,
+                secondaryAction: handleHeroSecondaryAction
             )
 
             HomeSignalSection(payload: payload, saveCheckIn: openCheckIn)
 
-            if payload.state == .calibrating, let firstWeekPlan = model.firstWeekPlan {
-                HomeFirstWeekPlanSection(firstWeekPlan: firstWeekPlan)
+            if let primaryModule = surfaceContract.primaryModule {
+                moduleSection(primaryModule)
             }
 
-            if !model.activeGoals.isEmpty {
-                HomeGoalsSection(goals: model.activeGoals)
-            }
-
-            if let recommendedSwap = payload.recommendedSwap {
-                HomeRecommendedSwapCard(
-                    suggestion: recommendedSwap,
-                    openScan: openScan,
-                    askStrategist: { strategistEntryPoint = .scan }
+            if !surfaceContract.secondaryModules.isEmpty {
+                HomeMoreContextCard(
+                    moduleTitles: surfaceContract.secondaryModules.map(\.title),
+                    whyNow: surfaceContract.hero.whyNow,
+                    deferredCount: surfaceContract.deferredModules.count,
+                    isExpanded: $contextExpanded
                 )
             }
 
-            if !payload.openLoops.isEmpty {
-                HomeOpenLoopsSection(openLoops: payload.openLoops)
+            if contextExpanded {
+                ForEach(surfaceContract.secondaryModules) { module in
+                    moduleSection(module)
+                }
             }
-
-            if !payload.recentWins.isEmpty {
-                HomeRecentWinsSection(recentWins: payload.recentWins)
-            }
-
-            HomeStrategistNoteCard(
-                note: payload.strategistNote,
-                openStrategist: { strategistEntryPoint = .home }
-            )
-
-            if !model.routines.isEmpty {
-                HomeRoutineSection(routines: model.routines)
-            }
-
-            HomeSampleReadsSection(
-                packs: model.demoScenarioPacks,
-                isExpanded: $sampleReadsExpanded,
-                runScenario: runScenario
-            )
         }
         .navigationTitle("Today")
         .sheet(item: $strategistEntryPoint) { entryPoint in
             StrategistChatView(entryPoint: entryPoint)
+        }
+        .sheet(isPresented: $showPantry) {
+            PantryView()
+        }
+    }
+
+    private var heroSecondaryActionTitle: String {
+        switch payload.nextAction.kind {
+        case .askStrategist:
+            "Open scan"
+        default:
+            "Ask strategist"
+        }
+    }
+
+    private var heroSecondaryActionSystemImage: String {
+        switch payload.nextAction.kind {
+        case .askStrategist:
+            "viewfinder"
+        default:
+            "message"
         }
     }
 
@@ -85,6 +98,28 @@ struct HomeView: View {
         }
     }
 
+    private func handleDailyBriefAction() {
+        switch brief.cta.kind {
+        case .scanBreakfast, .scanSnack, .mealSnapshot:
+            openScan()
+        case .updateFeedback:
+            openCheckIn()
+        case .openHistory:
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                model.selectedTab = .history
+            }
+        }
+    }
+
+    private func handleHeroSecondaryAction() {
+        switch payload.nextAction.kind {
+        case .askStrategist:
+            openScan()
+        default:
+            strategistEntryPoint = .home
+        }
+    }
+
     private func openScan() {
         withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
             model.selectedTab = .scan
@@ -102,27 +137,245 @@ struct HomeView: View {
             await model.runDemoScenario(scenario)
         }
     }
+
+    @ViewBuilder
+    private func moduleSection(_ module: HomeSurfaceModule) -> some View {
+        switch module {
+        case .firstWeekPlan:
+            if let firstWeekPlan = model.firstWeekPlan {
+                HomeFirstWeekPlanSection(firstWeekPlan: firstWeekPlan)
+            }
+        case .dailyBrief:
+            HomeDailyBriefCard(
+                brief: brief,
+                primaryAction: handleDailyBriefAction
+            )
+        case .activeGoals:
+            HomeGoalsSection(goals: model.activeGoals)
+        case .recommendedSwap:
+            if let recommendedSwap = payload.recommendedSwap {
+                HomeRecommendedSwapCard(
+                    suggestion: recommendedSwap,
+                    openScan: openScan,
+                    askStrategist: { strategistEntryPoint = .scan }
+                )
+            }
+        case .openLoops:
+            HomeOpenLoopsSection(
+                openLoops: payload.openLoops,
+                openCheckIn: openCheckIn,
+                openHistory: {
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                        model.selectedTab = .history
+                    }
+                }
+            )
+        case .recentWins:
+            HomeRecentWinsSection(recentWins: payload.recentWins)
+        case .strategistNote:
+            HomeStrategistNoteCard(
+                note: payload.strategistNote,
+                openStrategist: { strategistEntryPoint = .home }
+            )
+        case .routineMemory:
+            HomeRoutineSection(routines: model.routines)
+        case .pantry:
+            HomePantrySection(
+                items: Array(model.visiblePantryItems.prefix(3)),
+                suggestions: model.hasAccess(to: .pantrySuggestions) ? model.pantrySuggestions : [],
+                isUnlocked: model.hasAccess(to: .pantryMVP),
+                openPantry: {
+                    showPantry = true
+                }
+            )
+        case .sampleReads:
+            HomeSampleReadsSection(
+                packs: model.demoScenarioPacks,
+                isExpanded: $sampleReadsExpanded,
+                runScenario: runScenario
+            )
+        }
+    }
+}
+
+private struct HomePantrySection: View {
+    let items: [PantryItem]
+    let suggestions: [PantrySuggestion]
+    let isUnlocked: Bool
+    let openPantry: () -> Void
+
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Pantry",
+                    subtitle: "Keep stronger defaults visible before convenience takes over.",
+                    systemImage: "shippingbox"
+                )
+
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text(item.title)
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(item.summary)
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                }
+
+                let hasSuggestion = !suggestions.isEmpty
+
+                if isUnlocked, let suggestion = suggestions.first {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Next pantry move")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+
+                        Text(suggestion.summary)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                } else if let supportingMessage = PantryPresentationCopy.supportingMessage(
+                    isUnlocked: isUnlocked,
+                    hasSuggestion: hasSuggestion
+                ) {
+                    Text(supportingMessage)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                WLSecondaryButton(
+                    title: isUnlocked ? "Open pantry" : "Preview pantry",
+                    systemImage: isUnlocked ? "arrow.up.right.circle" : "shippingbox"
+                ) {
+                    openPantry()
+                }
+            }
+        }
+    }
+}
+
+private struct HomeMoreContextCard: View {
+    let moduleTitles: [String]
+    let whyNow: String
+    let deferredCount: Int
+    @Binding var isExpanded: Bool
+
+    private var modulePreview: String {
+        let preview = Array(moduleTitles.prefix(3))
+        if preview.isEmpty {
+            return "Keep the extra context close, but not in the way."
+        }
+
+        let joined = preview.joined(separator: ", ")
+        if moduleTitles.count > 3 || deferredCount > 0 {
+            return "Queued now: \(joined), and a little more only if today's first decision changes."
+        }
+        return "Queued now: \(joined)."
+    }
+
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "More for today",
+                    subtitle: whyNow,
+                    systemImage: "square.stack.3d.up"
+                )
+
+                Text(modulePreview)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                Button {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: WLSpacing.s) {
+                        Text(isExpanded ? "Hide extra context" : "Show extra context")
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Spacer(minLength: 0)
+
+                        WLIcon(
+                            systemName: isExpanded ? "chevron.up" : "chevron.down",
+                            color: WLPalette.rose,
+                            size: 14
+                        )
+                    }
+                    .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private struct HomeDailyBriefCard: View {
+    let brief: DailyBrief
+    let primaryAction: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Daily Brief",
+                    subtitle: "What matters before the next real decision.",
+                    systemImage: "sunrise"
+                )
+
+                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                    Text(brief.headline)
+                        .font(WLTypography.title)
+                        .foregroundStyle(WLPalette.ink)
+
+                    Text(brief.riskHeadline)
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                HStack(spacing: WLSpacing.s) {
+                    WLPill(title: "Priority: \(brief.nutritionPriority)", tone: .neutral)
+                    WLStatusBadge(title: "Today", systemImage: "scope", tone: .accent)
+                }
+
+                Text(brief.cta.subtitle)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                WLPrimaryButton(
+                    title: brief.cta.title,
+                    systemImage: "arrow.up.right.circle"
+                ) {
+                    primaryAction()
+                }
+            }
+        }
+    }
 }
 
 private struct HomeDailyHero: View {
     let payload: DailyHomePayload
     let primaryGoal: ActiveGoal?
     let primaryAction: () -> Void
-    let openStrategist: () -> Void
+    let secondaryActionTitle: String
+    let secondaryActionSystemImage: String
+    let secondaryAction: () -> Void
 
     var body: some View {
         WLHeroSurface {
             VStack(alignment: .leading, spacing: WLSpacing.l) {
-                HStack(spacing: WLSpacing.s) {
-                    WLStatusBadge(
-                        title: payload.state.title,
-                        systemImage: stateSymbol,
-                        tone: stateTone,
-                        style: .heroGlass
-                    )
+                ViewThatFits(in: .vertical) {
+                    HStack(spacing: WLSpacing.s) {
+                        heroStatusBadges
+                    }
 
-                    if let primaryGoal {
-                        WLPill(title: primaryGoal.focusMetric, tone: .neutral, style: .heroGlass)
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        heroStatusBadges
                     }
                 }
 
@@ -139,31 +392,51 @@ private struct HomeDailyHero: View {
                 }
 
                 WLHeroGlassGroup {
-                    HStack(spacing: WLSpacing.s) {
-                        metricCard(title: "Body signal", value: payload.bodySignal.title)
-                        metricCard(title: "Next action", value: payload.nextAction.title)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: WLSpacing.s) {
+                            metricCard(title: "Body signal", value: payload.bodySignal.title)
+                            metricCard(title: "Next action", value: payload.nextAction.title)
+                        }
+
+                        VStack(spacing: WLSpacing.s) {
+                            metricCard(title: "Body signal", value: payload.bodySignal.title)
+                            metricCard(title: "Next action", value: payload.nextAction.title)
+                        }
                     }
                 }
 
-                WLHeroGlassGroup {
-                    HStack(spacing: WLSpacing.s) {
-                        WLPrimaryButton(
-                            title: payload.nextAction.cta,
-                            systemImage: "arrow.up.right.circle",
-                            chrome: .standard
-                        ) {
-                            primaryAction()
-                        }
+                VStack(spacing: WLSpacing.s) {
+                    WLPrimaryButton(
+                        title: payload.nextAction.cta,
+                        systemImage: "arrow.up.right.circle",
+                        chrome: .heroPrimary
+                    ) {
+                        primaryAction()
+                    }
 
-                        WLSecondaryButton(
-                            title: "Ask strategist",
-                            systemImage: "message"
-                        ) {
-                            openStrategist()
-                        }
+                    WLSecondaryButton(
+                        title: secondaryActionTitle,
+                        systemImage: secondaryActionSystemImage,
+                        chrome: .heroSecondary
+                    ) {
+                        secondaryAction()
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var heroStatusBadges: some View {
+        WLStatusBadge(
+            title: payload.state.title,
+            systemImage: stateSymbol,
+            tone: stateTone,
+            style: .heroGlass
+        )
+
+        if let primaryGoal {
+            WLPill(title: primaryGoal.focusMetric, tone: .neutral, style: .heroGlass)
         }
     }
 
@@ -224,28 +497,23 @@ private struct HomeSignalSection: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "Body signal",
-                    subtitle: "A product recommendation should adapt to how the week is actually feeling.",
+                    subtitle: "Use today's body signal as the lens for the next decision.",
                     systemImage: "waveform.path.ecg"
                 )
 
-                HStack(alignment: .top, spacing: WLSpacing.s) {
-                    WLStatusBadge(
-                        title: payload.bodySignal.title,
-                        systemImage: "heart.text.square",
-                        tone: tone
-                    )
-
-                    Spacer(minLength: 0)
-
-                    WLSecondaryButton(title: "Update check-in") {
-                        saveCheckIn()
-                    }
-                    .frame(maxWidth: 148)
-                }
+                WLStatusBadge(
+                    title: payload.bodySignal.title,
+                    systemImage: "heart.text.square",
+                    tone: tone
+                )
 
                 Text(payload.bodySignal.summary)
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
+
+                WLSecondaryButton(title: "Update check-in", systemImage: "heart.text.square") {
+                    saveCheckIn()
+                }
             }
         }
     }
@@ -305,7 +573,7 @@ private struct HomeGoalsSection: View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
             WLSectionHeader(
                 title: "Active goals",
-                subtitle: "These are the outcomes currently steering Home, scan recommendations, and strategist advice.",
+                subtitle: "These goals should steer Home, scans, and strategist.",
                 systemImage: "target"
             )
 
@@ -375,7 +643,7 @@ private struct HomeRecommendedSwapCard: View {
                     .padding(.vertical, 2)
                 }
 
-                HStack(spacing: WLSpacing.s) {
+                VStack(spacing: WLSpacing.s) {
                     WLPrimaryButton(title: "Scan another product", systemImage: "viewfinder") {
                         openScan()
                     }
@@ -391,12 +659,14 @@ private struct HomeRecommendedSwapCard: View {
 
 private struct HomeOpenLoopsSection: View {
     let openLoops: [OpenLoop]
+    let openCheckIn: () -> Void
+    let openHistory: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
             WLSectionHeader(
                 title: "Open loops",
-                subtitle: "These are the decisions or experiments still shaping your week.",
+                subtitle: "The fastest way to close these is a quick check-in or one cleaner retest.",
                 systemImage: "ellipsis.circle"
             )
 
@@ -410,6 +680,28 @@ private struct HomeOpenLoopsSection: View {
                         Text(loop.summary)
                             .font(WLTypography.body)
                             .foregroundStyle(WLPalette.inkSoft)
+                    }
+                }
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: WLSpacing.s) {
+                    WLPrimaryButton(title: "Update check-in", systemImage: "heart.text.square") {
+                        openCheckIn()
+                    }
+
+                    WLSecondaryButton(title: "Open history", systemImage: "clock.arrow.circlepath") {
+                        openHistory()
+                    }
+                }
+
+                VStack(spacing: WLSpacing.s) {
+                    WLPrimaryButton(title: "Update check-in", systemImage: "heart.text.square") {
+                        openCheckIn()
+                    }
+
+                    WLSecondaryButton(title: "Open history", systemImage: "clock.arrow.circlepath") {
+                        openHistory()
                     }
                 }
             }
@@ -454,7 +746,7 @@ private struct HomeStrategistNoteCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: note.title,
-                    subtitle: "A contextual read that should feel more intimate than a generic app tip.",
+                    subtitle: "A contextual read, not a generic app tip.",
                     systemImage: "sparkles"
                 )
 
@@ -462,7 +754,7 @@ private struct HomeStrategistNoteCard: View {
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.ink)
 
-                WLPrimaryButton(title: "Continue with strategist", systemImage: "message") {
+                WLSecondaryButton(title: "Open strategist", systemImage: "message") {
                     openStrategist()
                 }
             }
@@ -477,7 +769,7 @@ private struct HomeRoutineSection: View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
             WLSectionHeader(
                 title: "Routine memory",
-                subtitle: "Products already promoted from one-off reads into repeatable decisions.",
+                subtitle: "Choices already promoted from one-off read to repeat default.",
                 systemImage: "tray.full"
             )
 
@@ -515,7 +807,7 @@ private struct HomeSampleReadsSection: View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
             WLSectionHeader(
                 title: "Sample reads",
-                subtitle: "Demo content stays available, but only as a secondary way to learn the product language.",
+                subtitle: "Demo reads stay available, but only as a secondary learning path.",
                 systemImage: "sparkles.rectangle.stack"
             )
 

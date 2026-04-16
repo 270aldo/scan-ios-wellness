@@ -34,7 +34,9 @@ struct CheckInView: View {
     @State private var bloatingRelief = 3
     @State private var cravingControl = 3
     @State private var mood = 3
+    @State private var satiety = 3
     @State private var note = ""
+    @State private var readHelpful = true
     @State private var showSavedState = false
     @State private var strategistEntryPoint: StrategistEntryPoint?
 
@@ -64,7 +66,34 @@ struct CheckInView: View {
                 CheckInOpenLoopCard(openLoop: model.dailyHomePayload.openLoops[0])
             }
 
-            if !model.weeklyInsights.isEmpty {
+            if let routine = model.routines.first {
+                CheckInRoutineReminderCard(
+                    routine: routine,
+                    tone: model.dailyHomePayload.bodySignal.tone,
+                    reviewMemory: {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                            model.selectedTab = .history
+                        }
+                    }
+                )
+            }
+
+            if model.services.featureFlags.weeklyInsightV2, let weeklyNarrative = model.weeklyNarrative {
+                CheckInWeeklyNarrativeCard(
+                    narrative: weeklyNarrative,
+                    isUnlocked: model.hasAccess(to: .weeklyInsightV2),
+                    unlock: {
+                        _ = model.requireAccess(
+                            to: .weeklyInsightV2,
+                            surface: .weeklyNarrative,
+                            previewLines: [
+                                weeklyNarrative.headline,
+                                weeklyNarrative.patternSummary
+                            ]
+                        )
+                    }
+                )
+            } else if !model.weeklyInsights.isEmpty {
                 CheckInInsightsCard(insight: model.weeklyInsights[0])
             }
         }
@@ -77,11 +106,21 @@ struct CheckInView: View {
     private var hero: some View {
         WLPrimaryCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
-                HStack(spacing: WLSpacing.s) {
-                    WLStatusBadge(title: "Daily check-in", systemImage: "heart", tone: .accent)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: WLSpacing.s) {
+                        WLStatusBadge(title: "Daily check-in", systemImage: "heart", tone: .accent)
 
-                    if showSavedState {
-                        WLStatusBadge(title: "Saved", systemImage: "checkmark.circle", tone: .success)
+                        if showSavedState {
+                            WLStatusBadge(title: "Saved", systemImage: "checkmark.circle", tone: .success)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLStatusBadge(title: "Daily check-in", systemImage: "heart", tone: .accent)
+
+                        if showSavedState {
+                            WLStatusBadge(title: "Saved", systemImage: "checkmark.circle", tone: .success)
+                        }
                     }
                 }
 
@@ -111,7 +150,7 @@ struct CheckInView: View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
             WLSectionHeader(
                 title: "Core signals",
-                subtitle: "Keep it short. The goal is signal quality, not journaling homework.",
+                subtitle: "Keep it short. The goal is signal quality, not journaling.",
                 systemImage: "waveform.path.ecg"
             )
 
@@ -146,6 +185,14 @@ struct CheckInView: View {
                 rightLabel: "Lifted",
                 states: ["Flat", "Low", "Even", "Good", "Lifted"]
             )
+
+            CheckInMetricCard(
+                title: "Satiety",
+                selection: $satiety,
+                leftLabel: "Hungry fast",
+                rightLabel: "Stayed full",
+                states: ["Hungry fast", "Short-lived", "Mixed", "Steady", "Stayed full"]
+            )
         }
     }
 
@@ -154,7 +201,7 @@ struct CheckInView: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "Optional note",
-                    subtitle: "Only add context if there is something you want the strategist to remember later.",
+                    subtitle: "Only add context if you want strategist to remember it later.",
                     systemImage: "square.and.pencil"
                 )
 
@@ -181,13 +228,43 @@ struct CheckInView: View {
                     }
                 }
 
-                HStack(spacing: WLSpacing.s) {
-                    WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
-                        strategistEntryPoint = .checkIn
+                if let latestScanEvent = model.latestScanEvent {
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Last scan follow-up")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(latestScanEvent.analysis.followUpPrompt)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        Picker("Did this read help?", selection: $readHelpful) {
+                            Text("Helpful").tag(true)
+                            Text("Not really").tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: WLSpacing.s) {
+                        WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
+                            strategistEntryPoint = .checkIn
+                        }
+
+                        WLPrimaryButton(title: "Save check-in", systemImage: "checkmark") {
+                            saveCheckIn()
+                        }
                     }
 
-                    WLPrimaryButton(title: "Save check-in", systemImage: "checkmark") {
-                        saveCheckIn()
+                    VStack(spacing: WLSpacing.s) {
+                        WLPrimaryButton(title: "Save check-in", systemImage: "checkmark") {
+                            saveCheckIn()
+                        }
+
+                        WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
+                            strategistEntryPoint = .checkIn
+                        }
                     }
                 }
             }
@@ -201,10 +278,14 @@ struct CheckInView: View {
             bloatingRelief: bloatingRelief,
             cravingControl: cravingControl,
             mood: mood,
-            note: note
+            note: note,
+            satiety: satiety,
+            readHelpful: model.latestScanEvent == nil ? nil : readHelpful,
+            linkedScanIDs: model.latestScanEvent.map { [$0.id] }
         )
 
         note = ""
+        satiety = 3
         showSavedState = true
 
         Task {
@@ -295,7 +376,7 @@ private struct CheckInOpenLoopCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.s) {
                 WLSectionHeader(
                     title: "Open loop to keep in mind",
-                    subtitle: "Check-ins are strongest when they connect to an actual decision the app is tracking.",
+                    subtitle: "Check-ins are strongest when they connect to a real tracked decision.",
                     systemImage: "ellipsis.circle"
                 )
 
@@ -319,7 +400,7 @@ private struct CheckInInsightsCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.s) {
                 WLSectionHeader(
                     title: insight.title,
-                    subtitle: "The weekly layer should become sharper as scans and check-ins repeat.",
+                    subtitle: "The weekly layer should sharpen as scans and check-ins repeat.",
                     systemImage: "sparkles"
                 )
 
@@ -330,6 +411,113 @@ private struct CheckInInsightsCard: View {
                 Text(insight.callToAction)
                     .font(WLTypography.captionStrong)
                     .foregroundStyle(WLPalette.rose)
+            }
+        }
+    }
+}
+
+private struct CheckInRoutineReminderCard: View {
+    let routine: RoutineItem
+    let tone: SignalTone
+    let reviewMemory: () -> Void
+
+    private var subtitle: String {
+        switch tone {
+        case .caution:
+            "If today already feels soft, fall back to the easiest stable default before you improvise."
+        case .supportive:
+            "A steadier day is the best time to confirm which defaults deserve to stay easy."
+        case .neutral:
+            "Use the easiest repeat choice as a baseline before you test anything louder."
+        }
+    }
+
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                WLSectionHeader(
+                    title: "Protect your easiest default",
+                    subtitle: subtitle,
+                    systemImage: "tray.full"
+                )
+
+                Text(routine.productName)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(routine.note)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                Text(routine.cadenceSummary)
+                    .font(WLTypography.captionStrong)
+                    .foregroundStyle(WLPalette.rose)
+
+                WLSecondaryButton(title: "Review memory", systemImage: "clock.arrow.circlepath") {
+                    reviewMemory()
+                }
+            }
+        }
+    }
+}
+
+private struct CheckInWeeklyNarrativeCard: View {
+    let narrative: WeeklyInsightNarrative
+    let isUnlocked: Bool
+    let unlock: () -> Void
+
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                WLSectionHeader(
+                    title: narrative.headline,
+                    subtitle: "The weekly layer gets clearer once repeat scans and body signals start agreeing.",
+                    systemImage: "sparkles"
+                )
+
+                Text(narrative.patternSummary)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                if isUnlocked {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Protect")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+                        Text(narrative.whatToProtect)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        Text("Reduce")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+                            .padding(.top, WLSpacing.xs)
+                        Text(narrative.whatToReduce)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        Text("Next experiment")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+                            .padding(.top, WLSpacing.xs)
+                        Text(narrative.nextExperiment)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+
+                    WLPill(
+                        title: "Confidence \(Int((narrative.confidence * 100).rounded()))",
+                        tone: .soft
+                    )
+                } else {
+                    Text("Preview: weekly narrative is ready, but the deeper protect/reduce plan unlocks with Plus.")
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+
+                    WLSecondaryButton(title: "Unlock weekly narrative", systemImage: "sparkles") {
+                        unlock()
+                    }
+                }
             }
         }
     }

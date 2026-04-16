@@ -19,6 +19,18 @@ struct AnalyzeProductResponse: Codable {
     let analysis: ScanAnalysis
 }
 
+struct AnalyzeStructuredScanRequest: Codable {
+    let input: ScanInput
+    let profile: UserProfile
+    let recentScans: [ScanEvent]
+    let recentCheckIns: [CheckInEvent]
+    let installID: String
+}
+
+struct AnalyzeStructuredScanResponse: Codable {
+    let analysis: AnalysisEnvelope
+}
+
 struct ResolveScanRequest: Codable {
     let input: ScanInput
     let installID: String
@@ -38,6 +50,11 @@ struct CompareProductsRequest: Codable {
 struct SaveCheckInRequest: Codable {
     let checkIn: CheckInEntry
     let userContext: UserContext
+    let installID: String
+}
+
+struct SaveCheckInEventRequest: Codable {
+    let event: CheckInEvent
     let installID: String
 }
 
@@ -75,6 +92,11 @@ struct DailyHomeRequest: Codable {
 
 struct DailyHomeResponse: Codable {
     let payload: DailyHomePayload
+    let payloadV2: DailyHomePayloadV2?
+}
+
+struct DailyBriefResponse: Codable {
+    let brief: DailyBrief
 }
 
 struct AlternativesRequest: Codable {
@@ -85,6 +107,17 @@ struct AlternativesRequest: Codable {
 
 struct AlternativesResponse: Codable {
     let alternatives: [AlternativeSuggestion]
+}
+
+struct HistoryEventsResponse: Codable {
+    let scans: [ScanEvent]
+    let checkIns: [CheckInEvent]
+    let favorites: [FavoriteItem]
+}
+
+struct SaveFavoriteItemRequest: Codable {
+    let favorite: FavoriteItem
+    let installID: String
 }
 
 protocol IdentityProviding: Sendable {
@@ -99,14 +132,19 @@ protocol AppCheckTokenProviding: Sendable {
 
 protocol WellnessBackendAPI: Sendable {
     func analyzeProduct(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis
+    func analyzeStructuredScan(input: ScanInput, profile: UserProfile, recentScans: [ScanEvent], recentCheckIns: [CheckInEvent]) async throws -> AnalysisEnvelope
     func resolveScan(input: ScanInput) async throws -> ResolveScanResponse
     func compareProducts(left: ScanAnalysis, right: ScanAnalysis) async throws -> ProductComparison
     func saveCheckIn(_ checkIn: CheckInEntry, userContext: UserContext) async throws
+    func saveCheckInEvent(_ event: CheckInEvent) async throws
     func completeOnboarding(profile: UserProfile, activeGoals: [ActiveGoal], firstWeekPlan: FirstWeekPlan?) async throws
     func getWeeklyInsights(userContext: UserContext) async throws -> [WeeklyInsight]
-    func fetchDailyHome(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyHomePayload
+    func fetchDailyHome(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyHomeResponse
+    func fetchDailyBrief(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyBrief
+    func fetchHistoryEvents() async throws -> HistoryEventsResponse
     func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion]
     func saveScanDecision(_ decision: ScanDecision) async throws
+    func saveFavoriteItem(_ favorite: FavoriteItem) async throws
     func upsertMemoryItems(_ memoryItems: [MemoryItem]) async throws
 }
 
@@ -224,6 +262,27 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         return response.analysis
     }
 
+    func analyzeStructuredScan(
+        input: ScanInput,
+        profile: UserProfile,
+        recentScans: [ScanEvent],
+        recentCheckIns: [CheckInEvent]
+    ) async throws -> AnalysisEnvelope {
+        let installID = await identityProvider.installID()
+        let response: AnalyzeStructuredScanResponse = try await send(
+            path: "v1/scan/analyze",
+            method: "POST",
+            body: AnalyzeStructuredScanRequest(
+                input: input,
+                profile: profile,
+                recentScans: recentScans,
+                recentCheckIns: recentCheckIns,
+                installID: installID
+            )
+        )
+        return response.analysis
+    }
+
     func resolveScan(input: ScanInput) async throws -> ResolveScanResponse {
         let installID = await identityProvider.installID()
         return try await send(path: "resolveScan", method: "POST", body: ResolveScanRequest(input: input, installID: installID))
@@ -245,6 +304,15 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
             path: "saveCheckIn",
             method: "POST",
             body: SaveCheckInRequest(checkIn: checkIn, userContext: userContext, installID: installID)
+        )
+    }
+
+    func saveCheckInEvent(_ event: CheckInEvent) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/scan/feedback",
+            method: "POST",
+            body: SaveCheckInEventRequest(event: event, installID: installID)
         )
     }
 
@@ -279,14 +347,32 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
     func fetchDailyHome(
         profile: UserProfile,
         activeGoals: [ActiveGoal]
-    ) async throws -> DailyHomePayload {
+    ) async throws -> DailyHomeResponse {
         let installID = await identityProvider.installID()
-        let response: DailyHomeResponse = try await send(
+        return try await send(
             path: "v1/home",
             method: "POST",
             body: DailyHomeRequest(profile: profile, activeGoals: activeGoals, installID: installID)
         )
-        return response.payload
+    }
+
+    func fetchDailyBrief(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyBrief {
+        let installID = await identityProvider.installID()
+        let response: DailyBriefResponse = try await send(
+            path: "v1/daily-brief",
+            method: "POST",
+            body: DailyHomeRequest(profile: profile, activeGoals: activeGoals, installID: installID)
+        )
+        return response.brief
+    }
+
+    func fetchHistoryEvents() async throws -> HistoryEventsResponse {
+        let installID = await identityProvider.installID()
+        return try await send(
+            path: "v1/history",
+            method: "POST",
+            body: ["installID": installID]
+        )
     }
 
     func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion] {
@@ -305,6 +391,15 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
             path: "v1/scans/decision",
             method: "POST",
             body: SaveScanDecisionRequest(decision: decision, installID: installID)
+        )
+    }
+
+    func saveFavoriteItem(_ favorite: FavoriteItem) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/favorites",
+            method: "POST",
+            body: SaveFavoriteItemRequest(favorite: favorite, installID: installID)
         )
     }
 

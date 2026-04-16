@@ -199,6 +199,15 @@ enum ScanDecisionKind: String, Codable, CaseIterable, Identifiable {
             "Track this again"
         }
     }
+
+    var keepsLoopOpen: Bool {
+        switch self {
+        case .saveToRoutine, .swapInstead, .trackAgain:
+            true
+        case .avoidForNow, .askStrategist:
+            false
+        }
+    }
 }
 
 enum MemoryItemKind: String, Codable, CaseIterable, Identifiable {
@@ -266,7 +275,25 @@ struct UserProfile: Codable, Hashable {
     var eatingRhythm: EatingRhythm
     var supplementStyle: SupplementRoutineStyle
     var memoryEnabled: Bool
+    var ageRange: AgeRange
+    var restaurantFrequency: RestaurantFrequency
+    var nutritionPriorities: [DailyNutritionPriority]
+    var consentFlags: ConsentFlags
     var createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case userContext
+        case frictions
+        case guidanceStyle
+        case eatingRhythm
+        case supplementStyle
+        case memoryEnabled
+        case ageRange
+        case restaurantFrequency
+        case nutritionPriorities
+        case consentFlags
+        case createdAt
+    }
 
     static let starter = UserProfile(
         userContext: .starter,
@@ -275,6 +302,10 @@ struct UserProfile: Codable, Hashable {
         eatingRhythm: .flexible,
         supplementStyle: .simple,
         memoryEnabled: true,
+        ageRange: .thirties,
+        restaurantFrequency: .balanced,
+        nutritionPriorities: [.energy, .digestion, .skin],
+        consentFlags: .starter,
         createdAt: .now
     )
 
@@ -295,8 +326,94 @@ struct UserProfile: Codable, Hashable {
             eatingRhythm: .flexible,
             supplementStyle: .simple,
             memoryEnabled: true,
+            ageRange: .thirties,
+            restaurantFrequency: .balanced,
+            nutritionPriorities: defaultPriorities(for: context.goals),
+            consentFlags: .starter,
             createdAt: createdAt
         )
+    }
+
+    init(
+        userContext: UserContext,
+        frictions: [UserFriction],
+        guidanceStyle: GuidanceStyle,
+        eatingRhythm: EatingRhythm,
+        supplementStyle: SupplementRoutineStyle,
+        memoryEnabled: Bool,
+        ageRange: AgeRange,
+        restaurantFrequency: RestaurantFrequency,
+        nutritionPriorities: [DailyNutritionPriority],
+        consentFlags: ConsentFlags,
+        createdAt: Date
+    ) {
+        self.userContext = userContext
+        self.frictions = frictions
+        self.guidanceStyle = guidanceStyle
+        self.eatingRhythm = eatingRhythm
+        self.supplementStyle = supplementStyle
+        self.memoryEnabled = memoryEnabled
+        self.ageRange = ageRange
+        self.restaurantFrequency = restaurantFrequency
+        self.nutritionPriorities = nutritionPriorities
+        self.consentFlags = consentFlags
+        self.createdAt = createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        userContext = try container.decode(UserContext.self, forKey: .userContext)
+        frictions = try container.decode([UserFriction].self, forKey: .frictions)
+        guidanceStyle = try container.decode(GuidanceStyle.self, forKey: .guidanceStyle)
+        eatingRhythm = try container.decode(EatingRhythm.self, forKey: .eatingRhythm)
+        supplementStyle = try container.decode(SupplementRoutineStyle.self, forKey: .supplementStyle)
+        memoryEnabled = try container.decode(Bool.self, forKey: .memoryEnabled)
+        ageRange = try container.decodeIfPresent(AgeRange.self, forKey: .ageRange) ?? .thirties
+        restaurantFrequency = try container.decodeIfPresent(RestaurantFrequency.self, forKey: .restaurantFrequency) ?? .balanced
+        nutritionPriorities = try container.decodeIfPresent([DailyNutritionPriority].self, forKey: .nutritionPriorities) ?? Self.defaultPriorities(for: userContext.goals)
+        consentFlags = try container.decodeIfPresent(ConsentFlags.self, forKey: .consentFlags) ?? .starter
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(userContext, forKey: .userContext)
+        try container.encode(frictions, forKey: .frictions)
+        try container.encode(guidanceStyle, forKey: .guidanceStyle)
+        try container.encode(eatingRhythm, forKey: .eatingRhythm)
+        try container.encode(supplementStyle, forKey: .supplementStyle)
+        try container.encode(memoryEnabled, forKey: .memoryEnabled)
+        try container.encode(ageRange, forKey: .ageRange)
+        try container.encode(restaurantFrequency, forKey: .restaurantFrequency)
+        try container.encode(nutritionPriorities, forKey: .nutritionPriorities)
+        try container.encode(consentFlags, forKey: .consentFlags)
+        try container.encode(createdAt, forKey: .createdAt)
+    }
+
+    private static func defaultPriorities(for goals: [UserGoal]) -> [DailyNutritionPriority] {
+        var priorities: [DailyNutritionPriority] = []
+
+        for goal in goals {
+            switch goal {
+            case .steadyEnergy:
+                priorities.append(.energy)
+            case .gutCalm, .deBloat:
+                priorities.append(.digestion)
+            case .clearSkin:
+                priorities.append(.skin)
+            case .hormoneSupport:
+                priorities.append(.hormones)
+            case .leanStrength:
+                priorities.append(.bodyComposition)
+            }
+        }
+
+        if priorities.isEmpty {
+            priorities = [.energy, .digestion, .skin]
+        }
+
+        var seen = Set<DailyNutritionPriority>()
+        return priorities.filter { seen.insert($0).inserted }
     }
 }
 
@@ -412,6 +529,13 @@ struct ConversationTurnContext: Codable, Hashable {
     var recentProducts: [String]
     var openLoopSummaries: [String]
     var memorySummaries: [String]
+    var latestDecisionSummary: String?
+    var latestReadSummary: String?
+    var latestPatternTitle: String?
+    var latestPatternSummary: String?
+    var weeklyNarrativeHeadline: String?
+    var weeklyNarrativeSummary: String?
+    var weeklyNextExperiment: String?
 }
 
 struct TodayFocus: Codable, Hashable {
@@ -445,6 +569,362 @@ struct DailyHomePayload: Codable, Hashable {
     var openLoops: [OpenLoop]
     var strategistNote: StrategistNote
     var recentWins: [RecentWin]
+}
+
+enum HomeSurfaceModule: String, Codable, CaseIterable, Hashable, Identifiable {
+    case firstWeekPlan
+    case dailyBrief
+    case activeGoals
+    case recommendedSwap
+    case openLoops
+    case recentWins
+    case strategistNote
+    case routineMemory
+    case pantry
+    case sampleReads
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .firstWeekPlan:
+            "First week plan"
+        case .dailyBrief:
+            "Daily brief"
+        case .activeGoals:
+            "Goals"
+        case .recommendedSwap:
+            "Recommended swap"
+        case .openLoops:
+            "Open loops"
+        case .recentWins:
+            "Recent wins"
+        case .strategistNote:
+            "Strategist note"
+        case .routineMemory:
+            "Routine memory"
+        case .pantry:
+            "Pantry"
+        case .sampleReads:
+            "Sample reads"
+        }
+    }
+}
+
+struct HomeSurfacePlan: Hashable {
+    var primaryModule: HomeSurfaceModule?
+    var secondaryModules: [HomeSurfaceModule]
+}
+
+struct HomeSurfacePlanner {
+    func plan(
+        payload: DailyHomePayload,
+        hasFirstWeekPlan: Bool,
+        hasDailyBrief: Bool,
+        hasGoals: Bool,
+        hasRoutines: Bool,
+        hasPantry: Bool,
+        hasSampleReads: Bool
+    ) -> HomeSurfacePlan {
+        let primaryModule: HomeSurfaceModule? = {
+            if payload.state == .calibrating, hasFirstWeekPlan {
+                return .firstWeekPlan
+            }
+            if payload.recommendedSwap != nil {
+                return .recommendedSwap
+            }
+            if hasDailyBrief {
+                return .dailyBrief
+            }
+            if hasGoals {
+                return .activeGoals
+            }
+            return .strategistNote
+        }()
+
+        let orderedModules: [HomeSurfaceModule] = [
+            .dailyBrief,
+            .activeGoals,
+            .recommendedSwap,
+            .openLoops,
+            .recentWins,
+            .strategistNote,
+            .routineMemory,
+            .pantry,
+            .sampleReads
+        ]
+
+        let availableModules = Set(orderedModules.filter { module in
+            switch module {
+            case .firstWeekPlan:
+                return hasFirstWeekPlan
+            case .dailyBrief:
+                return hasDailyBrief
+            case .activeGoals:
+                return hasGoals
+            case .recommendedSwap:
+                return payload.recommendedSwap != nil
+            case .openLoops:
+                return !payload.openLoops.isEmpty
+            case .recentWins:
+                return !payload.recentWins.isEmpty
+            case .strategistNote:
+                return !payload.strategistNote.summary.isEmpty
+            case .routineMemory:
+                return hasRoutines
+            case .pantry:
+                return hasPantry
+            case .sampleReads:
+                return hasSampleReads
+            }
+        })
+
+        let secondaryModules = orderedModules.filter { module in
+            availableModules.contains(module) && module != primaryModule
+        }
+
+        return HomeSurfacePlan(
+            primaryModule: primaryModule,
+            secondaryModules: secondaryModules
+        )
+    }
+}
+
+struct DailyHomeSurfaceAvailability: Codable, Hashable {
+    var hasFirstWeekPlan: Bool
+    var hasDailyBrief: Bool
+    var hasGoals: Bool
+    var hasRoutines: Bool
+    var hasPantry: Bool
+    var hasSampleReads: Bool
+    var hasUserActivity: Bool
+}
+
+enum DailyHomeHeroEmphasis: String, Codable, Hashable {
+    case onboarding
+    case protectMomentum
+    case rebuildMomentum
+    case reengage
+}
+
+enum HomeModuleSuppressionReason: String, Codable, Hashable {
+    case redundantNarrative
+    case redundantMemory
+    case demoOnly
+}
+
+struct SuppressedHomeModule: Codable, Hashable {
+    var module: HomeSurfaceModule
+    var reason: HomeModuleSuppressionReason
+}
+
+struct DailyHomeHeroV2: Codable, Hashable {
+    var emphasis: DailyHomeHeroEmphasis
+    var whyNow: String
+}
+
+struct DailyHomePayloadV2: Codable, Hashable {
+    var schemaVersion = 2
+    var hero: DailyHomeHeroV2
+    var primaryModule: HomeSurfaceModule?
+    var secondaryModules: [HomeSurfaceModule]
+    var deferredModules: [HomeSurfaceModule]
+    var suppressedModules: [SuppressedHomeModule]
+    var ctaPriority: RecommendationKind
+
+    static func legacy(
+        payload: DailyHomePayload,
+        plan: HomeSurfacePlan
+    ) -> DailyHomePayloadV2 {
+        DailyHomePayloadV2(
+            hero: DailyHomeHeroV2(
+                emphasis: .protectMomentum,
+                whyNow: "Legacy Home keeps supporting context visible without the tighter v2 curation rules."
+            ),
+            primaryModule: plan.primaryModule,
+            secondaryModules: plan.secondaryModules,
+            deferredModules: [],
+            suppressedModules: [],
+            ctaPriority: payload.nextAction.kind
+        )
+    }
+}
+
+struct DailyHomePayloadV2Builder {
+    private let orderedModules: [HomeSurfaceModule] = [
+        .dailyBrief,
+        .activeGoals,
+        .recommendedSwap,
+        .openLoops,
+        .recentWins,
+        .strategistNote,
+        .routineMemory,
+        .pantry,
+        .sampleReads
+    ]
+
+    private let maxSecondaryModules = 3
+
+    func build(
+        payload: DailyHomePayload,
+        availability: DailyHomeSurfaceAvailability
+    ) -> DailyHomePayloadV2 {
+        let primaryModule = primaryModule(
+            payload: payload,
+            availability: availability
+        )
+        let availableModules = orderedModules.filter {
+            isAvailable($0, payload: payload, availability: availability)
+        }
+
+        var suppressionLookup: [HomeSurfaceModule: HomeModuleSuppressionReason] = [:]
+
+        func suppress(_ module: HomeSurfaceModule, reason: HomeModuleSuppressionReason) {
+            guard availableModules.contains(module), module != primaryModule else { return }
+            suppressionLookup[module] = reason
+        }
+
+        if availability.hasSampleReads, availability.hasUserActivity || payload.state != .calibrating {
+            suppress(.sampleReads, reason: .demoOnly)
+        }
+
+        if availability.hasPantry, availability.hasRoutines {
+            suppress(.routineMemory, reason: .redundantMemory)
+        }
+
+        if availability.hasDailyBrief || primaryModule == .firstWeekPlan || primaryModule == .recommendedSwap {
+            suppress(.strategistNote, reason: .redundantNarrative)
+        }
+
+        let candidateModules = orderedModules.filter { module in
+            availableModules.contains(module) &&
+                module != primaryModule &&
+                suppressionLookup[module] == nil
+        }
+
+        let secondaryModules = Array(candidateModules.prefix(maxSecondaryModules))
+        let deferredModules = Array(candidateModules.dropFirst(maxSecondaryModules))
+        let suppressedModules: [SuppressedHomeModule] = orderedModules.compactMap { module -> SuppressedHomeModule? in
+            guard let reason = suppressionLookup[module] else { return nil }
+            return SuppressedHomeModule(module: module, reason: reason)
+        }
+
+        return DailyHomePayloadV2(
+            hero: DailyHomeHeroV2(
+                emphasis: heroEmphasis(for: payload.state),
+                whyNow: whyNow(
+                    payload: payload,
+                    primaryModule: primaryModule,
+                    secondaryModules: secondaryModules,
+                    deferredModules: deferredModules,
+                    suppressedModules: suppressedModules
+                )
+            ),
+            primaryModule: primaryModule,
+            secondaryModules: secondaryModules,
+            deferredModules: deferredModules,
+            suppressedModules: suppressedModules,
+            ctaPriority: payload.nextAction.kind
+        )
+    }
+
+    private func primaryModule(
+        payload: DailyHomePayload,
+        availability: DailyHomeSurfaceAvailability
+    ) -> HomeSurfaceModule? {
+        if payload.state == .calibrating, availability.hasFirstWeekPlan {
+            return .firstWeekPlan
+        }
+        if payload.recommendedSwap != nil {
+            return .recommendedSwap
+        }
+        if availability.hasDailyBrief {
+            return .dailyBrief
+        }
+        if availability.hasGoals {
+            return .activeGoals
+        }
+        return !payload.strategistNote.summary.isEmpty ? .strategistNote : nil
+    }
+
+    private func isAvailable(
+        _ module: HomeSurfaceModule,
+        payload: DailyHomePayload,
+        availability: DailyHomeSurfaceAvailability
+    ) -> Bool {
+        switch module {
+        case .firstWeekPlan:
+            availability.hasFirstWeekPlan
+        case .dailyBrief:
+            availability.hasDailyBrief
+        case .activeGoals:
+            availability.hasGoals
+        case .recommendedSwap:
+            payload.recommendedSwap != nil
+        case .openLoops:
+            !payload.openLoops.isEmpty
+        case .recentWins:
+            !payload.recentWins.isEmpty
+        case .strategistNote:
+            !payload.strategistNote.summary.isEmpty
+        case .routineMemory:
+            availability.hasRoutines
+        case .pantry:
+            availability.hasPantry
+        case .sampleReads:
+            availability.hasSampleReads
+        }
+    }
+
+    private func heroEmphasis(for state: UserLifecycleState) -> DailyHomeHeroEmphasis {
+        switch state {
+        case .unonboarded, .calibrating:
+            .onboarding
+        case .active:
+            .protectMomentum
+        case .drifting:
+            .rebuildMomentum
+        case .reengagement:
+            .reengage
+        }
+    }
+
+    private func whyNow(
+        payload: DailyHomePayload,
+        primaryModule: HomeSurfaceModule?,
+        secondaryModules: [HomeSurfaceModule],
+        deferredModules: [HomeSurfaceModule],
+        suppressedModules: [SuppressedHomeModule]
+    ) -> String {
+        let deferredCount = deferredModules.count
+        let narrativeWasTrimmed = suppressedModules.contains {
+            $0.reason == .redundantNarrative
+        }
+
+        switch primaryModule {
+        case .firstWeekPlan:
+            if narrativeWasTrimmed {
+                return "Home is holding the first-week calibration plan above the fold and trimming duplicate coaching."
+            }
+            return "Home is leading with the calibration plan so the first decision stays obvious."
+        case .recommendedSwap:
+            return "A softer swap is already on the table, so Home keeps only the context that helps you act on it."
+        case .dailyBrief:
+            return deferredCount > 0
+                ? "No single swap is dominating today, so Home leads with the brief and defers lower-priority modules."
+                : "No single swap is dominating today, so Home leads with the brief and keeps the rest lightweight."
+        case .activeGoals:
+            return "Home is anchoring to your active goal first so the supporting context does not compete with it."
+        case .strategistNote:
+            return secondaryModules.isEmpty
+                ? "The strategist note is carrying the story today because the rest of the signal is still light."
+                : "The strategist note is carrying the story today, with only a few supporting modules nearby."
+        case nil:
+            return payload.todayFocus.summary
+        case .openLoops, .recentWins, .routineMemory, .pantry, .sampleReads:
+            return payload.todayFocus.summary
+        }
+    }
 }
 
 enum HistoryTimelineKind: String, Codable, CaseIterable, Identifiable {
@@ -825,13 +1305,31 @@ struct HomeComposer {
 
     private func openLoops(from decisions: [ScanDecision], firstWeekPlan: FirstWeekPlan?, experiments: [Experiment]) -> [OpenLoop] {
         var items = decisions
-            .filter { $0.resolvedAt == nil }
+            .filter { $0.resolvedAt == nil && $0.kind.keepsLoopOpen }
             .prefix(2)
             .map {
-                OpenLoop(
-                    title: $0.kind.title,
-                    summary: "\($0.productName) is still open in your routine."
-                )
+                switch $0.kind {
+                case .saveToRoutine:
+                    return OpenLoop(
+                        title: "Confirm the routine slot",
+                        summary: "Use the next check-in to confirm whether \($0.productName) really deserves repeat space."
+                    )
+                case .swapInstead:
+                    return OpenLoop(
+                        title: "Test the softer swap",
+                        summary: "Do not let \($0.productName) harden into routine before the cleaner alternative gets a real try."
+                    )
+                case .trackAgain:
+                    return OpenLoop(
+                        title: "Retest \($0.productName)",
+                        summary: "Run one cleaner repeat so the next decision is based on signal, not guesswork."
+                    )
+                case .avoidForNow, .askStrategist:
+                    return OpenLoop(
+                        title: $0.kind.title,
+                        summary: $0.note
+                    )
+                }
             }
 
         if let incompletePlanStep = firstWeekPlan?.steps.first(where: { !$0.isComplete }) {
@@ -843,7 +1341,7 @@ struct HomeComposer {
             )
         }
 
-        items.append(contentsOf: experiments.prefix(1).map {
+        items.append(contentsOf: experiments.filter { $0.status == .active }.prefix(1).map {
             OpenLoop(
                 title: $0.title,
                 summary: $0.hypothesis
@@ -926,7 +1424,9 @@ struct ConversationContextAssembler {
         history: [ScanRecord],
         checkIns: [CheckInEntry],
         decisions: [ScanDecision],
-        memoryItems: [MemoryItem]
+        memoryItems: [MemoryItem],
+        patternInsights: [PatternInsight],
+        weeklyNarrative: WeeklyInsightNarrative?
     ) -> ConversationTurnContext {
         let signalSummaries: [String]
         if let latest = checkIns.first {
@@ -944,7 +1444,14 @@ struct ConversationContextAssembler {
             recentSignals: signalSummaries,
             recentProducts: Array(history.prefix(3)).map(\.analysis.resolvedProduct.name),
             openLoopSummaries: Array(decisions.filter { $0.resolvedAt == nil }.prefix(3)).map(\.note),
-            memorySummaries: Array(memoryItems.prefix(4)).map(\.summary)
+            memorySummaries: Array(memoryItems.prefix(4)).map(\.summary),
+            latestDecisionSummary: decisions.first?.note,
+            latestReadSummary: history.first?.analysis.overallSummary,
+            latestPatternTitle: patternInsights.first?.title,
+            latestPatternSummary: patternInsights.first?.summary,
+            weeklyNarrativeHeadline: weeklyNarrative?.headline,
+            weeklyNarrativeSummary: weeklyNarrative?.patternSummary,
+            weeklyNextExperiment: weeklyNarrative?.nextExperiment
         )
     }
 }
@@ -960,16 +1467,42 @@ struct StrategistResponseEngine {
         let goal = context.activeGoalTitles.first?.lowercased() ?? "your week"
         let signal = context.recentSignals.first?.lowercased() ?? "your last body signal"
         let product = linkedAnalysis?.resolvedProduct.name ?? context.recentProducts.first ?? "that product"
-        let friction = profile.frictions.first?.strategistSummary ?? "tighten the pattern"
+        let whyNow = context.weeklyNarrativeSummary ?? context.latestPatternSummary ?? context.latestDecisionSummary ?? "Keep the next decision tied to \(goal)."
+        let experiment = context.weeklyNextExperiment ?? context.openLoopSummaries.first ?? "Use the next scan to make one explicit keep, avoid, or swap decision."
+        let memoryAnchor = context.memorySummaries.first ?? "No strong saved memory yet."
+        let normalizedMessage = message.lowercased()
 
         let reply: String
         if let linkedAnalysis {
-            let weakestLens = linkedAnalysis.lensScores.min(by: { $0.score < $1.score })?.lens.title.lowercased() ?? "fit"
-            reply = "\(product) looks usable, but I’d frame it around \(goal). The soft spot is \(weakestLens), so if today already feels rough in \(signal), I’d either swap it or track it again instead of assuming it belongs."
-        } else if message.lowercased().contains("craving") || message.lowercased().contains("energy") {
-            reply = "Given \(signal), I’d stay with one calmer decision today: protect \(goal) first, then use the next scan to \(friction). Don’t try to optimize the whole week at once."
+            reply = linkedReadReply(
+                for: linkedAnalysis,
+                product: product,
+                goal: goal,
+                signal: signal,
+                whyNow: whyNow,
+                prompt: normalizedMessage
+            )
+        } else if normalizedMessage.contains("learned") || normalizedMessage.contains("me so far") || entryPoint == .profile {
+            reply = [
+                "What I'm learning: \(context.latestPatternTitle ?? memoryAnchor)",
+                "Strongest signal: \(whyNow)",
+                "Best next step: Use the next real decision to support \(goal), then keep the result if it still matches how the day feels.",
+                "Ask next: Do you want me to narrow your goal, call out the noisiest friction, or name the easiest repeat win?"
+            ].joined(separator: "\n\n")
+        } else if entryPoint == .checkIn || normalizedMessage.contains("energy") || normalizedMessage.contains("signal") || normalizedMessage.contains("feel off") {
+            reply = [
+                "Best next step: Keep the next choice as calm and repeatable as possible for \(goal).",
+                "Why now: \(signal.capitalizedSentence) is the freshest signal, and \(whyNow)",
+                "Watch for: A rough-feeling day is a bad time to force a big experiment.",
+                "Ask next: Do you want the easiest product category to protect today or the one to avoid?"
+            ].joined(separator: "\n\n")
         } else {
-            reply = "From here, I’d keep the strategy simple: use your next decision to support \(goal), keep an eye on \(signal), and let me remember what actually helped instead of relying on intention alone."
+            reply = [
+                "Best next step: \(context.latestDecisionSummary ?? "Use your next scan to make one explicit keep, avoid, or swap call for \(goal).")",
+                "Why now: \(whyNow)",
+                "Watch for: \(context.latestPatternSummary ?? "If the day already feels rough, favor calmer repeats over novelty.")",
+                "Ask next: \(experiment)"
+            ].joined(separator: "\n\n")
         }
 
         return ConversationMessage(
@@ -977,6 +1510,80 @@ struct StrategistResponseEngine {
             text: reply,
             createdAt: .now
         )
+    }
+
+    private func linkedReadReply(
+        for analysis: ScanAnalysis,
+        product: String,
+        goal: String,
+        signal: String,
+        whyNow: String,
+        prompt: String
+    ) -> String {
+        let weakestLens = analysis.lensScores.min(by: { $0.score < $1.score })?.lens.title.lowercased() ?? "fit"
+        let strongestLens = analysis.lensScores.max(by: { $0.score < $1.score })?.lens.title.lowercased() ?? "fit"
+        let averageScore = Int((Double(analysis.lensScores.map(\.score).reduce(0, +)) / Double(max(analysis.lensScores.count, 1))).rounded())
+        let verdict = linkedVerdict(for: analysis, averageScore: averageScore)
+        let alternative = analysis.alternatives.first
+
+        let bestNextStep: String
+        switch verdict {
+        case .good:
+            bestNextStep = "Keep \(product) in play for \(goal), but only graduate it into routine if the next real use still feels stable."
+        case .adjust:
+            if let alternative {
+                bestNextStep = "Treat \(product) as borderline and test \(alternative.productName) first if you want the softer move."
+            } else {
+                bestNextStep = "Use \(product) as a directional option, not a routine lock. One more real-world repeat should decide it."
+            }
+        case .avoid:
+            if let alternative {
+                bestNextStep = "Skip \(product) for now and test \(alternative.productName) instead."
+            } else {
+                bestNextStep = "Keep \(product) out of the routine for now and wait for a calmer context before repeating it."
+            }
+        case .needsMoreInfo:
+            bestNextStep = "Do not over-commit on \(product) yet. Get a cleaner read or a more grounded follow-up before deciding."
+        }
+
+        let askNext: String
+        if prompt.contains("swap"), let alternative {
+            askNext = "Do you want the exact reason \(alternative.productName) reads as the softer swap?"
+        } else if prompt.contains("routine") {
+            askNext = "Do you want me to turn this into a keep, avoid, or retest call in one sentence?"
+        } else if let alternative {
+            askNext = "Do you want me to compare \(product) against \(alternative.productName) directly?"
+        } else {
+            askNext = "Do you want me to explain whether this is a keep, avoid, or retest decision?"
+        }
+
+        return [
+            "Best next step: \(bestNextStep)",
+            "Why now: \(whyNow)",
+            "Watch for: \(product) is strongest around \(strongestLens), but the soft spot is \(weakestLens) when \(signal).",
+            "Ask next: \(askNext)"
+        ].joined(separator: "\n\n")
+    }
+
+    private func linkedVerdict(for analysis: ScanAnalysis, averageScore: Int) -> AnalysisVerdict {
+        if analysis.confidence == .low && averageScore < 55 {
+            return .needsMoreInfo
+        }
+        switch averageScore {
+        case 78...:
+            return .good
+        case 58...:
+            return .adjust
+        default:
+            return .avoid
+        }
+    }
+}
+
+private extension String {
+    var capitalizedSentence: String {
+        guard let first else { return self }
+        return first.uppercased() + dropFirst()
     }
 }
 

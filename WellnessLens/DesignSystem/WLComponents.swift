@@ -280,6 +280,8 @@ struct WLSectionHeader: View {
                 Text(subtitle)
                     .font(WLTypography.caption)
                     .foregroundStyle(WLPalette.inkSoft)
+                    .lineSpacing(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -344,6 +346,9 @@ struct WLPill: View {
             Text(title)
                 .font(WLTypography.captionStrong)
                 .foregroundStyle(tone.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .allowsTightening(true)
                 .padding(.horizontal, WLSpacing.m)
                 .padding(.vertical, 10)
                 .background(
@@ -364,6 +369,9 @@ struct WLPill: View {
                 Text(title)
                     .font(WLTypography.captionStrong)
                     .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .allowsTightening(true)
                     .padding(.horizontal, WLSpacing.m)
                     .padding(.vertical, 10)
             }
@@ -441,6 +449,9 @@ struct WLStatusBadge: View {
 
                 Text(title)
                     .font(WLTypography.captionStrong)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .allowsTightening(true)
             }
             .foregroundStyle(tone.foreground)
             .padding(.horizontal, WLSpacing.s)
@@ -467,6 +478,9 @@ struct WLStatusBadge: View {
 
                     Text(title)
                         .font(WLTypography.captionStrong)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                        .allowsTightening(true)
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, WLSpacing.s)
@@ -655,10 +669,14 @@ struct WLPrimaryButton: View {
             }
 
             Text(title)
+                .lineLimit(2)
+                .minimumScaleFactor(0.86)
+                .multilineTextAlignment(.center)
+                .allowsTightening(true)
         }
         .font(WLTypography.bodyEmphasis)
         .foregroundStyle(foreground)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 56)
         .padding(.horizontal, WLSpacing.m)
         .padding(.vertical, 16)
     }
@@ -707,10 +725,14 @@ struct WLSecondaryButton: View {
             }
 
             Text(title)
+                .lineLimit(2)
+                .minimumScaleFactor(0.86)
+                .multilineTextAlignment(.center)
+                .allowsTightening(true)
         }
         .font(WLTypography.bodyEmphasis)
         .foregroundStyle(foreground)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 56)
         .padding(.horizontal, WLSpacing.m)
         .padding(.vertical, 16)
     }

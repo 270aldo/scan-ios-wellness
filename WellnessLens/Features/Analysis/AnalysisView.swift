@@ -1,5 +1,204 @@
 import SwiftUI
 
+enum AnalysisActionKind: String, Equatable {
+    case saveToRoutine
+    case avoidForNow
+    case swapInstead
+    case askStrategist
+    case trackAgain
+    case saveFavorite
+    case saveToPantry
+}
+
+struct AnalysisPresentationPlan: Equatable {
+    let displayTitle: String
+    let heroBadgeTitle: String
+    let verdict: AnalysisVerdict
+    let verdictTitle: String
+    let overallScore: Int
+    let summary: String
+    let whyToday: [String]
+    let recommendedActions: [String]
+    let followUpPrompt: String
+    let primaryAction: AnalysisActionKind
+    let primaryButtonTitle: String
+    let primaryActionSummary: String
+    let secondaryAction: AnalysisActionKind?
+    let secondaryButtonTitle: String?
+    let swapPreviewTitle: String?
+    let swapPreviewReason: String?
+    let confidence: ConfidenceLevel
+
+    static func build(analysis: ScanAnalysis, structured: AnalysisEnvelope?) -> AnalysisPresentationPlan {
+        let overallScore = structured?.overallScore ?? fallbackScore(for: analysis)
+        let verdict = structured?.verdict ?? fallbackVerdict(for: overallScore, confidence: analysis.confidence)
+        let whyToday = Array((structured?.whyToday ?? fallbackWhyToday(for: analysis)).prefix(2))
+        let recommendedActions = Array((structured?.recommendedActions ?? []).prefix(2))
+        let followUpPrompt = structured?.followUpPrompt ?? fallbackFollowUpPrompt(for: analysis.source)
+        let hasAlternatives = !analysis.alternatives.isEmpty
+        let topAlternative = analysis.alternatives.first
+
+        let displayTitle: String = {
+            switch structured?.entityType {
+            case .meal:
+                return "Meal Snapshot"
+            case .menuItem:
+                return "Menu Scanner"
+            default:
+                switch analysis.source {
+                case .mealPhoto:
+                    return "Meal Snapshot"
+                case .menuPhoto:
+                    return "Menu Scanner"
+                default:
+                    return analysis.resolvedProduct.name
+                }
+            }
+        }()
+
+        let heroBadgeTitle: String = {
+            switch structured?.entityType {
+            case .meal:
+                return "Meal Snapshot"
+            case .menuItem:
+                return "Menu Scanner"
+            default:
+                switch analysis.source {
+                case .mealPhoto:
+                    return "Meal Snapshot"
+                case .menuPhoto:
+                    return "Menu Scanner"
+                default:
+                    return analysis.productType.title
+                }
+            }
+        }()
+
+        let verdictTitle: String = {
+            switch verdict {
+            case .good:
+                return "Strong fit for today"
+            case .adjust:
+                return "Usable with adjustment"
+            case .avoid:
+                return hasAlternatives ? "Swap before repeating" : "Lower-fit choice today"
+            case .needsMoreInfo:
+                return "Needs a cleaner read"
+            }
+        }()
+
+        let summary = whyToday.first ?? analysis.overallSummary
+
+        let primaryAction: AnalysisActionKind
+        let primaryButtonTitle: String
+        let primaryActionSummary: String
+        let secondaryAction: AnalysisActionKind?
+        let secondaryButtonTitle: String?
+
+        switch verdict {
+        case .good:
+            primaryAction = .saveToRoutine
+            primaryButtonTitle = "Keep this in routine"
+            primaryActionSummary = "The read is supportive enough to treat this as a likely repeat option if it matches how it felt in real life."
+            secondaryAction = .askStrategist
+            secondaryButtonTitle = "Ask strategist"
+        case .adjust:
+            if hasAlternatives {
+                primaryAction = .swapInstead
+                primaryButtonTitle = "Choose the softer swap"
+                primaryActionSummary = "This is close, but the swap looks like the cleaner move for today."
+            } else {
+                primaryAction = .trackAgain
+                primaryButtonTitle = "Track this again"
+                primaryActionSummary = "This can work, but it needs one more deliberate read before it earns a routine slot."
+            }
+            secondaryAction = .askStrategist
+            secondaryButtonTitle = "Ask strategist"
+        case .avoid:
+            if hasAlternatives {
+                primaryAction = .swapInstead
+                primaryButtonTitle = "Pick the swap instead"
+                primaryActionSummary = "The current option reads as low-fit for today. Move to the softer alternative instead of forcing it."
+                secondaryAction = .avoidForNow
+                secondaryButtonTitle = "Avoid this for now"
+            } else {
+                primaryAction = .avoidForNow
+                primaryButtonTitle = "Avoid this for now"
+                primaryActionSummary = "Treat this as a lower-fit choice today and keep it out of the routine until the context changes."
+                secondaryAction = .askStrategist
+                secondaryButtonTitle = "Ask strategist"
+            }
+        case .needsMoreInfo:
+            primaryAction = .askStrategist
+            primaryButtonTitle = "Ask strategist"
+            primaryActionSummary = "The input is thin enough that you should escalate or get a cleaner read before making this a repeat decision."
+            secondaryAction = .trackAgain
+            secondaryButtonTitle = "Track this again"
+        }
+
+        return AnalysisPresentationPlan(
+            displayTitle: displayTitle,
+            heroBadgeTitle: heroBadgeTitle,
+            verdict: verdict,
+            verdictTitle: verdictTitle,
+            overallScore: overallScore,
+            summary: summary,
+            whyToday: whyToday,
+            recommendedActions: recommendedActions,
+            followUpPrompt: followUpPrompt,
+            primaryAction: primaryAction,
+            primaryButtonTitle: primaryButtonTitle,
+            primaryActionSummary: primaryActionSummary,
+            secondaryAction: secondaryAction,
+            secondaryButtonTitle: secondaryButtonTitle,
+            swapPreviewTitle: topAlternative?.productName,
+            swapPreviewReason: topAlternative?.whyBetter,
+            confidence: analysis.confidence
+        )
+    }
+
+    private static func fallbackScore(for analysis: ScanAnalysis) -> Int {
+        let total = analysis.lensScores.map(\.score).reduce(0, +)
+        return Int((Double(total) / Double(max(analysis.lensScores.count, 1))).rounded())
+    }
+
+    private static func fallbackVerdict(for overallScore: Int, confidence: ConfidenceLevel) -> AnalysisVerdict {
+        if confidence == .low && overallScore < 55 {
+            return .needsMoreInfo
+        }
+        switch overallScore {
+        case 78...:
+            return .good
+        case 58...:
+            return .adjust
+        default:
+            return .avoid
+        }
+    }
+
+    private static func fallbackWhyToday(for analysis: ScanAnalysis) -> [String] {
+        var items = [analysis.overallSummary]
+        if let topReason = analysis.topReasons.first?.detail {
+            items.append(topReason)
+        }
+        if let firstWarning = analysis.warnings.first {
+            items.append(firstWarning)
+        }
+        return Array(items.prefix(2))
+    }
+
+    private static func fallbackFollowUpPrompt(for source: ScanSource) -> String {
+        switch source {
+        case .mealPhoto:
+            "How did this meal feel for your energy, digestion, and satiety a few hours later?"
+        case .menuPhoto:
+            "Did this menu choice feel aligned with what you needed today?"
+        default:
+            "Did this read match how this choice actually felt for you?"
+        }
+    }
+}
+
 struct AnalysisView: View {
     let analysis: ScanAnalysis
 
@@ -7,28 +206,99 @@ struct AnalysisView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showStrategist = false
 
-    private var strongestLens: LensScore? {
-        analysis.lensScores.max(by: { $0.score < $1.score })
+    private var structuredEvent: ScanEvent? {
+        model.scanEvent(for: analysis)
     }
 
-    private var softestLens: LensScore? {
-        analysis.lensScores.min(by: { $0.score < $1.score })
+    private var patternInsight: PatternInsight? {
+        model.leadingPatternInsight(for: analysis)
     }
 
     private var sortedLensScores: [LensScore] {
         analysis.lensScores.sorted(by: { $0.score > $1.score })
     }
 
+    private var presentation: AnalysisPresentationPlan {
+        AnalysisPresentationPlan.build(
+            analysis: analysis,
+            structured: structuredEvent?.analysis
+        )
+    }
+
+    private var hiddenSupportActions: Set<AnalysisActionKind> {
+        Set([presentation.primaryAction, presentation.secondaryAction].compactMap { $0 })
+    }
+
     var body: some View {
         NavigationStack {
             WLScreen {
-                AnalysisHero(analysis: analysis, strongestLens: strongestLens, softestLens: softestLens)
-                AnalysisConfidenceCard(explanation: confidenceExplanation, confidence: analysis.confidence)
+                AnalysisHero(
+                    analysis: analysis,
+                    presentation: presentation
+                )
+
+                AnalysisOutcomeCard(
+                    presentation: presentation,
+                    primaryAction: {
+                        handleAction(presentation.primaryAction)
+                    },
+                    secondaryAction: presentation.secondaryAction.map { action in
+                        {
+                            handleAction(action)
+                        }
+                    }
+                )
+
+                if model.services.featureFlags.patternAgent, let patternInsight {
+                    AnalysisPatternInsightCard(
+                        insight: patternInsight,
+                        isUnlocked: model.hasAccess(to: .patternAgent),
+                        unlock: {
+                            _ = model.requireAccess(
+                                to: .patternAgent,
+                                surface: .patternDetail,
+                                previewLines: [patternInsight.title, patternInsight.summary]
+                            )
+                        }
+                    )
+                }
+
+                if !analysis.alternatives.isEmpty {
+                    VStack(alignment: .leading, spacing: WLSpacing.m) {
+                        WLSectionHeader(
+                            title: "Softer swaps",
+                            subtitle: "Nearby alternatives worth reviewing before this becomes a repeat choice.",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+
+                        ForEach(analysis.alternatives) { suggestion in
+                            AnalysisSuggestionCard(suggestion: suggestion)
+                        }
+                    }
+                }
+
+                if !analysis.topReasons.isEmpty || !analysis.warnings.isEmpty {
+                    VStack(alignment: .leading, spacing: WLSpacing.m) {
+                        WLSectionHeader(
+                            title: "What shaped this read",
+                            subtitle: "Supportive signals and friction points that drove the verdict.",
+                            systemImage: "slider.horizontal.3"
+                        )
+
+                        ForEach(analysis.topReasons) { reason in
+                            AnalysisReasonCard(reason: reason)
+                        }
+
+                        ForEach(analysis.warnings, id: \.self) { warning in
+                            AnalysisWarningCard(warning: warning)
+                        }
+                    }
+                }
 
                 VStack(alignment: .leading, spacing: WLSpacing.m) {
                     WLSectionHeader(
-                        title: WLProductCopy.ProductRead.lensReadTitle,
-                        subtitle: WLProductCopy.ProductRead.lensReadSubtitle,
+                        title: "Lens breakdown",
+                        subtitle: "A directional view across the five WellnessLens lenses.",
                         systemImage: "circle.grid.2x2"
                     )
 
@@ -39,57 +309,27 @@ struct AnalysisView: View {
                     }
                 }
 
-                if !analysis.topReasons.isEmpty {
-                    VStack(alignment: .leading, spacing: WLSpacing.m) {
-                        WLSectionHeader(
-                            title: WLProductCopy.ProductRead.reasonsTitle,
-                            subtitle: WLProductCopy.ProductRead.reasonsSubtitle,
-                            systemImage: "sparkles"
-                        )
+                AnalysisConfidenceCard(
+                    explanation: confidenceExplanation,
+                    confidence: analysis.confidence
+                )
 
-                        ForEach(analysis.topReasons) { reason in
-                            AnalysisReasonCard(reason: reason)
-                        }
-                    }
-                }
-
-                if !analysis.warnings.isEmpty {
-                    VStack(alignment: .leading, spacing: WLSpacing.m) {
-                        WLSectionHeader(
-                            title: WLProductCopy.ProductRead.watchoutsTitle,
-                            subtitle: WLProductCopy.ProductRead.watchoutsSubtitle,
-                            systemImage: "exclamationmark.triangle"
-                        )
-
-                        ForEach(analysis.warnings, id: \.self) { warning in
-                            AnalysisWarningCard(warning: warning)
-                        }
-                    }
-                }
-
-                if !analysis.alternatives.isEmpty {
-                    VStack(alignment: .leading, spacing: WLSpacing.m) {
-                        WLSectionHeader(
-                            title: WLProductCopy.ProductRead.swapsTitle,
-                            subtitle: WLProductCopy.ProductRead.swapsSubtitle,
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-
-                        ForEach(analysis.alternatives) { suggestion in
-                            AnalysisSuggestionCard(suggestion: suggestion)
-                        }
-                    }
-                }
-
-                AnalysisDecisionCard(
-                    analysis: analysis,
-                    saveToRoutine: { commitDecision(.saveToRoutine) },
-                    avoidForNow: { commitDecision(.avoidForNow) },
-                    swapProduct: { commitDecision(.swapInstead) },
-                    trackAgain: { commitDecision(.trackAgain) },
+                AnalysisSupportingActionsCard(
+                    pantryUnlocked: model.hasAccess(to: .pantryMVP),
+                    showSaveToPantry: model.services.featureFlags.pantryMVP,
+                    showAskStrategist: !hiddenSupportActions.contains(.askStrategist),
+                    showTrackAgain: !hiddenSupportActions.contains(.trackAgain),
+                    saveFavorite: {
+                        handleAction(.saveFavorite)
+                    },
+                    saveToPantry: {
+                        handleAction(.saveToPantry)
+                    },
                     askStrategist: {
-                        commitDecision(.askStrategist, dismissAfter: false)
-                        showStrategist = true
+                        handleAction(.askStrategist)
+                    },
+                    trackAgain: {
+                        handleAction(.trackAgain)
                     }
                 )
 
@@ -115,11 +355,40 @@ struct AnalysisView: View {
     private var confidenceExplanation: String {
         switch analysis.confidence {
         case .high:
-            "This match is strong enough that the summary should feel stable, not noisy."
+            "This match is strong enough that the read should feel stable, not noisy."
         case .medium:
-            "This read is still useful, but treat it as directional context rather than a final verdict."
+            "This is useful as directional guidance, but keep the decision flexible if real-life feedback disagrees."
         case .low:
-            "This was inferred from thinner input. Double-check the label before acting on it."
+            "The input was thinner than ideal. Treat the read as a prompt to verify, not a final answer."
+        }
+    }
+
+    private func handleAction(_ action: AnalysisActionKind) {
+        switch action {
+        case .saveToRoutine:
+            commitDecision(.saveToRoutine)
+        case .avoidForNow:
+            commitDecision(.avoidForNow)
+        case .swapInstead:
+            commitDecision(.swapInstead)
+        case .askStrategist:
+            commitDecision(.askStrategist, dismissAfter: false)
+            showStrategist = true
+        case .trackAgain:
+            commitDecision(.trackAgain)
+        case .saveFavorite:
+            model.saveFavorite(from: analysis)
+        case .saveToPantry:
+            let preview = [
+                "Pantry keeps your strongest repeat choices visible.",
+                analysis.overallSummary
+            ]
+            guard model.requireAccess(
+                to: .pantryMVP,
+                surface: .pantry,
+                previewLines: preview
+            ) else { return }
+            model.saveToPantry(from: analysis)
         }
     }
 
@@ -133,78 +402,68 @@ struct AnalysisView: View {
 
 private struct AnalysisHero: View {
     let analysis: ScanAnalysis
-    let strongestLens: LensScore?
-    let softestLens: LensScore?
+    let presentation: AnalysisPresentationPlan
 
     var body: some View {
         WLHeroSurface {
-            VStack(alignment: .leading, spacing: WLSpacing.l) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: WLSpacing.s) {
                         WLStatusBadge(
-                            title: analysis.productType.title,
+                            title: presentation.heroBadgeTitle,
                             systemImage: "seal",
                             tone: .accent,
                             style: .heroGlass
                         )
 
-                        Text(analysis.resolvedProduct.name)
-                            .font(WLTypography.hero)
-                            .foregroundStyle(.white)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: WLSpacing.s)
 
-                        Text(analysis.overallSummary)
-                            .font(WLTypography.body)
-                            .foregroundStyle(Color.white.opacity(0.90))
-                            .fixedSize(horizontal: false, vertical: true)
+                        WLPill(title: presentation.verdictTitle, tone: verdictPillTone)
                     }
 
-                    Spacer(minLength: WLSpacing.s)
-                }
-
-                WLHeroGlassGroup {
-                    HStack(spacing: WLSpacing.s) {
-                        metricPill(
-                            title: "Standout",
-                            value: strongestLens?.lens.title ?? "—"
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: presentation.heroBadgeTitle,
+                            systemImage: "seal",
+                            tone: .accent,
+                            style: .heroGlass
                         )
 
-                        metricPill(
-                            title: "Gentle caution",
-                            value: softestLens?.lens.title ?? "—"
-                        )
+                        WLPill(title: presentation.verdictTitle, tone: verdictPillTone)
                     }
                 }
 
-                WLHeroGlassGroup {
-                    HStack(spacing: WLSpacing.s) {
-                        detailPill(title: "Source", value: analysis.source.title)
-                        detailPill(title: "Confidence", value: analysis.confidence.title)
-                    }
+                Text(presentation.displayTitle)
+                    .font(WLTypography.hero)
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(presentation.summary)
+                    .font(WLTypography.body)
+                    .foregroundStyle(Color.white.opacity(0.90))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 108), spacing: WLSpacing.s)],
+                    alignment: .leading,
+                    spacing: WLSpacing.s
+                ) {
+                    detailPill(title: "Source", value: analysis.source.title)
+                    detailPill(title: "Score", value: "\(presentation.overallScore)")
+                    detailPill(title: "Confidence", value: analysis.confidence.title)
                 }
             }
         }
     }
 
-    private func metricPill(title: String, value: String) -> some View {
-        WLAdaptiveGlassSurface(
-            shape: .roundedRect(WLCorner.m),
-            tint: Color.white.opacity(0.16),
-            fallbackFill: Color.white.opacity(0.12),
-            fallbackStroke: Color.white.opacity(0.10)
-        ) {
-            VStack(alignment: .leading, spacing: WLSpacing.xxs) {
-                Text(title.uppercased())
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.70))
-                Text(value)
-                    .font(WLTypography.captionStrong)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, WLSpacing.m)
-            .padding(.vertical, 14)
+    private var verdictPillTone: WLPill.Tone {
+        switch presentation.verdict {
+        case .good:
+            return .accent
+        case .adjust, .needsMoreInfo:
+            return .soft
+        case .avoid:
+            return .neutral
         }
     }
 
@@ -217,13 +476,191 @@ private struct AnalysisHero: View {
         ) {
             HStack(spacing: WLSpacing.xs) {
                 Text(title)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .allowsTightening(true)
                     .foregroundStyle(Color.white.opacity(0.72))
                 Text(value)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                    .allowsTightening(true)
                     .foregroundStyle(.white)
             }
             .font(WLTypography.caption)
             .padding(.horizontal, WLSpacing.m)
             .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct AnalysisOutcomeCard: View {
+    let presentation: AnalysisPresentationPlan
+    let primaryAction: () -> Void
+    let secondaryAction: (() -> Void)?
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Best next step",
+                    subtitle: "Make the decision before diving into the supporting detail.",
+                    systemImage: "point.bottomleft.forward.to.point.topright.scurvepath"
+                )
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: presentation.verdictTitle,
+                            systemImage: verdictSymbol,
+                            tone: verdictTone
+                        )
+                        WLPill(title: "Score \(presentation.overallScore)", tone: .soft)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: presentation.verdictTitle,
+                            systemImage: verdictSymbol,
+                            tone: verdictTone
+                        )
+                        WLPill(title: "Score \(presentation.overallScore)", tone: .soft)
+                    }
+                }
+
+                Text(presentation.primaryActionSummary)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                if !presentation.whyToday.isEmpty {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Why today")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        ForEach(presentation.whyToday, id: \.self) { item in
+                            Text("• \(item)")
+                                .font(WLTypography.body)
+                                .foregroundStyle(WLPalette.inkSoft)
+                        }
+                    }
+                }
+
+                if let swapPreviewTitle = presentation.swapPreviewTitle,
+                   let swapPreviewReason = presentation.swapPreviewReason,
+                   presentation.primaryAction != .swapInstead {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Swap preview")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text("\(swapPreviewTitle) looks softer because \(swapPreviewReason)")
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                }
+
+                if !presentation.recommendedActions.isEmpty {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Operational guidance")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        ForEach(presentation.recommendedActions, id: \.self) { action in
+                            Text("• \(action)")
+                                .font(WLTypography.body)
+                                .foregroundStyle(WLPalette.inkSoft)
+                        }
+                    }
+                }
+
+                VStack(spacing: WLSpacing.s) {
+                    WLPrimaryButton(
+                        title: presentation.primaryButtonTitle,
+                        systemImage: primarySymbol
+                    ) {
+                        primaryAction()
+                    }
+
+                    if let secondaryAction,
+                       let secondaryButtonTitle = presentation.secondaryButtonTitle {
+                        WLSecondaryButton(
+                            title: secondaryButtonTitle,
+                            systemImage: secondarySymbol
+                        ) {
+                            secondaryAction()
+                        }
+                    }
+                }
+
+                Text(presentation.followUpPrompt)
+                    .font(WLTypography.captionStrong)
+                    .foregroundStyle(WLPalette.rose)
+            }
+        }
+    }
+
+    private var verdictTone: WLStatusBadge.Tone {
+        switch presentation.verdict {
+        case .good:
+            return .success
+        case .adjust, .needsMoreInfo:
+            return .accent
+        case .avoid:
+            return .caution
+        }
+    }
+
+    private var verdictSymbol: String {
+        switch presentation.verdict {
+        case .good:
+            return "checkmark.seal"
+        case .adjust:
+            return "slider.horizontal.3"
+        case .avoid:
+            return "exclamationmark.triangle"
+        case .needsMoreInfo:
+            return "questionmark.circle"
+        }
+    }
+
+    private var primarySymbol: String {
+        switch presentation.primaryAction {
+        case .saveToRoutine:
+            return "checkmark.circle"
+        case .avoidForNow:
+            return "minus.circle"
+        case .swapInstead:
+            return "arrow.triangle.2.circlepath"
+        case .askStrategist:
+            return "message"
+        case .trackAgain:
+            return "clock.arrow.circlepath"
+        case .saveFavorite:
+            return "star"
+        case .saveToPantry:
+            return "shippingbox"
+        }
+    }
+
+    private var secondarySymbol: String {
+        switch presentation.secondaryAction {
+        case .saveToRoutine:
+            return "checkmark.circle"
+        case .avoidForNow:
+            return "minus.circle"
+        case .swapInstead:
+            return "arrow.triangle.2.circlepath"
+        case .askStrategist:
+            return "message"
+        case .trackAgain:
+            return "clock.arrow.circlepath"
+        case .saveFavorite:
+            return "star"
+        case .saveToPantry:
+            return "shippingbox"
+        case nil:
+            return "ellipsis"
         }
     }
 }
@@ -235,27 +672,50 @@ private struct AnalysisConfidenceCard: View {
     private var tone: WLStatusBadge.Tone {
         switch confidence {
         case .high:
-            .success
+            return .success
         case .medium:
-            .accent
+            return .accent
         case .low:
-            .caution
+            return .caution
+        }
+    }
+
+    private var framing: String {
+        switch confidence {
+        case .high:
+            return "Stable signal"
+        case .medium:
+            return "Directional"
+        case .low:
+            return "Thin input"
         }
     }
 
     var body: some View {
         WLSurfaceCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
-                HStack(alignment: .top) {
-                    WLStatusBadge(
-                        title: "Confidence: \(confidence.title)",
-                        systemImage: "scope",
-                        tone: tone
-                    )
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: "Confidence: \(confidence.title)",
+                            systemImage: "scope",
+                            tone: tone
+                        )
 
-                    Spacer()
+                        Spacer(minLength: WLSpacing.s)
 
-                    WLPill(title: "Directional only", tone: .soft)
+                        WLPill(title: framing, tone: .soft)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: "Confidence: \(confidence.title)",
+                            systemImage: "scope",
+                            tone: tone
+                        )
+
+                        WLPill(title: framing, tone: .soft)
+                    }
                 }
 
                 Text(explanation)
@@ -270,53 +730,124 @@ private struct AnalysisConfidenceCard: View {
     }
 }
 
-private struct AnalysisDecisionCard: View {
-    let analysis: ScanAnalysis
-    let saveToRoutine: () -> Void
-    let avoidForNow: () -> Void
-    let swapProduct: () -> Void
-    let trackAgain: () -> Void
+private struct AnalysisSupportingActionsCard: View {
+    let pantryUnlocked: Bool
+    let showSaveToPantry: Bool
+    let showAskStrategist: Bool
+    let showTrackAgain: Bool
+    let saveFavorite: () -> Void
+    let saveToPantry: () -> Void
     let askStrategist: () -> Void
+    let trackAgain: () -> Void
 
     var body: some View {
-        WLPrimaryCard {
+        WLCompactCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
-                WLSectionHeader(
-                    title: "Decide what happens next",
-                    subtitle: "A scan should change the routine, not just produce a score.",
-                    systemImage: "point.bottomleft.forward.to.point.topright.scurvepath"
-                )
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: WLSpacing.s) {
+                        WLSectionHeader(
+                            title: "Save or keep exploring",
+                            subtitle: "Use these when the read is useful, but not ready to become the main routine call.",
+                            systemImage: "square.stack.3d.up"
+                        )
 
-                Text("Use the read to keep, avoid, swap, or escalate into a strategist conversation.")
-                    .font(WLTypography.body)
-                    .foregroundStyle(WLPalette.inkSoft)
+                        Spacer(minLength: WLSpacing.s)
 
-                VStack(spacing: WLSpacing.s) {
-                    WLPrimaryButton(title: "Save to routine", systemImage: "checkmark.circle") {
-                        saveToRoutine()
+                        if showSaveToPantry {
+                            WLPill(title: pantryUnlocked ? "Pantry unlocked" : "Pantry Pro", tone: pantryUnlocked ? .soft : .accent)
+                        }
                     }
 
-                    HStack(spacing: WLSpacing.s) {
-                        WLSecondaryButton(title: "Avoid for now", systemImage: "minus.circle") {
-                            avoidForNow()
-                        }
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLSectionHeader(
+                            title: "Save or keep exploring",
+                            subtitle: "Use these when the read is useful, but not ready to become the main routine call.",
+                            systemImage: "square.stack.3d.up"
+                        )
 
+                        if showSaveToPantry {
+                            WLPill(title: pantryUnlocked ? "Pantry unlocked" : "Pantry Pro", tone: pantryUnlocked ? .soft : .accent)
+                        }
+                    }
+                }
+
+                VStack(spacing: WLSpacing.s) {
+                    WLSecondaryButton(title: "Save favorite", systemImage: "star") {
+                        saveFavorite()
+                    }
+
+                    if showSaveToPantry {
+                        WLSecondaryButton(
+                            title: pantryUnlocked ? "Save to pantry" : "Unlock pantry",
+                            systemImage: "shippingbox"
+                        ) {
+                            saveToPantry()
+                        }
+                    }
+
+                    if showAskStrategist {
+                        WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
+                            askStrategist()
+                        }
+                    }
+
+                    if showTrackAgain {
                         WLSecondaryButton(title: "Track this again", systemImage: "clock.arrow.circlepath") {
                             trackAgain()
                         }
                     }
+                }
+            }
+        }
+    }
+}
 
-                    HStack(spacing: WLSpacing.s) {
-                        WLSecondaryButton(
-                            title: analysis.alternatives.isEmpty ? "Find a softer swap" : "Choose the swap",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        ) {
-                            swapProduct()
-                        }
+private struct AnalysisPatternInsightCard: View {
+    let insight: PatternInsight
+    let isUnlocked: Bool
+    let unlock: () -> Void
 
-                        WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
-                            askStrategist()
-                        }
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Pattern context",
+                    subtitle: "This compares today’s read against your recent decisions and body-signal loop.",
+                    systemImage: "waveform.path.ecg.rectangle"
+                )
+
+                HStack(spacing: WLSpacing.s) {
+                    WLStatusBadge(
+                        title: insight.signal.title,
+                        systemImage: "sparkles",
+                        tone: .accent
+                    )
+                    WLPill(title: "Confidence \(Int((insight.confidence * 100).rounded()))", tone: .soft)
+                }
+
+                Text(insight.title)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(insight.summary)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                if isUnlocked {
+                    Text(insight.recommendedAction)
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.ink)
+
+                    Text(insight.safetyNote)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                } else {
+                    Text("Preview only. The deeper pattern action opens with Plus.")
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+
+                    WLSecondaryButton(title: "Unlock pattern detail", systemImage: "sparkles") {
+                        unlock()
                     }
                 }
             }
@@ -330,30 +861,30 @@ private struct AnalysisReasonCard: View {
     private var tone: WLStatusBadge.Tone {
         switch reason.impact {
         case .positive:
-            .success
+            return .success
         case .caution:
-            .caution
+            return .caution
         case .neutral:
-            .accent
+            return .accent
         }
     }
 
     private var fill: LinearGradient {
         switch reason.impact {
         case .positive:
-            LinearGradient(
+            return LinearGradient(
                 colors: [WLPalette.success.opacity(0.12), Color.white.opacity(0.96)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         case .caution:
-            LinearGradient(
+            return LinearGradient(
                 colors: [WLPalette.caution.opacity(0.14), Color.white.opacity(0.96)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
         case .neutral:
-            LinearGradient(
+            return LinearGradient(
                 colors: [WLPalette.lavender.opacity(0.12), Color.white.opacity(0.96)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -389,22 +920,22 @@ private struct AnalysisReasonCard: View {
     private var badgeTitle: String {
         switch reason.impact {
         case .positive:
-            "Supportive"
+            return "Supportive"
         case .caution:
-            "Caution"
+            return "Caution"
         case .neutral:
-            "Context"
+            return "Context"
         }
     }
 
     private var badgeSymbol: String {
         switch reason.impact {
         case .positive:
-            "plus.circle"
+            return "plus.circle"
         case .caution:
-            "exclamationmark.circle"
+            return "exclamationmark.circle"
         case .neutral:
-            "circle.grid.2x2"
+            return "circle.grid.2x2"
         }
     }
 }
@@ -513,9 +1044,8 @@ private struct FlowLayout: Layout {
 }
 
 #Preview("Analysis") {
-    AnalysisView(
-        analysis: previewAnalysis
-    )
+    AnalysisView(analysis: previewAnalysis)
+        .environment(AppModel())
 }
 
 private var previewAnalysis: ScanAnalysis {
