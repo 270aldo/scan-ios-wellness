@@ -56,9 +56,25 @@ final class WellnessLensTests: XCTestCase {
 
         var structuredAnalysisResult: Result<AnalysisEnvelope, Error>
         private(set) var analyzeStructuredScanCalls = 0
+        private(set) var completedOnboardingCalls = 0
+        private(set) var completedOnboardingProfile: UserProfile?
+        private(set) var completedOnboardingGoals: [ActiveGoal] = []
+        private(set) var completedOnboardingPlan: FirstWeekPlan?
 
         init(structuredAnalysisResult: Result<AnalysisEnvelope, Error>) {
             self.structuredAnalysisResult = structuredAnalysisResult
+        }
+
+        func fetchClientConfig() async throws -> ClientConfigResponse {
+            ClientConfigResponse(
+                environment: "test",
+                minimumSupportedVersion: "1.0",
+                minimumSupportedBuild: 1,
+                copyVersion: "test-copy",
+                flags: WellnessFeatureFlags(),
+                killSwitches: ClientKillSwitches(scanDisabled: false, strategistDisabled: false, homeDisabled: false),
+                updatedAt: .now
+            )
         }
 
         func analyzeProduct(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis {
@@ -91,7 +107,12 @@ final class WellnessLensTests: XCTestCase {
             profile: UserProfile,
             activeGoals: [ActiveGoal],
             firstWeekPlan: FirstWeekPlan?
-        ) async throws {}
+        ) async throws {
+            completedOnboardingCalls += 1
+            completedOnboardingProfile = profile
+            completedOnboardingGoals = activeGoals
+            completedOnboardingPlan = firstWeekPlan
+        }
 
         func getWeeklyInsights(userContext: UserContext) async throws -> [WeeklyInsight] {
             []
@@ -133,6 +154,24 @@ final class WellnessLensTests: XCTestCase {
 
         func fetchHistoryEvents() async throws -> HistoryEventsResponse {
             HistoryEventsResponse(scans: [], checkIns: [], favorites: [])
+        }
+
+        func syncHistory(
+            scans: [ScanEvent],
+            checkIns: [CheckInEvent],
+            favorites: [FavoriteItem],
+            memoryItems: [MemoryItem],
+            scanDecisions: [ScanDecision]
+        ) async throws -> HistorySyncResponse {
+            HistorySyncResponse(
+                installID: "test-install",
+                scans: scans,
+                checkIns: checkIns,
+                favorites: favorites,
+                memoryItems: memoryItems,
+                scanDecisions: scanDecisions,
+                serverTimestamp: .now
+            )
         }
 
         func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion] {
@@ -432,6 +471,91 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertNil(state.weeklyNarrative)
         XCTAssertTrue(state.pantryItems.isEmpty)
         XCTAssertEqual(state.entitlementSnapshot.tier, .free)
+    }
+
+    func testStoredAppStateRoundTripsOnboardingDraft() throws {
+        var state = StoredAppState.fresh()
+        let createdAt = Date(timeIntervalSince1970: 100)
+        let updatedAt = Date(timeIntervalSince1970: 200)
+        state.onboardingDraft = OnboardingDraft(
+            currentStep: .consent,
+            formData: .starter,
+            createdAt: createdAt,
+            lastUpdatedAt: updatedAt
+        )
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(StoredAppState.self, from: data)
+
+        XCTAssertEqual(decoded.schemaVersion, 4)
+        XCTAssertEqual(decoded.onboardingDraft?.currentStep, .consent)
+        XCTAssertEqual(decoded.onboardingDraft?.formData, .starter)
+        XCTAssertEqual(decoded.onboardingDraft?.createdAt, createdAt)
+        XCTAssertEqual(decoded.onboardingDraft?.lastUpdatedAt, updatedAt)
+    }
+
+    func testStoredAppStateClearsOnboardingDraftWhenAlreadyCompleted() throws {
+        var state = StoredAppState.fresh()
+        state.hasCompletedOnboarding = true
+        state.onboardingDraft = OnboardingDraft(currentStep: .summary)
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(StoredAppState.self, from: data)
+
+        XCTAssertTrue(decoded.hasCompletedOnboarding)
+        XCTAssertNil(decoded.onboardingDraft)
+    }
+
+    @MainActor
+    func testAppModelOnboardingDraftPersistsAndCompletesToRequestedDestination() async throws {
+        let store = InMemoryStore()
+        let backend = MockBackendAPI(structuredAnalysisResult: .failure(MockBackendAPI.MockError.structuredUnavailable))
+        let model = AppModel(services: makeServices(store: store, backendAPI: backend))
+
+        var draft = model.resumeOnboarding()
+        draft.currentStep = .routine
+        draft.formData.goals = [.steadyEnergy]
+        draft.formData.frictions = [.bloating]
+        model.updateOnboardingDraft(draft)
+
+        XCTAssertEqual(model.onboardingDraft?.currentStep, .routine)
+        XCTAssertEqual(store.snapshot.onboardingDraft?.currentStep, .routine)
+
+        model.skipOnboardingStep()
+        XCTAssertEqual(model.onboardingDraft?.currentStep, .priorities)
+        XCTAssertEqual(store.snapshot.onboardingDraft?.currentStep, .priorities)
+
+        let completionDraft = try XCTUnwrap(model.onboardingDraft)
+        model.completeOnboarding(using: completionDraft, exitDestination: .scan)
+
+        XCTAssertTrue(model.hasCompletedOnboarding)
+        XCTAssertNil(model.onboardingDraft)
+        XCTAssertNil(store.snapshot.onboardingDraft)
+        XCTAssertEqual(model.selectedTab, .scan)
+        XCTAssertFalse(model.activeGoals.isEmpty)
+        XCTAssertNotNil(model.firstWeekPlan)
+        XCTAssertFalse(model.memoryItems.isEmpty)
+        XCTAssertEqual(model.consentRecords.last?.flags, model.userProfile.consentFlags)
+
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(backend.completedOnboardingCalls, 1)
+        XCTAssertEqual(backend.completedOnboardingProfile?.userContext.goals, [.steadyEnergy])
+        XCTAssertFalse(backend.completedOnboardingGoals.isEmpty)
+        XCTAssertNotNil(backend.completedOnboardingPlan)
+    }
+
+    @MainActor
+    func testOnboardingExitDestinationPrefersCheckInAfterRealScan() {
+        let freshModel = AppModel(services: makeServices(store: InMemoryStore()))
+        XCTAssertEqual(freshModel.onboardingPrimaryExitDestination, .scan)
+        XCTAssertEqual(freshModel.onboardingSecondaryExitDestination, .checkIn)
+
+        var snapshot = StoredAppState.fresh()
+        snapshot.history = [ScanRecord(createdAt: .now, analysis: makeAnalysis(barcode: "850000001"))]
+        let returningModel = AppModel(services: makeServices(store: InMemoryStore(snapshot: snapshot)))
+
+        XCTAssertEqual(returningModel.onboardingPrimaryExitDestination, .checkIn)
+        XCTAssertEqual(returningModel.onboardingSecondaryExitDestination, .scan)
     }
 
     func testPatternAgentEngineHighlightsLowFitEnergyPattern() async throws {

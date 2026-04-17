@@ -34,7 +34,7 @@ targets:
         WLFirebaseEnabled: false
         WLStoreKitEnabled: false
         WLUseDemoData: true
-        WLUseAppCheckDebugProvider: true
+        WLUseAppCheckDebugProvider: false
         WLPlusProductID: com.aldoolivas.wellnesslens.plus
         WLProProductID: com.aldoolivas.wellnesslens.pro
     settings:

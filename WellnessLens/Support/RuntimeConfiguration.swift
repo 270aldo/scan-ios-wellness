@@ -27,7 +27,7 @@ struct RuntimeConfiguration {
             isFirebaseEnabled: boolValue("WLFirebaseEnabled", default: false),
             isStoreKitEnabled: boolValue("WLStoreKitEnabled", default: false),
             useDemoData: boolValue("WLUseDemoData", default: true),
-            useAppCheckDebugProvider: boolValue("WLUseAppCheckDebugProvider", default: true),
+            useAppCheckDebugProvider: boolValue("WLUseAppCheckDebugProvider", default: false),
             plusProductID: stringValue("WLPlusProductID"),
             proProductID: stringValue("WLProProductID")
         )

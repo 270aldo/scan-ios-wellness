@@ -159,7 +159,11 @@ struct HistoryView: View {
                 primaryAction: handlePrimaryAction
             )
 
-            if model.services.featureFlags.weeklyInsightV2, let weeklyNarrative = model.weeklyNarrative {
+            if model.isUsingLocalInsightsFallback {
+                HistoryFallbackStateCard()
+            }
+
+            if model.featureFlags.weeklyInsightV2, let weeklyNarrative = model.weeklyNarrative {
                 HistoryWeeklyNarrativeCard(
                     narrative: weeklyNarrative,
                     isUnlocked: model.hasAccess(to: .weeklyInsightV2),
@@ -178,7 +182,7 @@ struct HistoryView: View {
                 HistoryWeeklyFallbackCard(insight: model.weeklyInsights[0])
             }
 
-            if model.services.featureFlags.patternAgent, let latestPattern {
+            if model.featureFlags.patternAgent, let latestPattern {
                 HistoryPatternCard(
                     insight: latestPattern,
                     isUnlocked: model.hasAccess(to: .patternAgent),
@@ -543,7 +547,7 @@ private struct HistorySignalCard: View {
                     .foregroundStyle(WLPalette.inkSoft)
 
                 if let actionTitle, let action {
-                    WLSecondaryButton(title: actionTitle, systemImage: "arrow.right") {
+                    WLUtilityButton(title: actionTitle, systemImage: "arrow.right") {
                         action()
                     }
                 }
@@ -633,7 +637,7 @@ private struct HistoryWeeklyNarrativeCard: View {
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
 
-                    WLSecondaryButton(title: "Unlock weekly narrative", systemImage: "sparkles") {
+                    WLUtilityButton(title: "Unlock weekly narrative", systemImage: "sparkles") {
                         unlock()
                     }
                 }
@@ -697,7 +701,7 @@ private struct HistoryPatternCard: View {
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
 
-                    WLSecondaryButton(title: "Unlock pattern memory", systemImage: "sparkles") {
+                    WLUtilityButton(title: "Unlock pattern memory", systemImage: "sparkles") {
                         unlock()
                     }
                 }
@@ -902,22 +906,12 @@ private struct HistoryRecordCard: View {
                     .font(WLTypography.caption)
                     .foregroundStyle(WLPalette.inkSoft)
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: WLSpacing.s) {
-                        WLSecondaryButton(title: "Open read", systemImage: "chart.bar") {
-                            openRead()
-                        }
-
-                        comparisonButton
+                WLActionGroup {
+                    WLUtilityButton(title: "Open read", systemImage: "chart.bar") {
+                        openRead()
                     }
 
-                    VStack(spacing: WLSpacing.s) {
-                        WLSecondaryButton(title: "Open read", systemImage: "chart.bar") {
-                            openRead()
-                        }
-
-                        comparisonButton
-                    }
+                    comparisonButton
                 }
             }
         }
@@ -953,18 +947,29 @@ private struct HistoryRecordCard: View {
 
     @ViewBuilder
     private var comparisonButton: some View {
-        if isSelectedForComparison {
-            Button(action: toggleComparison) {
-                Text("Selected for compare")
-                    .frame(maxWidth: .infinity)
+        WLSecondaryButton(
+            title: isSelectedForComparison ? "Selected for compare" : "Select for compare",
+            systemImage: isSelectedForComparison ? "checkmark.circle.fill" : "plus.circle"
+        ) {
+            toggleComparison()
+        }
+    }
+}
+
+private struct HistoryFallbackStateCard: View {
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                WLStatusBadge(title: "Fallback active", systemImage: "icloud.slash", tone: .caution)
+
+                Text("Showing local history synthesis")
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text("Weekly and pattern layers are currently using the deterministic local fallback while the remote insight refresh catches up.")
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
             }
-            .buttonStyle(WLPrimaryButtonStyle())
-        } else {
-            Button(action: toggleComparison) {
-                Text("Select for compare")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(WLSecondaryButtonStyle())
         }
     }
 }

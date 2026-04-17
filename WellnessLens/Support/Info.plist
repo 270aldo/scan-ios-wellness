@@ -50,7 +50,7 @@
 	<key>WLStoreKitEnabled</key>
 	<false/>
 	<key>WLUseAppCheckDebugProvider</key>
-	<true/>
+	<false/>
 	<key>WLUseDemoData</key>
 	<true/>
 </dict>

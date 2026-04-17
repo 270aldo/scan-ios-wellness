@@ -249,7 +249,7 @@ struct AnalysisView: View {
                     }
                 )
 
-                if model.services.featureFlags.patternAgent, let patternInsight {
+                if model.featureFlags.patternAgent, let patternInsight {
                     AnalysisPatternInsightCard(
                         insight: patternInsight,
                         isUnlocked: model.hasAccess(to: .patternAgent),
@@ -316,7 +316,7 @@ struct AnalysisView: View {
 
                 AnalysisSupportingActionsCard(
                     pantryUnlocked: model.hasAccess(to: .pantryMVP),
-                    showSaveToPantry: model.services.featureFlags.pantryMVP,
+                    showSaveToPantry: model.featureFlags.pantryMVP,
                     showAskStrategist: !hiddenSupportActions.contains(.askStrategist),
                     showTrackAgain: !hiddenSupportActions.contains(.trackAgain),
                     saveFavorite: {
@@ -574,7 +574,7 @@ private struct AnalysisOutcomeCard: View {
                     }
                 }
 
-                VStack(spacing: WLSpacing.s) {
+                WLActionGroup {
                     WLPrimaryButton(
                         title: presentation.primaryButtonTitle,
                         systemImage: primarySymbol
@@ -771,8 +771,8 @@ private struct AnalysisSupportingActionsCard: View {
                     }
                 }
 
-                VStack(spacing: WLSpacing.s) {
-                    WLSecondaryButton(title: "Save favorite", systemImage: "star") {
+                VStack(alignment: .leading, spacing: WLSpacing.s) {
+                    WLUtilityButton(title: "Save favorite", systemImage: "star") {
                         saveFavorite()
                     }
 
@@ -786,13 +786,13 @@ private struct AnalysisSupportingActionsCard: View {
                     }
 
                     if showAskStrategist {
-                        WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
+                        WLUtilityButton(title: "Ask strategist", systemImage: "message") {
                             askStrategist()
                         }
                     }
 
                     if showTrackAgain {
-                        WLSecondaryButton(title: "Track this again", systemImage: "clock.arrow.circlepath") {
+                        WLUtilityButton(title: "Track this again", systemImage: "clock.arrow.circlepath") {
                             trackAgain()
                         }
                     }
@@ -846,7 +846,7 @@ private struct AnalysisPatternInsightCard: View {
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
 
-                    WLSecondaryButton(title: "Unlock pattern detail", systemImage: "sparkles") {
+                    WLUtilityButton(title: "Unlock pattern detail", systemImage: "sparkles") {
                         unlock()
                     }
                 }

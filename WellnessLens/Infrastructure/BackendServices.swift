@@ -95,6 +95,22 @@ struct DailyHomeResponse: Codable {
     let payloadV2: DailyHomePayloadV2?
 }
 
+struct ClientKillSwitches: Codable {
+    let scanDisabled: Bool
+    let strategistDisabled: Bool
+    let homeDisabled: Bool
+}
+
+struct ClientConfigResponse: Codable {
+    let environment: String
+    let minimumSupportedVersion: String
+    let minimumSupportedBuild: Int
+    let copyVersion: String
+    let flags: WellnessFeatureFlags
+    let killSwitches: ClientKillSwitches
+    let updatedAt: Date
+}
+
 struct DailyBriefResponse: Codable {
     let brief: DailyBrief
 }
@@ -115,6 +131,25 @@ struct HistoryEventsResponse: Codable {
     let favorites: [FavoriteItem]
 }
 
+struct HistorySyncRequest: Codable {
+    let installID: String
+    let scans: [ScanEvent]
+    let checkIns: [CheckInEvent]
+    let favorites: [FavoriteItem]
+    let memoryItems: [MemoryItem]
+    let scanDecisions: [ScanDecision]
+}
+
+struct HistorySyncResponse: Codable {
+    let installID: String
+    let scans: [ScanEvent]
+    let checkIns: [CheckInEvent]
+    let favorites: [FavoriteItem]
+    let memoryItems: [MemoryItem]
+    let scanDecisions: [ScanDecision]
+    let serverTimestamp: Date
+}
+
 struct SaveFavoriteItemRequest: Codable {
     let favorite: FavoriteItem
     let installID: String
@@ -131,6 +166,7 @@ protocol AppCheckTokenProviding: Sendable {
 }
 
 protocol WellnessBackendAPI: Sendable {
+    func fetchClientConfig() async throws -> ClientConfigResponse
     func analyzeProduct(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis
     func analyzeStructuredScan(input: ScanInput, profile: UserProfile, recentScans: [ScanEvent], recentCheckIns: [CheckInEvent]) async throws -> AnalysisEnvelope
     func resolveScan(input: ScanInput) async throws -> ResolveScanResponse
@@ -142,6 +178,13 @@ protocol WellnessBackendAPI: Sendable {
     func fetchDailyHome(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyHomeResponse
     func fetchDailyBrief(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyBrief
     func fetchHistoryEvents() async throws -> HistoryEventsResponse
+    func syncHistory(
+        scans: [ScanEvent],
+        checkIns: [CheckInEvent],
+        favorites: [FavoriteItem],
+        memoryItems: [MemoryItem],
+        scanDecisions: [ScanDecision]
+    ) async throws -> HistorySyncResponse
     func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion]
     func saveScanDecision(_ decision: ScanDecision) async throws
     func saveFavoriteItem(_ favorite: FavoriteItem) async throws
@@ -262,6 +305,10 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         return response.analysis
     }
 
+    func fetchClientConfig() async throws -> ClientConfigResponse {
+        try await send(path: "v1/client-config", method: "GET")
+    }
+
     func analyzeStructuredScan(
         input: ScanInput,
         profile: UserProfile,
@@ -375,6 +422,28 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         )
     }
 
+    func syncHistory(
+        scans: [ScanEvent],
+        checkIns: [CheckInEvent],
+        favorites: [FavoriteItem],
+        memoryItems: [MemoryItem],
+        scanDecisions: [ScanDecision]
+    ) async throws -> HistorySyncResponse {
+        let installID = await identityProvider.installID()
+        return try await send(
+            path: "v1/history/sync",
+            method: "POST",
+            body: HistorySyncRequest(
+                installID: installID,
+                scans: scans,
+                checkIns: checkIns,
+                favorites: favorites,
+                memoryItems: memoryItems,
+                scanDecisions: scanDecisions
+            )
+        )
+    }
+
     func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion] {
         let installID = await identityProvider.installID()
         let response: AlternativesResponse = try await send(
@@ -417,10 +486,37 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         method: String,
         body: RequestBody
     ) async throws -> ResponseBody {
+        var request = await makeRequest(path: path, method: method)
+        request.httpBody = try encoder.encode(body)
+        let (data, response) = try await urlSession.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw BackendClientError.invalidResponse
+        }
+        guard 200..<300 ~= httpResponse.statusCode else {
+            throw BackendClientError.httpError(httpResponse.statusCode)
+        }
+        return try decoder.decode(ResponseBody.self, from: data)
+    }
+
+    private func send<ResponseBody: Decodable>(
+        path: String,
+        method: String
+    ) async throws -> ResponseBody {
+        let request = await makeRequest(path: path, method: method)
+        let (data, response) = try await urlSession.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw BackendClientError.invalidResponse
+        }
+        guard 200..<300 ~= httpResponse.statusCode else {
+            throw BackendClientError.httpError(httpResponse.statusCode)
+        }
+        return try decoder.decode(ResponseBody.self, from: data)
+    }
+
+    private func makeRequest(path: String, method: String) async -> URLRequest {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(body)
 
         if let authHeader = await identityProvider.authorizationHeader() {
             request.setValue(authHeader, forHTTPHeaderField: "Authorization")
@@ -431,15 +527,7 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         if let appCheckToken = await appCheckProvider.token() {
             request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
         }
-
-        let (data, response) = try await urlSession.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw BackendClientError.invalidResponse
-        }
-        guard 200..<300 ~= httpResponse.statusCode else {
-            throw BackendClientError.httpError(httpResponse.statusCode)
-        }
-        return try decoder.decode(ResponseBody.self, from: data)
+        return request
     }
 }
 

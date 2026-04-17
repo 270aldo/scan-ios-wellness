@@ -23,6 +23,7 @@
 - App Store Connect products for Plus and Pro
 - APNs credentials for Daily Brief notifications
 - Backend-managed AI / vision provider keys
+- See `docs/PRODUCTION_SETUP_CHECKLIST.md` for the environment-by-environment rollout checklist.
 
 ## Rules
 - Never hardcode secrets in source.

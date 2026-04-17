@@ -78,7 +78,7 @@ struct CheckInView: View {
                 )
             }
 
-            if model.services.featureFlags.weeklyInsightV2, let weeklyNarrative = model.weeklyNarrative {
+            if model.featureFlags.weeklyInsightV2, let weeklyNarrative = model.weeklyNarrative {
                 CheckInWeeklyNarrativeCard(
                     narrative: weeklyNarrative,
                     isUnlocked: model.hasAccess(to: .weeklyInsightV2),
@@ -246,25 +246,13 @@ struct CheckInView: View {
                     }
                 }
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: WLSpacing.s) {
-                        WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
-                            strategistEntryPoint = .checkIn
-                        }
-
-                        WLPrimaryButton(title: "Save check-in", systemImage: "checkmark") {
-                            saveCheckIn()
-                        }
+                WLActionGroup {
+                    WLPrimaryButton(title: "Save check-in", systemImage: "checkmark") {
+                        saveCheckIn()
                     }
 
-                    VStack(spacing: WLSpacing.s) {
-                        WLPrimaryButton(title: "Save check-in", systemImage: "checkmark") {
-                            saveCheckIn()
-                        }
-
-                        WLSecondaryButton(title: "Ask strategist", systemImage: "message") {
-                            strategistEntryPoint = .checkIn
-                        }
+                    WLUtilityButton(title: "Ask strategist", systemImage: "message") {
+                        strategistEntryPoint = .checkIn
                     }
                 }
             }
@@ -453,7 +441,7 @@ private struct CheckInRoutineReminderCard: View {
                     .font(WLTypography.captionStrong)
                     .foregroundStyle(WLPalette.rose)
 
-                WLSecondaryButton(title: "Review memory", systemImage: "clock.arrow.circlepath") {
+                WLUtilityButton(title: "Review memory", systemImage: "clock.arrow.circlepath") {
                     reviewMemory()
                 }
             }
@@ -514,7 +502,7 @@ private struct CheckInWeeklyNarrativeCard: View {
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
 
-                    WLSecondaryButton(title: "Unlock weekly narrative", systemImage: "sparkles") {
+                    WLUtilityButton(title: "Unlock weekly narrative", systemImage: "sparkles") {
                         unlock()
                     }
                 }

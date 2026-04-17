@@ -16,9 +16,11 @@ enum FirebaseBootstrap {
         if FirebaseApp.app() != nil { return }
 
         #if canImport(FirebaseAppCheck)
+        #if DEBUG
         if configuration.useAppCheckDebugProvider {
             AppCheck.setAppCheckProviderFactory(AppCheckDebugProviderFactory())
         }
+        #endif
         #endif
 
         FirebaseApp.configure()

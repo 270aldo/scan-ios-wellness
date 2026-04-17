@@ -1,0 +1,225 @@
+{
+  "checkIns": [
+    {
+      "bloating": 1,
+      "checkin_id": "9e43aa16-556b-524c-b339-95311269e013",
+      "cravings": 2,
+      "energy": 4,
+      "legacy_entry": {
+        "bloatingRelief": 4,
+        "cravingControl": 4,
+        "createdAt": 777777897.0,
+        "energy": 4,
+        "id": "f361076b-6013-5087-a673-4943920cf4a5",
+        "mood": 4,
+        "note": "Felt steadier after a calmer breakfast choice.",
+        "skin": 3
+      },
+      "linked_scan_ids": [],
+      "local_profile_id": "local-profile-dev",
+      "mood": 4,
+      "notes": "Felt steadier after a calmer breakfast choice.",
+      "read_helpful": true,
+      "satiety": 4,
+      "skin": 3,
+      "timestamp": 777777897.0
+    }
+  ],
+  "favorites": [
+    {
+      "created_at": 777777957.0,
+      "favorite_id": "bf45c73b-480b-59e7-9721-c8177b703f17",
+      "scan_event_id": "1d11cd35-662e-5873-bec0-2b6adf07f06a",
+      "summary": "Strong fit for calmer energy and digestion support.",
+      "title": "Balanced Protein Yogurt"
+    }
+  ],
+  "installID": "install-dev",
+  "memoryItems": [
+    {
+      "createdAt": 777778017.0,
+      "id": "0f1c631f-df74-5d41-b4ef-3fc2ef5813bd",
+      "kind": "staple",
+      "lastReferencedAt": 777778017.0,
+      "relatedProductID": "breakfast-anchor",
+      "relatedProductName": "Balanced Protein Yogurt",
+      "summary": "A stronger first anchor is helping steady the rest of the day.",
+      "title": "Protein-forward breakfast"
+    }
+  ],
+  "scanDecisions": [
+    {
+      "createdAt": 777778077.0,
+      "id": "6ad423d3-5c48-543d-b156-a0115adfa904",
+      "kind": "saveToRoutine",
+      "note": "Save as an easy repeat anchor.",
+      "productID": "balanced-protein-yogurt",
+      "productName": "Balanced Protein Yogurt",
+      "relatedGoal": "steadyEnergy",
+      "resolvedAt": null
+    }
+  ],
+  "scans": [
+    {
+      "analysis": {
+        "analysis_id": "analysis-manualLabel-protein,-fiber,-chia,-bl",
+        "confidence": 0.72,
+        "entity_type": "product",
+        "follow_up_prompt": "Did this match how the choice felt in real use?",
+        "green_flags": [
+          "Signal quality",
+          "Steadier anchor"
+        ],
+        "input_type": "manual",
+        "lens_scores": {
+          "body_comp": 77,
+          "energy": 82,
+          "gut": 84,
+          "hormones": 78,
+          "skin": 72
+        },
+        "medical_safety": {
+          "disclaimer_needed": true,
+          "is_medical_advice": false,
+          "risk_level": "low"
+        },
+        "overall_score": 78,
+        "pattern_context": {
+          "relevant_pattern": null,
+          "used_history": false
+        },
+        "recommended_actions": [
+          "Keep this as a repeatable default if real-life feedback agrees.",
+          "Log a check-in later so the next recommendation stays grounded."
+        ],
+        "red_flags": [
+          "Consumer wellness guidance only."
+        ],
+        "swap_suggestions": [],
+        "timestamp": 777777837.0,
+        "verdict": "good",
+        "why_today": [
+          "This read is being structured server-side to match the app contract without removing the local fallback.",
+          "This choice looks supportive enough to keep momentum intact."
+        ]
+      },
+      "input_type": "manual",
+      "latency_ms": 120,
+      "legacy_analysis": {
+        "alternatives": [],
+        "confidence": "medium",
+        "createdAt": 777777837.0,
+        "disclaimer": "WellnessLens offers consumer wellness guidance only. It does not diagnose, treat, or replace medical advice.",
+        "id": "3c7bd50e-047a-51b1-8604-136b11831aca",
+        "lensScores": [
+          {
+            "lens": "glowSkin",
+            "score": 72,
+            "summary": "Solid fit"
+          },
+          {
+            "lens": "hormoneBalance",
+            "score": 78,
+            "summary": "Solid fit"
+          },
+          {
+            "lens": "gutComfort",
+            "score": 84,
+            "summary": "Strong fit"
+          },
+          {
+            "lens": "energyMood",
+            "score": 82,
+            "summary": "Strong fit"
+          },
+          {
+            "lens": "bodyCompositionStrength",
+            "score": 77,
+            "summary": "Solid fit"
+          }
+        ],
+        "overallSummary": "Solid fit with a few tradeoffs worth watching.",
+        "productType": "food",
+        "resolvedProduct": {
+          "alternativeIDs": [],
+          "barcode": null,
+          "brand": "WellnessLens Cloud",
+          "claims": [
+            "Cloud analyzed",
+            "Consumer wellness guidance"
+          ],
+          "headline": "Cloud-resolved compatibility scan aligned with the structured contract.",
+          "id": "product-manual",
+          "ingredients": [
+            {
+              "name": "Protein"
+            },
+            {
+              "name": "Fiber"
+            },
+            {
+              "name": "Chia"
+            },
+            {
+              "name": "Blueberries"
+            }
+          ],
+          "lookupTokens": [
+            "protein",
+            "fiber",
+            "chia",
+            "blueberries"
+          ],
+          "name": "Custom Label Scan",
+          "notes": [
+            "Generated by the production API compatibility layer."
+          ],
+          "productType": "food",
+          "tags": []
+        },
+        "source": "manualLabel",
+        "topReasons": [
+          {
+            "detail": "The backend is returning the same structured shape the client already expects.",
+            "id": "d0c913d6-a527-5412-8536-4b6f2a929bbd",
+            "impact": "positive",
+            "title": "Signal quality"
+          },
+          {
+            "detail": "Protein and fiber cues often support calmer energy and digestion reads.",
+            "id": "744de625-47e9-5d48-b73c-ef60da4b319b",
+            "impact": "positive",
+            "title": "Steadier anchor"
+          }
+        ],
+        "warnings": [
+          "Consumer wellness guidance only."
+        ]
+      },
+      "local_profile_id": "local-profile-dev",
+      "normalized_payload": {
+        "brand": "WellnessLens Cloud",
+        "claims": [
+          "Cloud analyzed",
+          "Consumer wellness guidance"
+        ],
+        "entityName": "Custom Label Scan",
+        "extractedText": "protein, fiber, chia, blueberries",
+        "inferredTags": [],
+        "ingredients": [
+          "Protein",
+          "Fiber",
+          "Chia",
+          "Blueberries"
+        ],
+        "productType": "food",
+        "source": "manual"
+      },
+      "scan_id": "1d11cd35-662e-5873-bec0-2b6adf07f06a",
+      "source_agents": [
+        "BackendCompatibilityShim"
+      ],
+      "timestamp": 777777837.0
+    }
+  ]
+}

@@ -105,6 +105,7 @@ final class AppModel {
     var selectedTab: AppTab = .home
     var localProfileID: String
     var hasCompletedOnboarding: Bool
+    var onboardingDraft: OnboardingDraft?
     var userContext: UserContext
     var userProfile: UserProfile
     var activeGoals: [ActiveGoal]
@@ -134,6 +135,10 @@ final class AppModel {
     var remoteInsights: [WeeklyInsight] = []
     var remoteHomePayload: DailyHomePayload?
     var remoteHomePayloadV2: DailyHomePayloadV2?
+    var remoteClientConfig: ClientConfigResponse?
+    var backendStatuses: [BackendSurfaceKind: BackendSurfaceStatus]
+    var hasAttemptedRemoteInsightsRefresh = false
+    var hasAttemptedRemoteHomeRefresh = false
     var bootstrapCompleted = false
 
     private let homeComposer = HomeComposer()
@@ -148,6 +153,14 @@ final class AppModel {
         self.services = resolvedServices
         let snapshot = resolvedServices.store.load()
         let derivedProfile = snapshot.userProfile ?? UserProfile.migrated(from: snapshot.userContext)
+        let resolvedOnboardingDraft: OnboardingDraft?
+        if snapshot.hasCompletedOnboarding {
+            resolvedOnboardingDraft = nil
+        } else if let snapshotDraft = snapshot.onboardingDraft {
+            resolvedOnboardingDraft = snapshotDraft
+        } else {
+            resolvedOnboardingDraft = OnboardingDraft(profile: derivedProfile)
+        }
         let bootstrap = onboardingPlanner.build(profile: derivedProfile)
         let billingMode: BillingMode = resolvedServices.configuration.isStoreKitEnabled ? .storeKit : .demo
         let phaseTwoArtifacts = RootOrchestrator().refreshPhaseTwoArtifacts(
@@ -160,6 +173,7 @@ final class AppModel {
 
         localProfileID = snapshot.localProfileID
         hasCompletedOnboarding = snapshot.hasCompletedOnboarding
+        onboardingDraft = resolvedOnboardingDraft
         userContext = derivedProfile.userContext
         userProfile = derivedProfile
         activeGoals = snapshot.activeGoals.isEmpty && snapshot.hasCompletedOnboarding ? bootstrap.activeGoals : snapshot.activeGoals
@@ -182,6 +196,7 @@ final class AppModel {
         pantryItems = phaseTwoArtifacts.pantryItems
         entitlementSnapshot = AccessPolicy().snapshot(subscriptionStatus: snapshot.subscriptionStatus, billingMode: billingMode)
         activePaywall = nil
+        backendStatuses = initialBackendStatuses(hasBackend: resolvedServices.backendAPI != nil)
     }
 
     var featuredProducts: [ProductCandidate] {
@@ -194,6 +209,22 @@ final class AppModel {
 
     var lastDemoScenario: DemoScenario? {
         DemoScenarioCatalog.scenario(id: lastDemoScenarioID)
+    }
+
+    var featureFlags: WellnessFeatureFlags {
+        remoteClientConfig?.flags ?? services.featureFlags
+    }
+
+    var backendStatusList: [BackendSurfaceStatus] {
+        BackendSurfaceKind.allCases.compactMap { backendStatuses[$0] }
+    }
+
+    var hasBackendDebugSurface: Bool {
+        services.configuration.hasBackend || remoteClientConfig != nil || services.configuration.isFirebaseEnabled
+    }
+
+    var backendAuthModeTitle: String {
+        services.configuration.isFirebaseEnabled ? "Firebase anonymous auth" : "Local install ID"
     }
 
     var weeklyInsights: [WeeklyInsight] {
@@ -215,6 +246,22 @@ final class AppModel {
 
     var activeEntitlements: [WellnessEntitlement] {
         entitlementSnapshot.activeEntitlements
+    }
+
+    var onboardingPrimaryExitDestination: OnboardingExitDestination {
+        hasCompletedOnboarding || !scanEvents.isEmpty || !history.isEmpty ? .checkIn : .scan
+    }
+
+    var onboardingSecondaryExitDestination: OnboardingExitDestination {
+        onboardingPrimaryExitDestination == .scan ? .checkIn : .scan
+    }
+
+    var isUsingLocalHomeFallback: Bool {
+        services.backendAPI != nil && hasAttemptedRemoteHomeRefresh && remoteHomePayload == nil
+    }
+
+    var isUsingLocalInsightsFallback: Bool {
+        services.backendAPI != nil && hasAttemptedRemoteInsightsRefresh && remoteInsights.isEmpty
     }
 
     var latestRecord: ScanRecord? {
@@ -257,7 +304,7 @@ final class AppModel {
             hasSampleReads: dailyHomeSurfaceAvailability.hasSampleReads
         )
 
-        guard services.featureFlags.homeSurfaceV2 else {
+        guard featureFlags.homeSurfaceV2 else {
             return DailyHomePayloadV2.legacy(
                 payload: dailyHomePayload,
                 plan: legacyPlan
@@ -282,7 +329,7 @@ final class AppModel {
     }
 
     func hasAccess(to entitlement: WellnessEntitlement) -> Bool {
-        if !services.featureFlags.entitlementsV2 {
+        if !featureFlags.entitlementsV2 {
             return true
         }
         return accessPolicy.isUnlocked(entitlement, snapshot: entitlementSnapshot)
@@ -291,10 +338,10 @@ final class AppModel {
     private var dailyHomeSurfaceAvailability: DailyHomeSurfaceAvailability {
         DailyHomeSurfaceAvailability(
             hasFirstWeekPlan: dailyHomePayload.state == .calibrating && firstWeekPlan != nil,
-            hasDailyBrief: services.featureFlags.dailyBrief,
+            hasDailyBrief: featureFlags.dailyBrief,
             hasGoals: !activeGoals.isEmpty,
             hasRoutines: !routines.isEmpty,
-            hasPantry: services.featureFlags.pantryMVP && !visiblePantryItems.isEmpty,
+            hasPantry: featureFlags.pantryMVP && !visiblePantryItems.isEmpty,
             hasSampleReads: !demoScenarioPacks.isEmpty,
             hasUserActivity: !history.isEmpty || !checkIns.isEmpty || !scanEvents.isEmpty || !checkInEvents.isEmpty
         )
@@ -306,10 +353,10 @@ final class AppModel {
         surface: PaywallSurface,
         previewLines: [String] = []
     ) -> Bool {
-        guard services.featureFlags.entitlementsV2 else { return true }
+        guard featureFlags.entitlementsV2 else { return true }
         guard !hasAccess(to: entitlement) else { return true }
 
-        if services.featureFlags.contextualPaywall {
+        if featureFlags.contextualPaywall {
             activePaywall = accessPolicy.paywallContext(
                 for: entitlement,
                 surface: surface,
@@ -417,15 +464,83 @@ final class AppModel {
             .sorted(by: { $0.createdAt > $1.createdAt })
     }
 
-    func completeOnboarding(with context: UserContext) {
-        completeOnboarding(with: UserProfile.migrated(from: context))
+    func startOnboardingIfNeeded() {
+        guard !hasCompletedOnboarding else { return }
+        guard onboardingDraft == nil else { return }
+        onboardingDraft = OnboardingDraft(profile: userProfile)
+        persist()
     }
 
-    func completeOnboarding(with profile: UserProfile) {
+    @discardableResult
+    func resumeOnboarding() -> OnboardingDraft {
+        if let onboardingDraft {
+            return onboardingDraft
+        }
+
+        let draft = OnboardingDraft(profile: userProfile)
+        onboardingDraft = draft
+        persist()
+        return draft
+    }
+
+    func updateOnboardingDraft(_ draft: OnboardingDraft) {
+        guard !hasCompletedOnboarding else { return }
+        var updatedDraft = draft
+        updatedDraft.touch()
+        onboardingDraft = updatedDraft
+        persist()
+    }
+
+    func updateOnboardingStep(_ step: OnboardingStep) {
+        guard !hasCompletedOnboarding else { return }
+        var draft = resumeOnboarding()
+        draft.currentStep = step
+        updateOnboardingDraft(draft)
+    }
+
+    func advanceOnboarding() {
+        guard !hasCompletedOnboarding else { return }
+        var draft = resumeOnboarding()
+        guard let nextStep = draft.currentStep.next else { return }
+        draft.currentStep = nextStep
+        updateOnboardingDraft(draft)
+    }
+
+    func skipOnboardingStep() {
+        guard !hasCompletedOnboarding else { return }
+        var draft = resumeOnboarding()
+        guard draft.currentStep.isSkippable, let nextStep = draft.currentStep.next else { return }
+        draft.currentStep = nextStep
+        updateOnboardingDraft(draft)
+    }
+
+    func discardOnboardingDraft() {
+        guard !hasCompletedOnboarding else {
+            onboardingDraft = nil
+            persist()
+            return
+        }
+
+        onboardingDraft = OnboardingDraft(profile: userProfile)
+        persist()
+    }
+
+    func completeOnboarding(with context: UserContext, exitDestination: OnboardingExitDestination? = nil) {
+        completeOnboarding(with: UserProfile.migrated(from: context), exitDestination: exitDestination)
+    }
+
+    func completeOnboarding(using draft: OnboardingDraft, exitDestination: OnboardingExitDestination) {
+        updateOnboardingDraft(draft)
+        let profile = draft.formData.makeProfile(createdAt: draft.createdAt)
+        completeOnboarding(with: profile, exitDestination: exitDestination)
+    }
+
+    func completeOnboarding(with profile: UserProfile, exitDestination: OnboardingExitDestination? = nil) {
         let bootstrap = onboardingPlanner.build(profile: profile)
         userProfile = bootstrap.profile
         userContext = bootstrap.profile.userContext
         hasCompletedOnboarding = true
+        onboardingDraft = nil
         activeGoals = bootstrap.activeGoals
         firstWeekPlan = bootstrap.firstWeekPlan
         memoryItems = bootstrap.seededMemory
@@ -440,6 +555,9 @@ final class AppModel {
         )
         refreshPhaseTwoState()
         refreshEntitlementSnapshot()
+        if let exitDestination {
+            selectedTab = exitDestination.tab
+        }
         persist()
 
         Task {
@@ -753,6 +871,8 @@ final class AppModel {
         bootstrapCompleted = true
 
         await services.identityProvider.prepare()
+        await refreshClientConfigIfNeeded()
+        await syncHistoryIfNeeded()
         refreshEntitlementSnapshot()
         refreshPhaseTwoState()
         await refreshInsightsIfNeeded()
@@ -1180,18 +1300,46 @@ final class AppModel {
         for input: ScanInput,
         legacyAnalysis: ScanAnalysis
     ) async -> AnalysisEnvelope? {
-        guard services.featureFlags.structuredAnalysis, let backendAPI = services.backendAPI else {
+        guard featureFlags.structuredAnalysis, let backendAPI = services.backendAPI else {
+            if services.backendAPI == nil {
+                updateBackendStatus(.structuredScan, state: .unavailable, detail: "No backend configured. Using deterministic local analysis.")
+            }
             return nil
         }
 
+        if remoteClientConfig?.killSwitches.scanDisabled == true {
+            updateBackendStatus(
+                .structuredScan,
+                state: .fallback,
+                detail: "Remote structured scan is disabled by client config.",
+                incrementAttempt: true,
+                incrementFallback: true
+            )
+            return rootOrchestrator.localStructuredAnalysis(
+                input: input,
+                legacyAnalysis: legacyAnalysis,
+                recentScans: scanEvents,
+                recentCheckIns: checkInEvents
+            )
+        }
+
+        updateBackendStatus(.structuredScan, state: .syncPending, detail: "Requesting remote AnalysisEnvelope.", incrementAttempt: true)
         do {
-            return try await backendAPI.analyzeStructuredScan(
+            let analysis = try await backendAPI.analyzeStructuredScan(
                 input: input,
                 profile: userProfile,
                 recentScans: scanEvents,
                 recentCheckIns: checkInEvents
             )
+            updateBackendStatus(.structuredScan, state: .live, detail: "Remote AnalysisEnvelope applied.")
+            return analysis
         } catch {
+            updateBackendStatus(
+                .structuredScan,
+                state: .fallback,
+                detail: backendErrorDetail(prefix: "Structured scan fell back to local analysis.", error: error),
+                incrementFallback: true
+            )
             return rootOrchestrator.localStructuredAnalysis(
                 input: input,
                 legacyAnalysis: legacyAnalysis,
@@ -1201,56 +1349,225 @@ final class AppModel {
         }
     }
 
+    private func refreshClientConfigIfNeeded() async {
+        guard let backendAPI = services.backendAPI else {
+            remoteClientConfig = nil
+            updateBackendStatus(.clientConfig, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.clientConfig, state: .syncPending, detail: "Fetching runtime client config.", incrementAttempt: true)
+        do {
+            let config = try await backendAPI.fetchClientConfig()
+            remoteClientConfig = config
+            updateBackendStatus(
+                .clientConfig,
+                state: .live,
+                detail: "\(config.environment) • minimum build \(config.minimumSupportedBuild) • copy \(config.copyVersion)"
+            )
+        } catch {
+            remoteClientConfig = nil
+            updateBackendStatus(
+                .clientConfig,
+                state: .retryableError,
+                detail: backendErrorDetail(prefix: "Client config fetch failed.", error: error)
+            )
+        }
+    }
+
+    private func syncHistoryIfNeeded() async {
+        guard let backendAPI = services.backendAPI else {
+            updateBackendStatus(.historySync, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.historySync, state: .syncPending, detail: "Reconciling local-first history with the backend.", incrementAttempt: true)
+        do {
+            let response = try await backendAPI.syncHistory(
+                scans: scanEvents,
+                checkIns: checkInEvents,
+                favorites: favoriteItems,
+                memoryItems: memoryItems,
+                scanDecisions: scanDecisions
+            )
+            applyHistorySync(response)
+            updateBackendStatus(
+                .historySync,
+                state: .live,
+                detail: "Merged \(response.scans.count) scans, \(response.checkIns.count) check-ins, \(response.favorites.count) favorites."
+            )
+        } catch {
+            updateBackendStatus(
+                .historySync,
+                state: .retryableError,
+                detail: backendErrorDetail(prefix: "History sync failed.", error: error)
+            )
+        }
+    }
+
     private func syncProfileIfNeeded() async {
-        guard let backendAPI = services.backendAPI else { return }
-        try? await backendAPI.completeOnboarding(
-            profile: userProfile,
-            activeGoals: activeGoals,
-            firstWeekPlan: firstWeekPlan
-        )
+        guard let backendAPI = services.backendAPI else {
+            updateBackendStatus(.profileSync, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.profileSync, state: .syncPending, detail: "Syncing onboarding/profile context.", incrementAttempt: true)
+        do {
+            try await backendAPI.completeOnboarding(
+                profile: userProfile,
+                activeGoals: activeGoals,
+                firstWeekPlan: firstWeekPlan
+            )
+            updateBackendStatus(.profileSync, state: .live, detail: "Profile and onboarding context synced.")
+        } catch {
+            updateBackendStatus(
+                .profileSync,
+                state: .retryableError,
+                detail: backendErrorDetail(prefix: "Profile sync failed.", error: error)
+            )
+        }
     }
 
     private func syncCheckInIfNeeded(_ checkIn: CheckInEntry) async {
-        guard let backendAPI = services.backendAPI else { return }
-        try? await backendAPI.saveCheckIn(checkIn, userContext: userContext)
+        guard let backendAPI = services.backendAPI else {
+            updateBackendStatus(.checkInSync, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.checkInSync, state: .syncPending, detail: "Syncing check-in payload.", incrementAttempt: true)
+        do {
+            try await backendAPI.saveCheckIn(checkIn, userContext: userContext)
+            updateBackendStatus(.checkInSync, state: .live, detail: "Check-in synced.")
+        } catch {
+            updateBackendStatus(
+                .checkInSync,
+                state: .retryableError,
+                detail: backendErrorDetail(prefix: "Check-in sync failed.", error: error)
+            )
+        }
     }
 
     private func syncCheckInEventIfNeeded(_ event: CheckInEvent) async {
-        guard let backendAPI = services.backendAPI else { return }
-        try? await backendAPI.saveCheckInEvent(event)
+        guard let backendAPI = services.backendAPI else {
+            updateBackendStatus(.checkInSync, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.checkInSync, state: .syncPending, detail: "Syncing structured check-in event.", incrementAttempt: true)
+        do {
+            try await backendAPI.saveCheckInEvent(event)
+            updateBackendStatus(.checkInSync, state: .live, detail: "Structured check-in event synced.")
+        } catch {
+            updateBackendStatus(
+                .checkInSync,
+                state: .retryableError,
+                detail: backendErrorDetail(prefix: "Structured check-in sync failed.", error: error)
+            )
+        }
     }
 
     private func syncMemoryIfNeeded() async {
-        guard let backendAPI = services.backendAPI else { return }
-        try? await backendAPI.upsertMemoryItems(memoryItems)
+        guard let backendAPI = services.backendAPI else {
+            updateBackendStatus(.memorySync, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.memorySync, state: .syncPending, detail: "Upserting memory context.", incrementAttempt: true)
+        do {
+            try await backendAPI.upsertMemoryItems(memoryItems)
+            updateBackendStatus(.memorySync, state: .live, detail: "Memory context synced.")
+        } catch {
+            updateBackendStatus(
+                .memorySync,
+                state: .retryableError,
+                detail: backendErrorDetail(prefix: "Memory sync failed.", error: error)
+            )
+        }
     }
 
     private func syncScanDecisionIfNeeded(_ decision: ScanDecision) async {
-        guard let backendAPI = services.backendAPI else { return }
-        try? await backendAPI.saveScanDecision(decision)
+        guard let backendAPI = services.backendAPI else {
+            updateBackendStatus(.decisionSync, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.decisionSync, state: .syncPending, detail: "Syncing scan decision.", incrementAttempt: true)
+        do {
+            try await backendAPI.saveScanDecision(decision)
+            updateBackendStatus(.decisionSync, state: .live, detail: "Scan decision synced.")
+        } catch {
+            updateBackendStatus(
+                .decisionSync,
+                state: .retryableError,
+                detail: backendErrorDetail(prefix: "Scan decision sync failed.", error: error)
+            )
+        }
     }
 
     private func syncFavoriteIfNeeded(_ favorite: FavoriteItem) async {
-        guard let backendAPI = services.backendAPI else { return }
-        try? await backendAPI.saveFavoriteItem(favorite)
+        guard let backendAPI = services.backendAPI else {
+            updateBackendStatus(.favoriteSync, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.favoriteSync, state: .syncPending, detail: "Syncing favorite.", incrementAttempt: true)
+        do {
+            try await backendAPI.saveFavoriteItem(favorite)
+            updateBackendStatus(.favoriteSync, state: .live, detail: "Favorite synced.")
+        } catch {
+            updateBackendStatus(
+                .favoriteSync,
+                state: .retryableError,
+                detail: backendErrorDetail(prefix: "Favorite sync failed.", error: error)
+            )
+        }
     }
 
     private func refreshInsightsIfNeeded() async {
-        guard let backendAPI = services.backendAPI else { return }
+        hasAttemptedRemoteInsightsRefresh = true
+        guard let backendAPI = services.backendAPI else {
+            updateBackendStatus(.insights, state: .unavailable, detail: "No backend configured in runtime settings.")
+            return
+        }
+
+        updateBackendStatus(.insights, state: .syncPending, detail: "Refreshing weekly insights.", incrementAttempt: true)
         do {
             remoteInsights = try await backendAPI.getWeeklyInsights(userContext: userContext)
+            updateBackendStatus(.insights, state: .live, detail: "Remote weekly insights applied.")
         } catch {
             remoteInsights = []
+            updateBackendStatus(
+                .insights,
+                state: .fallback,
+                detail: backendErrorDetail(prefix: "Insights fell back to local generation.", error: error),
+                incrementFallback: true
+            )
         }
     }
 
     private func refreshHomeIfNeeded() async {
+        hasAttemptedRemoteHomeRefresh = true
         guard let backendAPI = services.backendAPI else {
             remoteHomePayload = nil
             remoteHomePayloadV2 = nil
+            updateBackendStatus(.home, state: .unavailable, detail: "No backend configured in runtime settings.")
             return
         }
 
+        if remoteClientConfig?.killSwitches.homeDisabled == true {
+            remoteHomePayload = nil
+            remoteHomePayloadV2 = nil
+            updateBackendStatus(
+                .home,
+                state: .fallback,
+                detail: "Remote home is disabled by client config.",
+                incrementAttempt: true,
+                incrementFallback: true
+            )
+            return
+        }
+
+        updateBackendStatus(.home, state: .syncPending, detail: "Refreshing daily home payload.", incrementAttempt: true)
         do {
             let response = try await backendAPI.fetchDailyHome(
                 profile: userProfile,
@@ -1258,18 +1575,90 @@ final class AppModel {
             )
             remoteHomePayload = response.payload
             remoteHomePayloadV2 = response.payloadV2
+            updateBackendStatus(.home, state: .live, detail: "Remote Home payload applied.")
         } catch {
             remoteHomePayload = nil
             remoteHomePayloadV2 = nil
+            updateBackendStatus(
+                .home,
+                state: .fallback,
+                detail: backendErrorDetail(prefix: "Home fell back to local composition.", error: error),
+                incrementFallback: true
+            )
         }
+    }
+
+    private func updateBackendStatus(
+        _ kind: BackendSurfaceKind,
+        state: BackendSurfaceState,
+        detail: String,
+        incrementAttempt: Bool = false,
+        incrementFallback: Bool = false
+    ) {
+        var status = backendStatuses[kind] ?? BackendSurfaceStatus.initial(kind: kind, hasBackend: services.backendAPI != nil)
+        if incrementAttempt {
+            status.attempts += 1
+        }
+        if incrementFallback {
+            status.fallbackCount += 1
+        }
+        status.state = state
+        status.detail = detail
+        status.updatedAt = .now
+        backendStatuses[kind] = status
+    }
+
+    private func backendErrorDetail(prefix: String, error: Error) -> String {
+        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return prefix }
+        return "\(prefix) \(message)"
+    }
+
+    private func applyHistorySync(_ response: HistorySyncResponse) {
+        scanEvents = mergeItems(scanEvents, with: response.scans, id: \.id) { $0.timestamp > $1.timestamp }
+        checkInEvents = mergeItems(checkInEvents, with: response.checkIns, id: \.id) { $0.timestamp > $1.timestamp }
+        favoriteItems = mergeItems(favoriteItems, with: response.favorites, id: \.id) { $0.createdAt > $1.createdAt }
+        memoryItems = mergeItems(memoryItems, with: response.memoryItems, id: \.id) { $0.lastReferencedAt > $1.lastReferencedAt }
+        scanDecisions = mergeItems(scanDecisions, with: response.scanDecisions, id: \.id) { $0.createdAt > $1.createdAt }
+        checkIns = checkInEvents.map(\.legacyEntry).sorted(by: { $0.createdAt > $1.createdAt })
+        history = rebuiltHistory(from: scanEvents, favorites: favoriteItems)
+        refreshPhaseTwoState()
+        persist()
+    }
+
+    private func rebuiltHistory(from scanEvents: [ScanEvent], favorites: [FavoriteItem]) -> [ScanRecord] {
+        let favoriteScanIDs = Set(favorites.map(\.scanEventID))
+        return scanEvents.map { event in
+            ScanRecord(
+                id: UUID(uuidString: event.id) ?? UUID(),
+                createdAt: event.legacyAnalysis.createdAt,
+                analysis: event.legacyAnalysis,
+                isFavorite: favoriteScanIDs.contains(event.id)
+            )
+        }
+        .sorted(by: { $0.createdAt > $1.createdAt })
+    }
+
+    private func mergeItems<Item, Identifier: Hashable>(
+        _ local: [Item],
+        with remote: [Item],
+        id: KeyPath<Item, Identifier>,
+        sort: (Item, Item) -> Bool
+    ) -> [Item] {
+        var merged: [Identifier: Item] = Dictionary(uniqueKeysWithValues: local.map { ($0[keyPath: id], $0) })
+        for item in remote {
+            merged[item[keyPath: id]] = item
+        }
+        return Array(merged.values).sorted(by: sort)
     }
 
     private func persist() {
         services.store.save(
             StoredAppState(
-                schemaVersion: 3,
+                schemaVersion: 4,
                 localProfileID: localProfileID,
                 hasCompletedOnboarding: hasCompletedOnboarding,
+                onboardingDraft: onboardingDraft,
                 userContext: userContext,
                 history: history,
                 checkIns: checkIns,

@@ -42,7 +42,7 @@ struct ScanView: View {
                 }
             )
 
-            if model.services.featureFlags.mealSnapshot || model.services.featureFlags.menuScanner {
+            if model.featureFlags.mealSnapshot || model.featureFlags.menuScanner {
                 ScanModeActionsCard(
                     openMealSnapshot: {
                         requestPhotoSelection(for: .mealSnapshot)
@@ -50,8 +50,8 @@ struct ScanView: View {
                     openMenuScanner: {
                         requestPhotoSelection(for: .menuScanner)
                     },
-                    showMealSnapshot: model.services.featureFlags.mealSnapshot,
-                    showMenuScanner: model.services.featureFlags.menuScanner,
+                    showMealSnapshot: model.featureFlags.mealSnapshot,
+                    showMenuScanner: model.featureFlags.menuScanner,
                     menuScannerUnlocked: model.hasAccess(to: .menuScanner)
                 )
             }
@@ -405,12 +405,12 @@ private struct ScanPrimaryActionCard: View {
                     systemImage: "camera.viewfinder"
                 )
 
-                VStack(spacing: WLSpacing.s) {
+                WLActionGroup(alignment: .trailing) {
                     WLPrimaryButton(title: "Open camera scanner", systemImage: "camera.viewfinder") {
                         openScanner()
                     }
 
-                    WLSecondaryButton(title: "Use a label photo", systemImage: "photo") {
+                    WLUtilityButton(title: "Use a label photo", systemImage: "photo") {
                         openPhotoSelection()
                     }
                 }
@@ -645,9 +645,9 @@ private struct ScanStatusCard: View {
                 }
 
                 if !actions.isEmpty {
-                    VStack(spacing: WLSpacing.s) {
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
                         ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
-                            WLSecondaryButton(title: action.title, systemImage: action.systemImage) {
+                            WLUtilityButton(title: action.title, systemImage: action.systemImage) {
                                 action.action()
                             }
                         }
@@ -712,7 +712,7 @@ private struct ScanSampleReadsTeaserCard: View {
                     systemImage: "sparkles"
                 )
 
-                WLSecondaryButton(title: "Show sample reads", systemImage: "sparkles") {
+                WLUtilityButton(title: "Show sample reads", systemImage: "sparkles") {
                     expand()
                 }
             }
