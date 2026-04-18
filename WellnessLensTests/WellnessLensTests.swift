@@ -273,6 +273,93 @@ final class WellnessLensTests: XCTestCase {
         return verdict
     }
 
+    func testLILAGreatFitHeadlineUsesSpanishFallbackCopy() {
+        var analysis = makeAnalysis(barcode: "850000001")
+        analysis.resolvedProduct.name = "Yogurt griego"
+        analysis.lensScores = analysis.lensScores.map { lensScore in
+            LensScore(lens: lensScore.lens, score: 92, summary: lensScore.summary)
+        }
+
+        let verdict = analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+
+        XCTAssertTrue(verdict.headline.contains("sí suma"))
+        XCTAssertFalse(verdict.headline.localizedCaseInsensitiveContains("strong fit"))
+    }
+
+    func testLILASkipHeadlineLowercasesProductName() {
+        var analysis = makeAnalysis(barcode: "850000001")
+        analysis.resolvedProduct.name = "Bebida Energética"
+        analysis.lensScores = analysis.lensScores.map { lensScore in
+            LensScore(lens: lensScore.lens, score: 32, summary: lensScore.summary)
+        }
+
+        let verdict = analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+
+        XCTAssertTrue(verdict.headline.hasPrefix("Mejor no "))
+        XCTAssertTrue(verdict.headline.contains("bebida energética"))
+    }
+
+    func testLILAFallbackHeadlinesDoNotContainEnglishFragments() {
+        let forbidden = ["strong fit", "supportive", "occasional choice", "not the best fit", "bit more detail"]
+        let verdicts: [LILADomain.ScanVerdict] = [
+            {
+                var analysis = makeAnalysis(barcode: "850000001")
+                analysis.resolvedProduct.name = "Producto"
+                analysis.lensScores = analysis.lensScores.map { LensScore(lens: $0.lens, score: 92, summary: $0.summary) }
+                return analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+            }(),
+            {
+                var analysis = makeAnalysis(barcode: "850000001")
+                analysis.resolvedProduct.name = "Producto"
+                analysis.lensScores = analysis.lensScores.map { LensScore(lens: $0.lens, score: 74, summary: $0.summary) }
+                return analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+            }(),
+            {
+                var analysis = makeAnalysis(barcode: "850000001")
+                analysis.resolvedProduct.name = "Producto"
+                analysis.lensScores = analysis.lensScores.map { LensScore(lens: $0.lens, score: 56, summary: $0.summary) }
+                return analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+            }(),
+            {
+                var analysis = makeAnalysis(barcode: "850000001")
+                analysis.resolvedProduct.name = "Producto"
+                analysis.lensScores = analysis.lensScores.map { LensScore(lens: $0.lens, score: 28, summary: $0.summary) }
+                return analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+            }(),
+            AnalysisEnvelope(
+                analysisID: UUID().uuidString,
+                timestamp: .now,
+                inputType: .barcode,
+                entityType: .product,
+                verdict: .needsMoreInfo,
+                overallScore: 0,
+                lensScores: StructuredLensScores(skin: 0, hormones: 0, gut: 0, energy: 0, bodyComp: 0),
+                whyToday: [],
+                greenFlags: [],
+                redFlags: [],
+                recommendedActions: [],
+                swapSuggestions: [],
+                followUpPrompt: "",
+                confidence: 0.2,
+                medicalSafety: MedicalSafety(isMedicalAdvice: false, disclaimerNeeded: true, riskLevel: .low),
+                patternContext: PatternContext(usedHistory: false, relevantPattern: nil)
+            ).lilaVerdict(
+                fallbackAnalysis: nil,
+                context: UserContext.starter.lilaContext()
+            )
+        ]
+
+        for verdict in verdicts {
+            let headline = verdict.headline.lowercased()
+            for fragment in forbidden {
+                XCTAssertFalse(
+                    headline.contains(fragment),
+                    "Headline contains English fragment '\(fragment)': \(verdict.headline)"
+                )
+            }
+        }
+    }
+
     @MainActor
     private func makeServices(
         store: InMemoryStore = InMemoryStore(),

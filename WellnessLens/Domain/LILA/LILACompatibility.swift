@@ -719,15 +719,15 @@ private extension LILADomain.FitLevel {
     func headline(productName: String, context: LILADomain.UserContext) -> String {
         switch self {
         case .greatFit:
-            return "\(productName) looks like a strong fit for your current goals."
+            return "\(productName) sí suma para tu contexto de hoy"
         case .goodFit:
-            return "\(productName) looks supportive with only minor watchouts."
+            return "\(productName) se ve compatible con tu día de hoy"
         case .occasional:
-            return "\(productName) can work, but it is better as an occasional choice."
+            return "\(productName) va mejor como algo ocasional hoy"
         case .skip:
-            return "\(productName) is not the best fit for today."
+            return "Mejor no \(productName.lowercased()) hoy"
         case .unclear:
-            return "The scan needs a bit more detail before making a confident call."
+            return "No hay claridad suficiente sobre \(productName)"
         }
     }
 }
