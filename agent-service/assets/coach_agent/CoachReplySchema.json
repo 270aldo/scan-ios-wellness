@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CoachReply",
+  "description": "Structured output de LILA en modo Coach. Mapea a CoachReply en backend (Python) e iOS (Swift).",
+  "type": "object",
+  "required": [
+    "replyId",
+    "createdAt",
+    "message",
+    "tone",
+    "suggestedActions",
+    "safetyFlags",
+    "evidenceTier",
+    "disclaimer"
+  ],
+  "properties": {
+    "replyId": {
+      "type": "string",
+      "description": "UUID v4 que identifica esta respuesta específica."
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 datetime de cuándo se generó la respuesta."
+    },
+
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 560,
+      "description": "Respuesta conversacional de 1-4 frases. Prosa hablable. Sin bullets ni markdown."
+    },
+
+    "tone": {
+      "type": "string",
+      "enum": ["warmDirect", "supportive", "cautious", "celebratory"],
+      "description": "Registro emocional de la respuesta."
+    },
+
+    "referencedVerdictId": {
+      "type": ["string", "null"],
+      "description": "UUID del ScanVerdict referenciado, si la respuesta refiere a un scan específico."
+    },
+
+    "referencedVerdictSummary": {
+      "type": ["string", "null"],
+      "maxLength": 140,
+      "description": "Resumen de 1 frase del verdict referenciado para fact-check del usuario."
+    },
+
+    "referencedPatterns": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "Patrones históricos usados en la respuesta. Solo si son reales, no inventados.",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+
+    "suggestedActions": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "Máximo 3 acciones sugeridas, ordenadas por relevancia.",
+      "items": {
+        "type": "object",
+        "required": ["type", "label"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["scan", "check_in", "view_verdict", "consult_professional", "none"]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "description": "Verbo primero. Ej: 'Escanea lo que vas a tomar'."
+          },
+          "deepLinkHint": {
+            "type": ["string", "null"],
+            "maxLength": 80,
+            "description": "Hint para routing en-app. No es URL completa."
+          }
+        }
+      }
+    },
+
+    "followUpQuestion": {
+      "type": ["string", "null"],
+      "maxLength": 160,
+      "description": "Opcional. Una sola pregunta abierta para mantener conversación."
+    },
+
+    "safetyFlags": {
+      "type": "array",
+      "description": "Flags activados. Array vacío si ningún guardrail aplica.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "crisis_signal",
+          "ed_guardrail",
+          "pregnancy_guardrail",
+          "diabetes_guardrail",
+          "minor_detected"
+        ]
+      },
+      "uniqueItems": true
+    },
+
+    "evidenceTier": {
+      "type": "string",
+      "enum": ["high", "emerging", "personalPattern"],
+      "description": "Nivel honesto de evidencia detrás de la respuesta."
+    },
+
+    "disclaimer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Siempre incluido. Base + línea específica si aplica guardrail."
+    },
+
+    "voiceTags": {
+      "type": ["array", "null"],
+      "maxItems": 8,
+      "description": "Tags voice-ready alineados a ElevenLabs suggested_audio_tags. Ignorados en V1.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "warm",
+          "calm",
+          "curious",
+          "encouraging",
+          "cautious",
+          "gentle",
+          "confident",
+          "playful"
+        ]
+      },
+      "uniqueItems": true
+    },
+
+    "voiceDirective": {
+      "type": ["string", "null"],
+      "maxLength": 120,
+      "description": "Hints simples de prosodia para TTS. Ignorado en V1."
+    },
+
+    "spokenVersion": {
+      "type": ["string", "null"],
+      "maxLength": 640,
+      "description": "Variante hablable del message si difiere por necesidades de pronunciación. Solo cuando aplica."
+    }
+  }
+}

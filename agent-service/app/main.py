@@ -5,17 +5,22 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 
 from app.contracts import (
+    CoachReply,
+    CoachReplyRequest,
     ScanVerdictRequest,
     ScanVerdictResponse,
     StrategistReplyRequest,
     StrategistReplyResponse,
 )
+from app.coach_runtime import get_coach_assets
 from app.service import StrategistService, get_settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.strategist_service = StrategistService(settings=get_settings())
+    settings = get_settings()
+    get_coach_assets(settings.coach_assets_dir)
+    app.state.strategist_service = StrategistService(settings=settings)
     yield
 
 
@@ -51,3 +56,11 @@ async def scan_verdict(
     service: StrategistService = Depends(get_service),
 ) -> ScanVerdictResponse:
     return ScanVerdictResponse(verdict=service.verdict(request))
+
+
+@app.post("/v1/coach/reply", response_model=CoachReply)
+async def coach_reply(
+    request: CoachReplyRequest,
+    service: StrategistService = Depends(get_service),
+) -> CoachReply:
+    return service.coach_reply(request)

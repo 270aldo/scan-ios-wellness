@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from datetime import datetime
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -226,3 +227,99 @@ class ScanVerdictRequest(ContractModel):
 
 class ScanVerdictResponse(ContractModel):
     verdict: ScanVerdict
+
+
+class CoachTone(str, Enum):
+    warmDirect = "warmDirect"
+    supportive = "supportive"
+    cautious = "cautious"
+    celebratory = "celebratory"
+
+
+class CoachEvidenceTier(str, Enum):
+    high = "high"
+    emerging = "emerging"
+    personalPattern = "personalPattern"
+
+
+class CoachSuggestedActionType(str, Enum):
+    scan = "scan"
+    check_in = "check_in"
+    view_verdict = "view_verdict"
+    consult_professional = "consult_professional"
+    none = "none"
+
+
+class CoachSafetyFlag(str, Enum):
+    crisis_signal = "crisis_signal"
+    ed_guardrail = "ed_guardrail"
+    pregnancy_guardrail = "pregnancy_guardrail"
+    diabetes_guardrail = "diabetes_guardrail"
+    minor_detected = "minor_detected"
+
+
+class CoachVoiceTag(str, Enum):
+    warm = "warm"
+    calm = "calm"
+    curious = "curious"
+    encouraging = "encouraging"
+    cautious = "cautious"
+    gentle = "gentle"
+    confident = "confident"
+    playful = "playful"
+
+
+class CoachSuggestedAction(ContractModel):
+    type: CoachSuggestedActionType
+    label: str = Field(min_length=1, max_length=40)
+    deepLinkHint: str | None = Field(default=None, max_length=80)
+
+
+class CoachVerdictSummary(ContractModel):
+    verdictId: str
+    productName: str
+    fit: str
+    createdAt: datetime
+
+
+class CoachCheckInEntry(ContractModel):
+    date: str
+    energy: int = Field(ge=1, le=5)
+    bloating: int = Field(ge=1, le=5)
+    mood: int = Field(ge=1, le=5)
+    note: str | None = Field(default=None, max_length=280)
+
+
+class CoachThreadTurn(ContractModel):
+    role: str
+    content: str = Field(max_length=640)
+    timestamp: datetime | None = None
+
+
+class CoachReplyRequest(ContractModel):
+    userMessage: str = Field(min_length=1, max_length=2000)
+    userContextSummary: str = Field(max_length=2000)
+    latestVerdictSummary: CoachVerdictSummary | None = None
+    recentVerdictSummaries: list[CoachVerdictSummary] = Field(default_factory=list, max_length=5)
+    recentCheckIns: list[CoachCheckInEntry] = Field(default_factory=list, max_length=3)
+    memorySummaries: list[str] = Field(default_factory=list, max_length=5)
+    patternInsights: list[str] = Field(default_factory=list, max_length=3)
+    threadHistory: list[CoachThreadTurn] = Field(default_factory=list, max_length=10)
+
+
+class CoachReply(ContractModel):
+    replyId: str
+    createdAt: datetime
+    message: str = Field(min_length=1, max_length=560)
+    tone: CoachTone
+    referencedVerdictId: str | None = None
+    referencedVerdictSummary: str | None = Field(default=None, max_length=140)
+    referencedPatterns: list[str] = Field(default_factory=list, max_length=3)
+    suggestedActions: list[CoachSuggestedAction] = Field(default_factory=list, max_length=3)
+    followUpQuestion: str | None = Field(default=None, max_length=160)
+    safetyFlags: list[CoachSafetyFlag] = Field(default_factory=list)
+    evidenceTier: CoachEvidenceTier
+    disclaimer: str = Field(min_length=1)
+    voiceTags: list[CoachVoiceTag] | None = Field(default=None, max_length=8)
+    voiceDirective: str | None = Field(default=None, max_length=120)
+    spokenVersion: str | None = Field(default=None, max_length=640)
