@@ -64,6 +64,14 @@ final class WellnessLensTests: XCTestCase {
         func writeNutritionIfAllowed(verdict: LILADomain.ScanVerdict, preferences: LILADomain.DataSyncPreferences) async {}
     }
 
+    private struct StubCoachAgent: CoachAgentServing {
+        var reply: CoachReply
+
+        func generateReply(for request: CoachAgentRequest) async -> CoachReply {
+            reply
+        }
+    }
+
     private final class MockBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         enum MockError: Error {
             case structuredUnavailable
@@ -273,6 +281,45 @@ final class WellnessLensTests: XCTestCase {
         return verdict
     }
 
+    private func makeCoachReply(
+        message: String = "Respuesta del coach.",
+        followUpQuestion: String? = nil,
+        tone: CoachTone = .warmDirect,
+        safetyFlags: [CoachSafetyFlag] = []
+    ) -> CoachReply {
+        CoachReply(
+            replyId: UUID().uuidString,
+            createdAt: .now,
+            message: message,
+            tone: tone,
+            referencedVerdictId: nil,
+            referencedVerdictSummary: nil,
+            referencedPatterns: [],
+            suggestedActions: [],
+            followUpQuestion: followUpQuestion,
+            safetyFlags: safetyFlags,
+            evidenceTier: .emerging,
+            disclaimer: "Nácar ofrece guía direccional de wellness, no diagnóstico ni tratamiento médico.",
+            voiceTags: nil,
+            voiceDirective: nil,
+            spokenVersion: nil
+        )
+    }
+
+    private func makeCoachRequest(userMessage: String) -> CoachAgentRequest {
+        CoachAgentRequest(
+            userMessage: userMessage,
+            profile: .starter,
+            biometrics: nil,
+            latestVerdict: nil,
+            recentVerdicts: [],
+            recentCheckIns: [],
+            memorySummaries: [],
+            patternInsights: [],
+            threadHistory: []
+        )
+    }
+
     func testLILAGreatFitHeadlineUsesSpanishFallbackCopy() {
         var analysis = makeAnalysis(barcode: "850000001")
         analysis.resolvedProduct.name = "Yogurt griego"
@@ -360,6 +407,76 @@ final class WellnessLensTests: XCTestCase {
         }
     }
 
+    func testDeterministicCoachAgentRespondsToOpenMessage() async {
+        let agent = DeterministicCoachAgent()
+
+        let reply = await agent.generateReply(for: makeCoachRequest(userMessage: "Hola"))
+
+        XCTAssertFalse(reply.message.isEmpty)
+        XCTAssertTrue(reply.disclaimer.contains("Nácar"))
+    }
+
+    func testDeterministicCoachAgentTriggersEDGuardrail() async {
+        let agent = DeterministicCoachAgent()
+
+        let reply = await agent.generateReply(for: makeCoachRequest(userMessage: "Me salto la cena para compensar lo de hoy"))
+
+        XCTAssertTrue(reply.safetyFlags.contains(.edGuardrail))
+        XCTAssertEqual(reply.tone, .supportive)
+    }
+
+    func testDeterministicCoachAgentTriggersCrisisSignal() async {
+        let agent = DeterministicCoachAgent()
+
+        let reply = await agent.generateReply(for: makeCoachRequest(userMessage: "Ya no puedo más, no quiero estar aquí"))
+
+        XCTAssertTrue(reply.safetyFlags.contains(.crisisSignal))
+    }
+
+    func testRemoteCoachAgentFallsBackOnNetworkFailure() async {
+        let agent = RemoteCoachAgent(
+            endpoint: URL(string: "http://127.0.0.1:1/v1/coach/reply")!,
+            timeoutSeconds: 0.1
+        )
+
+        let reply = await agent.generateReply(for: makeCoachRequest(userMessage: "Hola"))
+
+        XCTAssertFalse(reply.message.isEmpty)
+        XCTAssertTrue(reply.disclaimer.contains("Nácar"))
+    }
+
+    @MainActor
+    func testSendStrategistMessageUsesCoachReplyAndFlattensFollowUpQuestion() async {
+        let store = InMemoryStore()
+        let coachReply = makeCoachReply(
+            message: "Esta es la respuesta principal.",
+            followUpQuestion: "¿Quieres que lo revisemos mañana?"
+        )
+        let model = AppModel(
+            services: makeServices(
+                store: store,
+                coachAgent: StubCoachAgent(reply: coachReply)
+            )
+        )
+
+        let initialMessages = model.conversationThread(for: .home).messages.count
+        model.sendStrategistMessage("Hola coach", entryPoint: .home)
+        await waitForConversationMessageCount(
+            initialMessages + 2,
+            in: model,
+            entryPoint: .home
+        )
+
+        let thread = model.conversationThread(for: .home)
+        let recentMessages = Array(thread.messages.suffix(2))
+
+        XCTAssertEqual(recentMessages.map(\.speaker), [.user, .strategist])
+        XCTAssertEqual(
+            recentMessages.last?.text,
+            "Esta es la respuesta principal.\n\n¿Quieres que lo revisemos mañana?"
+        )
+    }
+
     @MainActor
     private func makeServices(
         store: InMemoryStore = InMemoryStore(),
@@ -368,13 +485,15 @@ final class WellnessLensTests: XCTestCase {
         scanService: ScanService? = nil,
         backendAPI: WellnessBackendAPI? = nil,
         healthKitService: HealthKitServicing = NoopHealthKitService(),
-        scanVerdictAgent: ScanVerdictServing = DeterministicScanVerdictAgent()
+        scanVerdictAgent: ScanVerdictServing = DeterministicScanVerdictAgent(),
+        coachAgent: any CoachAgentServing = DeterministicCoachAgent()
     ) -> AppServices {
         store.snapshot.subscriptionStatus = subscriptionStatus
 
         return AppServices(
             configuration: RuntimeConfiguration(
                 backendBaseURL: nil,
+                agentServiceBaseURL: nil,
                 isFirebaseEnabled: false,
                 isStoreKitEnabled: false,
                 useDemoData: true,
@@ -390,6 +509,7 @@ final class WellnessLensTests: XCTestCase {
             backendAPI: backendAPI,
             identityProvider: LocalInstallIdentityProvider(),
             scanVerdictAgent: scanVerdictAgent,
+            coachAgent: coachAgent,
             healthKitService: healthKitService
         )
     }
@@ -1441,18 +1561,52 @@ final class WellnessLensTests: XCTestCase {
     }
 
     @MainActor
-    func testStrategistUsesSharedThreadAcrossEntryPoints() {
+    func testStrategistUsesSharedThreadAcrossEntryPoints() async {
         let model = AppModel(services: makeServices())
 
         model.sendStrategistMessage("What matters most today?", entryPoint: .home)
+        let initialCount = model.conversationThread(for: .home).messages.count
+        await waitForConversationMessageCount(
+            initialCount + 1,
+            in: model,
+            entryPoint: .home
+        )
         let firstCount = model.conversationThread(for: .home).messages.count
 
         model.sendStrategistMessage("Should this stay in my routine?", entryPoint: .scan)
+        await waitForConversationMessageCount(
+            firstCount + 2,
+            in: model,
+            entryPoint: .home
+        )
 
         XCTAssertEqual(model.conversationThreads.count, 1)
         XCTAssertEqual(model.conversationThread(for: .home).messages.count, firstCount + 2)
         XCTAssertEqual(model.conversationThread(for: .scan).messages.count, firstCount + 2)
         XCTAssertEqual(model.conversationThread(for: .scan).title, "Daily strategist")
+    }
+
+    @MainActor
+    private func waitForConversationMessageCount(
+        _ expectedCount: Int,
+        in model: AppModel,
+        entryPoint: StrategistEntryPoint,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        for _ in 0..<50 {
+            if model.conversationThread(for: entryPoint).messages.count >= expectedCount {
+                return
+            }
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        XCTFail(
+            "Expected at least \(expectedCount) messages for \(entryPoint)",
+            file: file,
+            line: line
+        )
     }
 
     func testComposeScanEventUsesStructuredOverrideAndPreservesLegacyAnalysis() async throws {

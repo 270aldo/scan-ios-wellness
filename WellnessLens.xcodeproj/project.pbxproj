@@ -11,6 +11,7 @@
 		08D82F5F9B562167110EF52F /* GoogleService-Info.plist.example in Resources */ = {isa = PBXBuildFile; fileRef = DBB2A5D3A12EF2FB096035F9 /* GoogleService-Info.plist.example */; };
 		09016013DBDA6EAAFE6047F5 /* ScanVerdict.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F13576A8224F7039BAB2438 /* ScanVerdict.swift */; };
 		0F9F259634E215712835235D /* LILACompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4730FFE2E8DD177465E9449E /* LILACompatibility.swift */; };
+		11A46DA95CCF75FEC05F888B /* CoachAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21A83436A2E1353BA6921520 /* CoachAgent.swift */; };
 		260FBA4E154C01BBC06B66F6 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = C48074434D973B8D0D26B8BB /* FirebaseCore */; };
 		2E004E419D1367C376E03AAD /* ScanVerdictAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A4F09D7393AF69E5B7A6CF /* ScanVerdictAgent.swift */; };
 		342DB409B3CBE3FE5071F0BC /* DailyAssistantOrchestration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC9C9FC55A4768A6A4B9D403 /* DailyAssistantOrchestration.swift */; };
@@ -42,6 +43,7 @@
 		B40830763A30FADDB9EF46D1 /* StrategistDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45830359EBEEA92645E5869D /* StrategistDomain.swift */; };
 		B67DA6B8F16E8289E30A1E46 /* FirebaseBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ABA94F5FF50A0A71014CB46 /* FirebaseBootstrap.swift */; };
 		C13819161F4CDB39D7D7F1FD /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 588E67EAD9F41F6BB704F863 /* FirebaseStorage */; };
+		C6466102669EE82CC87B0070 /* RemoteCoachAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBE6A9BFC8A82700A5826DDD /* RemoteCoachAgent.swift */; };
 		DCA681F5EE7D1D8941B9FC7B /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 89EF23150A79016F248FEA7A /* FirebaseFirestore */; };
 		E017D3AF22AF853449BB7298 /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDB98B2A419CC4CB6BE17DE /* OnboardingState.swift */; };
 		E16AA0CB9E9EFE9D3C9078BA /* BackendAdminView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EA8CD4C6DBDE65E2F06732A /* BackendAdminView.swift */; };
@@ -66,6 +68,7 @@
 		03F73812C1949AE6E2BACBAD /* DailyAssistantContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyAssistantContracts.swift; sourceTree = "<group>"; };
 		07FEB953B498E112C8A8A8C2 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		0EDB98B2A419CC4CB6BE17DE /* OnboardingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingState.swift; sourceTree = "<group>"; };
+		21A83436A2E1353BA6921520 /* CoachAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachAgent.swift; sourceTree = "<group>"; };
 		2751749671D09209A11C24EF /* NutritionProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionProfile.swift; sourceTree = "<group>"; };
 		300C0E719D0C64482CD38604 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		359AAE5E6E967C33DE26BBAE /* WLTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WLTheme.swift; sourceTree = "<group>"; };
@@ -91,6 +94,7 @@
 		AC9C9FC55A4768A6A4B9D403 /* DailyAssistantOrchestration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyAssistantOrchestration.swift; sourceTree = "<group>"; };
 		AD6712C15F39C0CD038D10CA /* WLComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WLComponents.swift; sourceTree = "<group>"; };
 		B54152303D18CFF92CA0F833 /* PantryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PantryView.swift; sourceTree = "<group>"; };
+		BBE6A9BFC8A82700A5826DDD /* RemoteCoachAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCoachAgent.swift; sourceTree = "<group>"; };
 		D0A25C06B295C2E81EF98B81 /* StrategistChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategistChatView.swift; sourceTree = "<group>"; };
 		D2FFA343C4C84CF758A2B273 /* FitnessProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FitnessProfile.swift; sourceTree = "<group>"; };
 		D83C1DA02B8771A7785C414C /* WellnessLensApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WellnessLensApp.swift; sourceTree = "<group>"; };
@@ -256,9 +260,11 @@
 			isa = PBXGroup;
 			children = (
 				E1EA1030BB7C1D45922895FE /* BackendServices.swift */,
+				21A83436A2E1353BA6921520 /* CoachAgent.swift */,
 				5ABA94F5FF50A0A71014CB46 /* FirebaseBootstrap.swift */,
 				48A65C90DCE79798A7002B45 /* HealthKitService.swift */,
 				F0D30805104A44656D733B57 /* PlatformServices.swift */,
+				BBE6A9BFC8A82700A5826DDD /* RemoteCoachAgent.swift */,
 				95A4F09D7393AF69E5B7A6CF /* ScanVerdictAgent.swift */,
 			);
 			path = Infrastructure;
@@ -431,6 +437,7 @@
 				4FD440EA2D0E7E2FA3EEE77D /* BackendDiagnostics.swift in Sources */,
 				96B1028840C4D1A1A132F0A7 /* BackendServices.swift in Sources */,
 				665BAA4D75C65877B80AE257 /* CheckInView.swift in Sources */,
+				11A46DA95CCF75FEC05F888B /* CoachAgent.swift in Sources */,
 				672EAC2CF3F02B5D3AAADBE4 /* DailyAssistantContracts.swift in Sources */,
 				342DB409B3CBE3FE5071F0BC /* DailyAssistantOrchestration.swift in Sources */,
 				AF95ECE6E07EC05A3ABEBF88 /* FemaleBiology.swift in Sources */,
@@ -447,6 +454,7 @@
 				9E6D31AD150DAC18907DF5D2 /* PantryView.swift in Sources */,
 				7F75B63604552039C797C6B6 /* PlatformServices.swift in Sources */,
 				7B6708450D900C16E8F20F3E /* ProfileView.swift in Sources */,
+				C6466102669EE82CC87B0070 /* RemoteCoachAgent.swift in Sources */,
 				A8E0571DAAA922DAE49231DF /* RuntimeConfiguration.swift in Sources */,
 				09016013DBDA6EAAFE6047F5 /* ScanVerdict.swift in Sources */,
 				2E004E419D1367C376E03AAD /* ScanVerdictAgent.swift in Sources */,

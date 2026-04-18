@@ -555,6 +555,7 @@ struct AppServices {
     var backendAPI: WellnessBackendAPI?
     var identityProvider: IdentityProviding
     var scanVerdictAgent: ScanVerdictServing = DeterministicScanVerdictAgent()
+    var coachAgent: any CoachAgentServing = DeterministicCoachAgent()
     var healthKitService: HealthKitServicing = NoopHealthKitService()
 
     @MainActor
@@ -604,6 +605,10 @@ struct AppServices {
             subscription = DemoSubscriptionController(status: snapshot.subscriptionStatus)
         }
 
+        let coachAgent: any CoachAgentServing = configuration.agentServiceBaseURL.map {
+            RemoteCoachAgent(endpoint: $0.appending(path: "v1/coach/reply"))
+        } ?? DeterministicCoachAgent()
+
         return AppServices(
             configuration: configuration,
             featureFlags: WellnessFeatureFlags(),
@@ -614,6 +619,7 @@ struct AppServices {
             backendAPI: backendAPI,
             identityProvider: identityProvider,
             scanVerdictAgent: DeterministicScanVerdictAgent(),
+            coachAgent: coachAgent,
             healthKitService: {
                 #if canImport(HealthKit)
                 return HealthKitService()

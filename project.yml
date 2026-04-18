@@ -33,6 +33,7 @@ targets:
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen: {}
         WLBackendBaseURL: ""
+        WLAgentServiceBaseURL: ""
         WLFirebaseEnabled: false
         WLStoreKitEnabled: false
         WLUseDemoData: true

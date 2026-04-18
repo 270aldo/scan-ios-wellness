@@ -149,6 +149,7 @@ final class AppModel {
     private let strategistResponseEngine = StrategistResponseEngine()
     private let rootOrchestrator = RootOrchestrator()
     private let accessPolicy = AccessPolicy()
+    private var coachReplyTask: Task<Void, Never>?
 
     init(services: AppServices? = nil) {
         let resolvedServices = services ?? AppServices.makePreviewServices()
@@ -1207,32 +1208,13 @@ final class AppModel {
         entryPoint: StrategistEntryPoint,
         linkedAnalysis: ScanAnalysis? = nil
     ) {
-        let threadIndex = ensureConversationThread(for: entryPoint)
+        var threadIndex = ensureConversationThread(for: entryPoint)
         let userMessage = ConversationMessage(
             speaker: .user,
             text: text,
             createdAt: .now
         )
         conversationThreads[threadIndex].messages.append(userMessage)
-
-        let context = contextAssembler.build(
-            profile: userProfile,
-            activeGoals: activeGoals,
-            history: history,
-            checkIns: checkIns,
-            decisions: scanDecisions,
-            memoryItems: memoryItems,
-            patternInsights: patternInsights,
-            weeklyNarrative: weeklyNarrative
-        )
-        let reply = strategistResponseEngine.respond(
-            to: text,
-            profile: userProfile,
-            entryPoint: entryPoint,
-            context: context,
-            linkedAnalysis: linkedAnalysis
-        )
-        conversationThreads[threadIndex].messages.append(reply)
         conversationThreads[threadIndex].updatedAt = .now
         conversationThreads[threadIndex].title = "Daily strategist"
         conversationThreads[threadIndex].entryPoint = .home
@@ -1240,23 +1222,31 @@ final class AppModel {
         if threadIndex != 0 {
             let primaryThread = conversationThreads.remove(at: threadIndex)
             conversationThreads.insert(primaryThread, at: 0)
-        }
-
-        if linkedAnalysis != nil {
-            upsertMemoryItem(
-                MemoryItem(
-                    kind: .strategistTakeaway,
-                    title: "Strategist takeaway",
-                    summary: reply.text,
-                    relatedProductID: linkedAnalysis?.resolvedProduct.id,
-                    relatedProductName: linkedAnalysis?.resolvedProduct.name,
-                    createdAt: .now,
-                    lastReferencedAt: .now
-                )
-            )
+            threadIndex = 0
         }
 
         persist()
+
+        let threadID = conversationThreads[threadIndex].id
+        let userMessageID = userMessage.id
+        let previousTask = coachReplyTask
+
+        coachReplyTask = Task { @MainActor [weak self] in
+            await previousTask?.value
+            guard let self else { return }
+
+            let reply = await self.generateCoachReply(
+                userMessage: text,
+                threadID: threadID,
+                userMessageID: userMessageID
+            )
+            self.insertCoachReply(
+                reply,
+                threadID: threadID,
+                after: userMessageID,
+                linkedAnalysis: linkedAnalysis
+            )
+        }
     }
 
     private func analyze(_ input: ScanInput) async {
@@ -1763,6 +1753,95 @@ final class AppModel {
         let thread = fallbackStrategistThread()
         conversationThreads.insert(thread, at: 0)
         return 0
+    }
+
+    private func generateCoachReply(
+        userMessage: String,
+        threadID: ConversationThread.ID,
+        userMessageID: ConversationMessage.ID
+    ) async -> CoachReply {
+        let biometrics = await services.healthKitService.currentSnapshot(for: userProfile)
+        let thread = conversationThreads.first(where: { $0.id == threadID }) ?? fallbackStrategistThread()
+
+        let request = CoachAgentRequest(
+            userMessage: userMessage,
+            profile: userProfile,
+            biometrics: biometrics,
+            latestVerdict: latestVerdict,
+            recentVerdicts: Array(scanVerdicts.prefix(5).map(\.verdict)),
+            recentCheckIns: Array(checkInEvents.prefix(3)),
+            memorySummaries: Array(memoryItems.prefix(5).map(\.summary)),
+            patternInsights: Array(patternInsights.prefix(3).map { "\($0.title): \($0.summary)" }),
+            threadHistory: coachThreadHistory(for: thread, through: userMessageID)
+        )
+
+        return await services.coachAgent.generateReply(for: request)
+    }
+
+    private func coachThreadHistory(
+        for thread: ConversationThread,
+        through userMessageID: ConversationMessage.ID
+    ) -> [CoachThreadTurn] {
+        let scopedMessages: ArraySlice<ConversationMessage>
+        if let endIndex = thread.messages.firstIndex(where: { $0.id == userMessageID }) {
+            scopedMessages = thread.messages.prefix(endIndex + 1).suffix(10)
+        } else {
+            scopedMessages = thread.messages.suffix(10)
+        }
+
+        return scopedMessages.map {
+            CoachThreadTurn(
+                role: $0.speaker == .user ? "user" : "assistant",
+                content: $0.text,
+                timestamp: $0.createdAt
+            )
+        }
+    }
+
+    private func insertCoachReply(
+        _ reply: CoachReply,
+        threadID: ConversationThread.ID,
+        after userMessageID: ConversationMessage.ID,
+        linkedAnalysis: ScanAnalysis?
+    ) {
+        guard let threadIndex = conversationThreads.firstIndex(where: { $0.id == threadID }) else { return }
+
+        let message = ConversationMessage(
+            speaker: .strategist,
+            text: coachMessageText(from: reply),
+            createdAt: reply.createdAt,
+            citedMemoryIDs: []
+        )
+
+        if let userIndex = conversationThreads[threadIndex].messages.firstIndex(where: { $0.id == userMessageID }) {
+            conversationThreads[threadIndex].messages.insert(message, at: userIndex + 1)
+        } else {
+            conversationThreads[threadIndex].messages.append(message)
+        }
+        conversationThreads[threadIndex].updatedAt = reply.createdAt
+
+        if linkedAnalysis != nil {
+            upsertMemoryItem(
+                MemoryItem(
+                    kind: .strategistTakeaway,
+                    title: "Strategist takeaway",
+                    summary: reply.message,
+                    relatedProductID: linkedAnalysis?.resolvedProduct.id,
+                    relatedProductName: linkedAnalysis?.resolvedProduct.name,
+                    createdAt: reply.createdAt,
+                    lastReferencedAt: reply.createdAt
+                )
+            )
+        }
+
+        persist()
+    }
+
+    private func coachMessageText(from reply: CoachReply) -> String {
+        guard let followUpQuestion = reply.followUpQuestion, !followUpQuestion.isEmpty else {
+            return reply.message
+        }
+        return "\(reply.message)\n\n\(followUpQuestion)"
     }
 
     private func primaryConversationThreadIndex() -> Int? {

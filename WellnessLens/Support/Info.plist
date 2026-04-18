@@ -45,6 +45,8 @@
 	<dict/>
 	<key>WLBackendBaseURL</key>
 	<string></string>
+	<key>WLAgentServiceBaseURL</key>
+	<string></string>
 	<key>WLFirebaseEnabled</key>
 	<false/>
 	<key>WLPlusProductID</key>

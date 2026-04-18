@@ -2,6 +2,7 @@ import Foundation
 
 struct RuntimeConfiguration {
     let backendBaseURL: URL?
+    let agentServiceBaseURL: URL?
     let isFirebaseEnabled: Bool
     let isStoreKitEnabled: Bool
     let useDemoData: Bool
@@ -24,6 +25,7 @@ struct RuntimeConfiguration {
 
         return RuntimeConfiguration(
             backendBaseURL: stringValue("WLBackendBaseURL").flatMap(URL.init(string:)),
+            agentServiceBaseURL: stringValue("WLAgentServiceBaseURL").flatMap(URL.init(string:)),
             isFirebaseEnabled: boolValue("WLFirebaseEnabled", default: false),
             isStoreKitEnabled: boolValue("WLStoreKitEnabled", default: false),
             useDemoData: boolValue("WLUseDemoData", default: true),
@@ -35,5 +37,9 @@ struct RuntimeConfiguration {
 
     var hasBackend: Bool {
         backendBaseURL != nil
+    }
+
+    var hasAgentService: Bool {
+        agentServiceBaseURL != nil
     }
 }
