@@ -199,6 +199,177 @@ struct AnalysisPresentationPlan: Equatable {
     }
 }
 
+struct ScanVerdictSurfaceContent: Equatable {
+    struct WatchoutItem: Equatable, Identifiable {
+        let id: UUID
+        let title: String
+        let detail: String
+        let severity: LILADomain.WatchoutSeverity
+        let relevance: LILADomain.PersonalRelevance
+    }
+
+    let productName: String
+    let fit: LILADomain.FitLevel
+    let fitTitle: String
+    let headline: String
+    let primaryReason: String
+    let confidence: LILADomain.Confidence
+    let confidenceTitle: String
+    let sourceTitle: String
+    let watchouts: [WatchoutItem]
+    let betterSwapTitle: String?
+    let betterSwapReason: String?
+    let followUpPrompt: String?
+
+    static func build(verdict: LILADomain.ScanVerdict) -> ScanVerdictSurfaceContent {
+        ScanVerdictSurfaceContent(
+            productName: verdict.resolvedProduct.name,
+            fit: verdict.fit,
+            fitTitle: verdict.fit.surfaceTitle,
+            headline: verdict.headline,
+            primaryReason: verdict.primaryReason,
+            confidence: verdict.confidence,
+            confidenceTitle: verdict.confidence.surfaceTitle,
+            sourceTitle: verdict.scanSource.surfaceTitle,
+            watchouts: Array(verdict.watchouts.prefix(2)).map {
+                WatchoutItem(
+                    id: $0.id,
+                    title: $0.title,
+                    detail: $0.detail,
+                    severity: $0.severity,
+                    relevance: $0.personalRelevance
+                )
+            },
+            betterSwapTitle: verdict.betterSwap?.productName,
+            betterSwapReason: verdict.betterSwap?.whyBetter,
+            followUpPrompt: verdict.trackPrompt?.questionText
+        )
+    }
+}
+
+extension LILADomain.FitLevel {
+    var surfaceTitle: String {
+        switch self {
+        case .greatFit:
+            "Great fit"
+        case .goodFit:
+            "Good fit"
+        case .occasional:
+            "Occasional"
+        case .skip:
+            "Skip for now"
+        case .unclear:
+            "Needs a cleaner read"
+        }
+    }
+
+    var badgeTone: WLStatusBadge.Tone {
+        switch self {
+        case .greatFit, .goodFit:
+            .success
+        case .occasional, .unclear:
+            .accent
+        case .skip:
+            .caution
+        }
+    }
+
+    var pillTone: WLPill.Tone {
+        switch self {
+        case .greatFit, .goodFit:
+            .accent
+        case .occasional, .unclear:
+            .soft
+        case .skip:
+            .neutral
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .greatFit, .goodFit:
+            "checkmark.seal"
+        case .occasional:
+            "slider.horizontal.3"
+        case .skip:
+            "exclamationmark.triangle"
+        case .unclear:
+            "questionmark.circle"
+        }
+    }
+}
+
+private extension LILADomain.Confidence {
+    var surfaceTitle: String {
+        switch self {
+        case .high:
+            "High confidence"
+        case .medium:
+            "Medium confidence"
+        case .low:
+            "Low confidence"
+        case .insufficient:
+            "Insufficient confidence"
+        }
+    }
+}
+
+private extension LILADomain.ScanSource {
+    var surfaceTitle: String {
+        switch self {
+        case .liveBarcode:
+            "Live barcode"
+        case .manualBarcode:
+            "Manual barcode"
+        case .labelPhoto:
+            "Label photo"
+        case .mealPhoto:
+            "Meal snapshot"
+        case .menuPhoto:
+            "Menu scanner"
+        case .manualLabel:
+            "Manual label"
+        case .voiceLog:
+            "Voice log"
+        }
+    }
+}
+
+private extension LILADomain.WatchoutSeverity {
+    var surfaceTitle: String {
+        switch self {
+        case .gentle:
+            "Gentle"
+        case .moderate:
+            "Watch"
+        case .important:
+            "Important"
+        }
+    }
+
+    var pillTone: WLPill.Tone {
+        switch self {
+        case .gentle:
+            .soft
+        case .moderate, .important:
+            .neutral
+        }
+    }
+}
+
+private extension LILADomain.PersonalRelevance {
+    var surfaceTitle: String {
+        switch self {
+        case .general:
+            "General"
+        case .personal:
+            "Personal"
+        case .clinical:
+            "Higher sensitivity"
+        }
+    }
+}
+
 struct AnalysisView: View {
     let analysis: ScanAnalysis
 
@@ -225,6 +396,26 @@ struct AnalysisView: View {
         )
     }
 
+    private var scanVerdict: LILADomain.ScanVerdict {
+        if let storedVerdict = model.scanVerdict(for: analysis) {
+            return storedVerdict
+        }
+
+        let context = model.userProfile.lilaContext()
+        if let structuredAnalysis = structuredEvent?.analysis {
+            return structuredAnalysis.lilaVerdict(
+                fallbackAnalysis: analysis,
+                context: context
+            )
+        }
+
+        return analysis.lilaVerdict(context: context)
+    }
+
+    private var verdictSurface: ScanVerdictSurfaceContent {
+        ScanVerdictSurfaceContent.build(verdict: scanVerdict)
+    }
+
     private var hiddenSupportActions: Set<AnalysisActionKind> {
         Set([presentation.primaryAction, presentation.secondaryAction].compactMap { $0 })
     }
@@ -233,12 +424,17 @@ struct AnalysisView: View {
         NavigationStack {
             WLScreen {
                 AnalysisHero(
-                    analysis: analysis,
-                    presentation: presentation
+                    presentation: presentation,
+                    verdictSurface: verdictSurface
+                )
+
+                ScanVerdictSurfaceCard(
+                    content: verdictSurface
                 )
 
                 AnalysisOutcomeCard(
                     presentation: presentation,
+                    followUpPrompt: nil,
                     primaryAction: {
                         handleAction(presentation.primaryAction)
                     },
@@ -401,8 +597,8 @@ struct AnalysisView: View {
 }
 
 private struct AnalysisHero: View {
-    let analysis: ScanAnalysis
     let presentation: AnalysisPresentationPlan
+    let verdictSurface: ScanVerdictSurfaceContent
 
     var body: some View {
         WLHeroSurface {
@@ -418,7 +614,7 @@ private struct AnalysisHero: View {
 
                         Spacer(minLength: WLSpacing.s)
 
-                        WLPill(title: presentation.verdictTitle, tone: verdictPillTone)
+                        WLPill(title: verdictSurface.fitTitle, tone: verdictSurface.fit.pillTone)
                     }
 
                     VStack(alignment: .leading, spacing: WLSpacing.s) {
@@ -429,16 +625,16 @@ private struct AnalysisHero: View {
                             style: .heroGlass
                         )
 
-                        WLPill(title: presentation.verdictTitle, tone: verdictPillTone)
+                        WLPill(title: verdictSurface.fitTitle, tone: verdictSurface.fit.pillTone)
                     }
                 }
 
-                Text(presentation.displayTitle)
+                Text(verdictSurface.productName)
                     .font(WLTypography.hero)
                     .foregroundStyle(.white)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(presentation.summary)
+                Text(verdictSurface.headline)
                     .font(WLTypography.body)
                     .foregroundStyle(Color.white.opacity(0.90))
                     .fixedSize(horizontal: false, vertical: true)
@@ -448,22 +644,11 @@ private struct AnalysisHero: View {
                     alignment: .leading,
                     spacing: WLSpacing.s
                 ) {
-                    detailPill(title: "Source", value: analysis.source.title)
-                    detailPill(title: "Score", value: "\(presentation.overallScore)")
-                    detailPill(title: "Confidence", value: analysis.confidence.title)
+                    detailPill(title: "Fit", value: verdictSurface.fitTitle)
+                    detailPill(title: "Confidence", value: verdictSurface.confidenceTitle)
+                    detailPill(title: "Source", value: verdictSurface.sourceTitle)
                 }
             }
-        }
-    }
-
-    private var verdictPillTone: WLPill.Tone {
-        switch presentation.verdict {
-        case .good:
-            return .accent
-        case .adjust, .needsMoreInfo:
-            return .soft
-        case .avoid:
-            return .neutral
         }
     }
 
@@ -494,8 +679,152 @@ private struct AnalysisHero: View {
     }
 }
 
+private struct ScanVerdictSurfaceCard: View {
+    let content: ScanVerdictSurfaceContent
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Today's verdict",
+                    subtitle: "This is the primary read to use before drilling into the legacy detail.",
+                    systemImage: "sparkles"
+                )
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: content.fitTitle,
+                            systemImage: content.fit.symbol,
+                            tone: content.fit.badgeTone
+                        )
+
+                        WLPill(title: content.confidenceTitle, tone: .soft)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: content.fitTitle,
+                            systemImage: content.fit.symbol,
+                            tone: content.fit.badgeTone
+                        )
+
+                        WLPill(title: content.confidenceTitle, tone: .soft)
+                    }
+                }
+
+                Text(content.headline)
+                    .font(WLTypography.title)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(content.primaryReason)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                if !content.watchouts.isEmpty {
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Watchouts")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        ForEach(content.watchouts) { watchout in
+                            ScanVerdictWatchoutCard(watchout: watchout)
+                        }
+                    }
+                }
+
+                if let betterSwapTitle = content.betterSwapTitle,
+                   let betterSwapReason = content.betterSwapReason {
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Better swap")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(betterSwapTitle)
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(betterSwapReason)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                    .padding(WLSpacing.l)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .wlCardSurface(
+                        fill: LinearGradient(
+                            colors: [WLPalette.blush.opacity(0.24), Color.white.opacity(0.98)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                }
+
+                if let followUpPrompt = content.followUpPrompt {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Follow-up prompt")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+
+                        Text(followUpPrompt)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ScanVerdictWatchoutCard: View {
+    let watchout: ScanVerdictSurfaceContent.WatchoutItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.s) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: WLSpacing.s) {
+                    Text(watchout.title)
+                        .font(WLTypography.bodyEmphasis)
+                        .foregroundStyle(WLPalette.ink)
+
+                    Spacer(minLength: WLSpacing.s)
+
+                    HStack(spacing: WLSpacing.xs) {
+                        WLPill(title: watchout.severity.surfaceTitle, tone: watchout.severity.pillTone)
+                        WLPill(title: watchout.relevance.surfaceTitle, tone: .soft)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: WLSpacing.s) {
+                    Text(watchout.title)
+                        .font(WLTypography.bodyEmphasis)
+                        .foregroundStyle(WLPalette.ink)
+
+                    HStack(spacing: WLSpacing.xs) {
+                        WLPill(title: watchout.severity.surfaceTitle, tone: watchout.severity.pillTone)
+                        WLPill(title: watchout.relevance.surfaceTitle, tone: .soft)
+                    }
+                }
+            }
+
+            Text(watchout.detail)
+                .font(WLTypography.body)
+                .foregroundStyle(WLPalette.inkSoft)
+        }
+        .padding(WLSpacing.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wlCardSurface(
+            fill: LinearGradient(
+                colors: [WLPalette.caution.opacity(0.12), Color.white.opacity(0.98)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+    }
+}
+
 private struct AnalysisOutcomeCard: View {
     let presentation: AnalysisPresentationPlan
+    let followUpPrompt: String?
     let primaryAction: () -> Void
     let secondaryAction: (() -> Void)?
 
@@ -593,9 +922,11 @@ private struct AnalysisOutcomeCard: View {
                     }
                 }
 
-                Text(presentation.followUpPrompt)
-                    .font(WLTypography.captionStrong)
-                    .foregroundStyle(WLPalette.rose)
+                if let followUpPrompt {
+                    Text(followUpPrompt)
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.rose)
+                }
             }
         }
     }

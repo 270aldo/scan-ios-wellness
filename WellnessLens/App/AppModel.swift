@@ -113,6 +113,7 @@ final class AppModel {
     var history: [ScanRecord]
     var checkIns: [CheckInEntry]
     var scanEvents: [ScanEvent]
+    var scanVerdicts: [StoredScanVerdict]
     var checkInEvents: [CheckInEvent]
     var favoriteItems: [FavoriteItem]
     var consentRecords: [ConsentRecord]
@@ -123,6 +124,7 @@ final class AppModel {
     var conversationThreads: [ConversationThread]
     var lastDemoScenarioID: String?
     var latestAnalysis: ScanAnalysis?
+    var latestVerdict: LILADomain.ScanVerdict?
     var activeComparison: ProductComparison?
     var scanFeedback: ScanFeedback?
     var isAnalyzing = false
@@ -181,6 +183,7 @@ final class AppModel {
         history = snapshot.history.sorted(by: { $0.createdAt > $1.createdAt })
         checkIns = snapshot.checkIns.sorted(by: { $0.createdAt > $1.createdAt })
         scanEvents = snapshot.scanEvents.sorted(by: { $0.timestamp > $1.timestamp })
+        scanVerdicts = snapshot.scanVerdicts.sorted(by: { $0.createdAt > $1.createdAt })
         checkInEvents = snapshot.checkInEvents.sorted(by: { $0.timestamp > $1.timestamp })
         favoriteItems = snapshot.favoriteItems.sorted(by: { $0.createdAt > $1.createdAt })
         consentRecords = snapshot.consentRecords.sorted(by: { $0.createdAt > $1.createdAt })
@@ -197,6 +200,8 @@ final class AppModel {
         entitlementSnapshot = AccessPolicy().snapshot(subscriptionStatus: snapshot.subscriptionStatus, billingMode: billingMode)
         activePaywall = nil
         backendStatuses = initialBackendStatuses(hasBackend: resolvedServices.backendAPI != nil)
+        latestVerdict = scanVerdicts.first?.verdict
+        reconcileScanVerdictsIfNeeded()
     }
 
     var featuredProducts: [ProductCandidate] {
@@ -640,6 +645,10 @@ final class AppModel {
 
     func dismissAnalysis() {
         latestAnalysis = nil
+    }
+
+    func requestHealthPermissions() async -> HealthKitAuthorizationReport {
+        await services.healthKitService.requestAuthorization(for: userProfile.lilaContext().dataSync)
     }
 
     func dismissComparison() {
@@ -1131,6 +1140,14 @@ final class AppModel {
         scanEvents.first(where: { $0.legacyAnalysis.id == analysis.id })
     }
 
+    func scanVerdict(for analysis: ScanAnalysis) -> LILADomain.ScanVerdict? {
+        guard let event = scanEvent(for: analysis) else {
+            return nil
+        }
+
+        return scanVerdicts.first(where: { $0.scanEventID == event.id })?.verdict
+    }
+
     func leadingPatternInsight(for analysis: ScanAnalysis) -> PatternInsight? {
         guard let event = scanEvent(for: analysis) else {
             return patternInsights.first
@@ -1255,6 +1272,7 @@ final class AppModel {
                 for: input,
                 legacyAnalysis: analysis
             )
+            let biometrics = await services.healthKitService.currentSnapshot(for: userProfile)
             let event = rootOrchestrator.composeScanEvent(
                 input: input,
                 legacyAnalysis: analysis,
@@ -1265,6 +1283,23 @@ final class AppModel {
                 latencyMs: Int(Date().timeIntervalSince(startedAt) * 1000)
             )
             scanEvents.insert(event, at: 0)
+            let verdict = await services.scanVerdictAgent.generateVerdict(
+                for: ScanVerdictRequest(
+                    input: input,
+                    legacyAnalysis: analysis,
+                    structuredAnalysis: structuredAnalysis,
+                    profile: userProfile,
+                    recentScans: scanEvents,
+                    recentCheckIns: checkInEvents,
+                    biometrics: biometrics
+                )
+            )
+            latestVerdict = verdict
+            scanVerdicts.removeAll(where: { $0.scanEventID == event.id })
+            scanVerdicts.insert(
+                StoredScanVerdict(scanEventID: event.id, verdict: verdict, createdAt: event.timestamp),
+                at: 0
+            )
             let recordID = UUID(uuidString: event.id) ?? UUID()
             history.insert(ScanRecord(id: recordID, createdAt: analysis.createdAt, analysis: analysis), at: 0)
             if history.count > 60 {
@@ -1273,6 +1308,9 @@ final class AppModel {
             if scanEvents.count > 120 {
                 scanEvents = Array(scanEvents.prefix(120))
             }
+            if scanVerdicts.count > 120 {
+                scanVerdicts = Array(scanVerdicts.prefix(120))
+            }
 
             if let planStep = firstWeekPlan?.steps.firstIndex(where: { $0.title.localizedCaseInsensitiveContains("Scan two") }) {
                 firstWeekPlan?.steps[planStep].isComplete = scanEvents.count >= 2
@@ -1280,6 +1318,10 @@ final class AppModel {
 
             refreshPhaseTwoState()
             persist()
+            await services.healthKitService.writeNutritionIfAllowed(
+                verdict: verdict,
+                preferences: userProfile.lilaContext(biometrics: biometrics).dataSync
+            )
             await refreshInsightsIfNeeded()
             await refreshHomeIfNeeded()
         } catch {
@@ -1622,6 +1664,7 @@ final class AppModel {
         scanDecisions = mergeItems(scanDecisions, with: response.scanDecisions, id: \.id) { $0.createdAt > $1.createdAt }
         checkIns = checkInEvents.map(\.legacyEntry).sorted(by: { $0.createdAt > $1.createdAt })
         history = rebuiltHistory(from: scanEvents, favorites: favoriteItems)
+        reconcileScanVerdictsIfNeeded()
         refreshPhaseTwoState()
         persist()
     }
@@ -1655,7 +1698,7 @@ final class AppModel {
     private func persist() {
         services.store.save(
             StoredAppState(
-                schemaVersion: 4,
+                schemaVersion: 5,
                 localProfileID: localProfileID,
                 hasCompletedOnboarding: hasCompletedOnboarding,
                 onboardingDraft: onboardingDraft,
@@ -1663,6 +1706,7 @@ final class AppModel {
                 history: history,
                 checkIns: checkIns,
                 scanEvents: scanEvents,
+                scanVerdicts: scanVerdicts,
                 checkInEvents: checkInEvents,
                 favoriteItems: favoriteItems,
                 consentRecords: consentRecords,
@@ -1682,6 +1726,33 @@ final class AppModel {
                 entitlementSnapshot: entitlementSnapshot
             )
         )
+    }
+
+    private func reconcileScanVerdictsIfNeeded() {
+        let context = userProfile.lilaContext()
+        let knownIDs = Set(scanVerdicts.map(\.scanEventID))
+        let missingEvents = scanEvents.filter { !knownIDs.contains($0.id) }
+
+        if !missingEvents.isEmpty {
+            let synthesized = missingEvents.map { event in
+                StoredScanVerdict(
+                    scanEventID: event.id,
+                    verdict: event.analysis.lilaVerdict(
+                        fallbackAnalysis: event.legacyAnalysis,
+                        context: context
+                    ),
+                    createdAt: event.timestamp
+                )
+            }
+            scanVerdicts = (scanVerdicts + synthesized).sorted(by: { $0.createdAt > $1.createdAt })
+        } else {
+            scanVerdicts.sort(by: { $0.createdAt > $1.createdAt })
+        }
+
+        if scanVerdicts.count > 120 {
+            scanVerdicts = Array(scanVerdicts.prefix(120))
+        }
+        latestVerdict = scanVerdicts.first?.verdict
     }
 
     private func ensureConversationThread(for _: StrategistEntryPoint) -> Int {

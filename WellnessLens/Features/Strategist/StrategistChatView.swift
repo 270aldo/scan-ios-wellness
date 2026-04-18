@@ -315,27 +315,14 @@ struct StrategistChatView: View {
                     }
                 }
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: WLSpacing.s) {
-                        WLSecondaryButton(title: presentation.composerSeedTitle) {
-                            draft = presentation.composerSeedPrompt
-                        }
-
-                        WLPrimaryButton(title: "Send", systemImage: "arrow.up.circle.fill") {
-                            sendMessage()
-                        }
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                WLActionGroup {
+                    WLPrimaryButton(title: "Send", systemImage: "arrow.up.circle.fill") {
+                        sendMessage()
                     }
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                    VStack(spacing: WLSpacing.s) {
-                        WLPrimaryButton(title: "Send", systemImage: "arrow.up.circle.fill") {
-                            sendMessage()
-                        }
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        WLSecondaryButton(title: presentation.composerSeedTitle) {
-                            draft = presentation.composerSeedPrompt
-                        }
+                    WLUtilityButton(title: presentation.composerSeedTitle, systemImage: "sparkles") {
+                        draft = presentation.composerSeedPrompt
                     }
                 }
             }

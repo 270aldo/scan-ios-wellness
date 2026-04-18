@@ -49,6 +49,21 @@ final class WellnessLensTests: XCTestCase {
         }
     }
 
+    private struct StubHealthKitService: HealthKitServicing {
+        var report: HealthKitAuthorizationReport
+        var snapshot: BiometricsSnapshot?
+
+        func requestAuthorization(for preferences: LILADomain.DataSyncPreferences) async -> HealthKitAuthorizationReport {
+            report
+        }
+
+        func currentSnapshot(for profile: UserProfile) async -> BiometricsSnapshot? {
+            snapshot
+        }
+
+        func writeNutritionIfAllowed(verdict: LILADomain.ScanVerdict, preferences: LILADomain.DataSyncPreferences) async {}
+    }
+
     private final class MockBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         enum MockError: Error {
             case structuredUnavailable
@@ -225,13 +240,48 @@ final class WellnessLensTests: XCTestCase {
         )
     }
 
+    private func makeVerdict(
+        fit: LILADomain.FitLevel = .goodFit,
+        source: LILADomain.ScanSource = .manualBarcode,
+        watchoutCount: Int = 2
+    ) -> LILADomain.ScanVerdict {
+        var verdict = makeAnalysis(barcode: "850000001").lilaVerdict(context: UserContext.starter.lilaContext())
+        verdict.fit = fit
+        verdict.scanSource = source
+        verdict.confidence = LILADomain.Confidence.medium
+        verdict.headline = "Custom verdict headline."
+        verdict.primaryReason = "Primary reason customized for the verdict surface."
+        verdict.watchouts = Array(0..<watchoutCount).map { index in
+            LILADomain.Watchout(
+                title: "Watchout \(index + 1)",
+                detail: "Detail \(index + 1)",
+                severity: index == 0 ? .important : .moderate,
+                personalRelevance: index == 0 ? .personal : .general
+            )
+        }
+        verdict.betterSwap = LILADomain.Alternative(
+            productName: "Softer swap",
+            whyBetter: "it lowers sugar friction and keeps the read steadier",
+            improvedLenses: [.energyAndMood]
+        )
+        verdict.trackPrompt = LILADomain.FollowUpPrompt(
+            triggerAfterHours: 3,
+            questionText: "Did this feel steadier a few hours later?",
+            targetLens: .energyAndMood,
+            expectedResponseType: .openText
+        )
+        return verdict
+    }
+
     @MainActor
     private func makeServices(
         store: InMemoryStore = InMemoryStore(),
         subscriptionStatus: SubscriptionStatus = .free,
         featureFlags: WellnessFeatureFlags = WellnessFeatureFlags(),
         scanService: ScanService? = nil,
-        backendAPI: WellnessBackendAPI? = nil
+        backendAPI: WellnessBackendAPI? = nil,
+        healthKitService: HealthKitServicing = NoopHealthKitService(),
+        scanVerdictAgent: ScanVerdictServing = DeterministicScanVerdictAgent()
     ) -> AppServices {
         store.snapshot.subscriptionStatus = subscriptionStatus
 
@@ -251,7 +301,9 @@ final class WellnessLensTests: XCTestCase {
             subscription: DemoSubscriptionController(status: subscriptionStatus),
             labelOCRService: LabelOCRService(),
             backendAPI: backendAPI,
-            identityProvider: LocalInstallIdentityProvider()
+            identityProvider: LocalInstallIdentityProvider(),
+            scanVerdictAgent: scanVerdictAgent,
+            healthKitService: healthKitService
         )
     }
 
@@ -464,6 +516,7 @@ final class WellnessLensTests: XCTestCase {
 
         XCTAssertEqual(state.schemaVersion, 1)
         XCTAssertEqual(state.scanEvents.count, 1)
+        XCTAssertEqual(state.scanVerdicts.count, 1)
         XCTAssertEqual(state.checkInEvents.count, 1)
         XCTAssertEqual(state.favoriteItems.count, 1)
         XCTAssertEqual(state.scanEvents[0].analysis.inputType, .barcode)
@@ -487,11 +540,34 @@ final class WellnessLensTests: XCTestCase {
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(StoredAppState.self, from: data)
 
-        XCTAssertEqual(decoded.schemaVersion, 4)
+        XCTAssertEqual(decoded.schemaVersion, 5)
         XCTAssertEqual(decoded.onboardingDraft?.currentStep, .consent)
         XCTAssertEqual(decoded.onboardingDraft?.formData, .starter)
         XCTAssertEqual(decoded.onboardingDraft?.createdAt, createdAt)
         XCTAssertEqual(decoded.onboardingDraft?.lastUpdatedAt, updatedAt)
+    }
+
+    func testLILAVerdictAdapterRoundTripsWithEnvelopeFallback() async throws {
+        let analysis = makeAnalysis(barcode: "850000001")
+        let context = UserProfile.starter.lilaContext()
+
+        let verdict = analysis.lilaVerdict(context: context)
+        let envelope = verdict.analysisEnvelope()
+        let rebuilt = envelope.lilaVerdict(fallbackAnalysis: analysis, context: context)
+
+        XCTAssertEqual(envelope.analysisID, verdict.id.uuidString)
+        XCTAssertEqual(rebuilt.resolvedProduct.name, analysis.resolvedProduct.name)
+        XCTAssertEqual(rebuilt.scanSource, verdict.scanSource)
+        XCTAssertEqual(rebuilt.overallScore, verdict.overallScore)
+    }
+
+    func testNoopHealthKitServiceFallsBackGracefully() async {
+        let report = await NoopHealthKitService().requestAuthorization(for: .init(healthKitEnabled: true))
+        let snapshot = await NoopHealthKitService().currentSnapshot(for: .starter)
+
+        XCTAssertFalse(report.healthDataAvailable)
+        XCTAssertEqual(report.cycle, .unavailable)
+        XCTAssertNil(snapshot)
     }
 
     func testStoredAppStateClearsOnboardingDraftWhenAlreadyCompleted() throws {
@@ -1115,6 +1191,53 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(plan.heroBadgeTitle, "Meal Snapshot")
     }
 
+    func testScanVerdictSurfaceContentPrefersVerdictHierarchyAndTrimsWatchouts() {
+        let verdict = makeVerdict(fit: .occasional, watchoutCount: 3)
+        let content = ScanVerdictSurfaceContent.build(verdict: verdict)
+
+        XCTAssertEqual(content.productName, verdict.resolvedProduct.name)
+        XCTAssertEqual(content.fitTitle, "Occasional")
+        XCTAssertEqual(content.headline, "Custom verdict headline.")
+        XCTAssertEqual(content.primaryReason, "Primary reason customized for the verdict surface.")
+        XCTAssertEqual(content.confidenceTitle, "Medium confidence")
+        XCTAssertEqual(content.sourceTitle, "Manual barcode")
+        XCTAssertEqual(content.watchouts.count, 2)
+        XCTAssertEqual(content.betterSwapTitle, "Softer swap")
+        XCTAssertEqual(content.followUpPrompt, "Did this feel steadier a few hours later?")
+    }
+
+    @MainActor
+    func testAppModelSynthesizesScanVerdictLookupForLegacyScanEvent() async throws {
+        let input = ScanInput(
+            sourceType: .manualBarcode,
+            barcode: "850000001",
+            capturedImageRef: nil,
+            rawText: nil,
+            productTypeHint: nil,
+            locale: "en_US"
+        )
+        let analysis = try await DemoScanService().analyze(input: input, userContext: .starter)
+        let event = RootOrchestrator().composeScanEvent(
+            input: input,
+            legacyAnalysis: analysis,
+            structuredAnalysis: nil,
+            localProfileID: UUID().uuidString,
+            recentScans: [],
+            recentCheckIns: [],
+            latencyMs: 120
+        )
+        let store = InMemoryStore(snapshot: .fresh())
+        store.snapshot.scanEvents = [event]
+
+        let model = AppModel(services: makeServices(store: store))
+        let verdict = try XCTUnwrap(model.scanVerdict(for: analysis))
+
+        XCTAssertEqual(model.scanVerdicts.count, 1)
+        XCTAssertEqual(model.scanVerdicts.first?.scanEventID, event.id)
+        XCTAssertEqual(verdict.resolvedProduct.name, analysis.resolvedProduct.name)
+        XCTAssertEqual(model.latestVerdict?.id, verdict.id)
+    }
+
     func testHistoryPresentationPlanPrefersCompareWhenTwoReadsSelected() {
         let plan = HistoryPresentationPlan.build(
             readCount: 4,
@@ -1406,6 +1529,43 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(event.analysis.followUpPrompt, expectedEnvelope.followUpPrompt)
         XCTAssertEqual(event.analysis.overallScore, expectedEnvelope.overallScore)
         XCTAssertEqual(event.legacyAnalysis, legacyAnalysis)
+    }
+
+    @MainActor
+    func testAppModelPersistsLatestLILAVerdictAfterAnalyze() async throws {
+        let store = InMemoryStore(snapshot: .fresh())
+        let biometrics = BiometricsSnapshot(
+            capturedAt: .now,
+            cycleState: .init(lastPeriodStart: .now, source: .manualEntry),
+            trainingLoad: .init(workoutsCount: 2, activeEnergyBurnedKcal: 430, durationMinutes: 90, lastWorkoutEndedAt: .now),
+            sleepHours: 7.2,
+            hrvMilliseconds: 41,
+            restingHeartRate: 57,
+            wristTemperatureDeltaCelsius: nil
+        )
+        let services = makeServices(
+            store: store,
+            healthKitService: StubHealthKitService(
+                report: HealthKitAuthorizationReport(
+                    healthDataAvailable: true,
+                    cycle: .sharingAuthorized,
+                    workouts: .sharingAuthorized,
+                    recovery: .sharingAuthorized,
+                    sleep: .sharingAuthorized,
+                    nutritionWriteBack: .notDetermined
+                ),
+                snapshot: biometrics
+            )
+        )
+        let model = AppModel(services: services)
+
+        await model.analyzeBarcode("850000001")
+
+        XCTAssertNotNil(model.latestVerdict)
+        XCTAssertEqual(model.scanVerdicts.count, 1)
+        XCTAssertEqual(store.snapshot.scanVerdicts.count, 1)
+        XCTAssertEqual(store.snapshot.scanVerdicts.first?.scanEventID, model.scanEvents.first?.id)
+        XCTAssertEqual(model.latestVerdict?.reasoningBreakdown.userHistoryFactors.count, 1)
     }
 
     @MainActor

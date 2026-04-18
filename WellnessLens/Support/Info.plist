@@ -33,6 +33,10 @@
 	<string>public.app-category.healthcare-fitness</string>
 	<key>NSCameraUsageDescription</key>
 	<string>WellnessLens uses the camera to scan barcodes and read product labels.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>WellnessLens reads cycle, sleep, workout, and recovery data only when you opt in so each scan can reflect your current biology and training context.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>WellnessLens can write nutrition entries to Health only when you enable write-back for your scan history.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>WellnessLens uses your photo library so you can analyze ingredient labels from photos.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

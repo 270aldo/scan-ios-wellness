@@ -4,7 +4,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 
-from app.contracts import StrategistReplyRequest, StrategistReplyResponse
+from app.contracts import (
+    ScanVerdictRequest,
+    ScanVerdictResponse,
+    StrategistReplyRequest,
+    StrategistReplyResponse,
+)
 from app.service import StrategistService, get_settings
 
 
@@ -38,3 +43,11 @@ async def strategist_reply(
     service: StrategistService = Depends(get_service),
 ) -> StrategistReplyResponse:
     return StrategistReplyResponse(reply=service.reply(request))
+
+
+@app.post("/v1/scan/verdict", response_model=ScanVerdictResponse)
+async def scan_verdict(
+    request: ScanVerdictRequest,
+    service: StrategistService = Depends(get_service),
+) -> ScanVerdictResponse:
+    return ScanVerdictResponse(verdict=service.verdict(request))

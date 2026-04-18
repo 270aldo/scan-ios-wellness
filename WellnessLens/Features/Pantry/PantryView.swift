@@ -183,41 +183,21 @@ struct PantryView: View {
                         .foregroundStyle(Color.white.opacity(0.88))
                 }
 
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: WLSpacing.s) {
-                        WLPrimaryButton(
-                            title: surfacePlan.primaryActionTitle,
-                            systemImage: surfacePlan.primaryActionSystemImage,
-                            chrome: .heroPrimary
-                        ) {
-                            handlePrimaryAction()
-                        }
-
-                        WLSecondaryButton(
-                            title: surfacePlan.secondaryActionTitle,
-                            systemImage: surfacePlan.secondaryActionSystemImage,
-                            chrome: .heroSecondary
-                        ) {
-                            handleSecondaryAction()
-                        }
+                WLActionGroup {
+                    WLPrimaryButton(
+                        title: surfacePlan.primaryActionTitle,
+                        systemImage: surfacePlan.primaryActionSystemImage,
+                        chrome: .heroPrimary
+                    ) {
+                        handlePrimaryAction()
                     }
 
-                    VStack(spacing: WLSpacing.s) {
-                        WLPrimaryButton(
-                            title: surfacePlan.primaryActionTitle,
-                            systemImage: surfacePlan.primaryActionSystemImage,
-                            chrome: .heroPrimary
-                        ) {
-                            handlePrimaryAction()
-                        }
-
-                        WLSecondaryButton(
-                            title: surfacePlan.secondaryActionTitle,
-                            systemImage: surfacePlan.secondaryActionSystemImage,
-                            chrome: .heroSecondary
-                        ) {
-                            handleSecondaryAction()
-                        }
+                    WLSecondaryButton(
+                        title: surfacePlan.secondaryActionTitle,
+                        systemImage: surfacePlan.secondaryActionSystemImage,
+                        chrome: .heroSecondary
+                    ) {
+                        handleSecondaryAction()
                     }
                 }
             }
@@ -430,9 +410,9 @@ private struct PantryAnchorCard: View {
                     Spacer()
 
                     if isUnlocked {
-                        Button("Remove", action: remove)
-                            .font(WLTypography.captionStrong)
-                            .foregroundStyle(WLPalette.rose)
+                        WLUtilityButton(title: "Remove", systemImage: "trash") {
+                            remove()
+                        }
                     }
                 }
 
@@ -491,24 +471,6 @@ private struct PantryInlineActionButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: WLSpacing.xs) {
-                WLIcon(systemName: systemImage, color: WLPalette.ink, size: 12)
-                Text(title)
-                    .font(WLTypography.captionStrong)
-                    .foregroundStyle(WLPalette.ink)
-            }
-            .padding(.horizontal, WLSpacing.m)
-            .padding(.vertical, 10)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.9))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(WLPalette.strokeStrong)
-            )
-        }
-        .buttonStyle(.plain)
+        WLUtilityButton(title: title, systemImage: systemImage, action: action)
     }
 }

@@ -211,16 +211,43 @@ struct WLCompactCard<Content: View>: View {
     }
 }
 
-struct WLHeroSurface<Content: View>: View {
+struct WLSecondarySurfaceCard<Content: View>: View {
     private let content: Content
+    private let padding: CGFloat
 
-    init(@ViewBuilder content: () -> Content) {
+    init(padding: CGFloat = 18, @ViewBuilder content: () -> Content) {
+        self.padding = padding
         self.content = content()
     }
 
     var body: some View {
         content
-            .padding(WLSpacing.xl)
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .wlCardSurface(
+                fill: LinearGradient(
+                    colors: [Color.white.opacity(0.985), WLPalette.surfaceMuted.opacity(0.96)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                shadowColor: WLElevation.shadow.opacity(0.24),
+                radius: WLCorner.secondary
+            )
+    }
+}
+
+struct WLHeroSurface<Content: View>: View {
+    private let content: Content
+    private let padding: CGFloat
+
+    init(padding: CGFloat = WLSpacing.xl, @ViewBuilder content: () -> Content) {
+        self.padding = padding
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 ZStack {
@@ -246,13 +273,15 @@ struct WLHeroSurface<Content: View>: View {
 
 struct WLHeroCard<Content: View>: View {
     private let content: Content
+    private let padding: CGFloat
 
-    init(@ViewBuilder content: () -> Content) {
+    init(padding: CGFloat = WLSpacing.xl, @ViewBuilder content: () -> Content) {
+        self.padding = padding
         self.content = content()
     }
 
     var body: some View {
-        WLHeroSurface(content: { content })
+        WLHeroSurface(padding: padding, content: { content })
     }
 }
 
@@ -283,6 +312,103 @@ struct WLSectionHeader: View {
                     .lineSpacing(1)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+struct WLDisclosureCard<Content: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    var statusTitle: String? = nil
+    var systemImage: String? = nil
+    var isExpanded: Bool
+    let action: () -> Void
+
+    private let content: Content
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        statusTitle: String? = nil,
+        systemImage: String? = nil,
+        isExpanded: Bool,
+        action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.statusTitle = statusTitle
+        self.systemImage = systemImage
+        self.isExpanded = isExpanded
+        self.action = action
+        self.content = content()
+    }
+
+    var body: some View {
+        WLSecondarySurfaceCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                Button(action: action) {
+                    ViewThatFits(in: .horizontal) {
+                        headerRow
+                        headerStack
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if isExpanded {
+                    content
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+    }
+
+    private var headerRow: some View {
+        HStack(alignment: .top, spacing: WLSpacing.s) {
+            titleBlock
+            Spacer(minLength: WLSpacing.s)
+            accessoryBlock
+        }
+    }
+
+    private var headerStack: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.s) {
+            titleBlock
+            accessoryBlock
+        }
+    }
+
+    private var titleBlock: some View {
+        HStack(spacing: WLSpacing.xs) {
+            if let systemImage {
+                WLIcon(systemName: systemImage, color: WLPalette.rose, size: 14)
+            }
+
+            Text(title)
+                .font(WLTypography.bodyEmphasis)
+                .foregroundStyle(WLPalette.ink)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    private var accessoryBlock: some View {
+        HStack(spacing: WLSpacing.xs) {
+            if let statusTitle {
+                WLPill(title: statusTitle, tone: isExpanded ? .accent : .soft)
+            }
+
+            Image(systemName: "chevron.down")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(WLPalette.inkSoft)
+                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                .animation(.spring(response: 0.28, dampingFraction: 0.88), value: isExpanded)
         }
     }
 }
@@ -343,37 +469,14 @@ struct WLPill: View {
     var body: some View {
         switch style {
         case .standard:
-            Text(title)
-                .font(WLTypography.captionStrong)
-                .foregroundStyle(tone.foreground)
-                .lineLimit(1)
-                .minimumScaleFactor(0.82)
-                .allowsTightening(true)
-                .padding(.horizontal, WLSpacing.m)
-                .padding(.vertical, 10)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(tone.fill)
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(tone.stroke)
-                )
+            ViewThatFits(in: .horizontal) {
+                standardCapsuleBody
+                standardWrappedBody
+            }
         case .heroGlass:
-            WLAdaptiveGlassSurface(
-                shape: .capsule,
-                tint: heroGlassTint,
-                fallbackFill: Color.white.opacity(0.12),
-                fallbackStroke: Color.white.opacity(0.12)
-            ) {
-                Text(title)
-                    .font(WLTypography.captionStrong)
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                    .allowsTightening(true)
-                    .padding(.horizontal, WLSpacing.m)
-                    .padding(.vertical, 10)
+            ViewThatFits(in: .horizontal) {
+                heroGlassCapsuleBody
+                heroGlassWrappedBody
             }
         }
     }
@@ -385,6 +488,74 @@ struct WLPill: View {
         case .accent:
             return WLPalette.rose.opacity(0.20)
         }
+    }
+
+    private var standardCapsuleBody: some View {
+        pillText(foreground: tone.foreground, lineLimit: 1, alignment: .center)
+            .padding(.horizontal, WLSpacing.m)
+            .padding(.vertical, 10)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(tone.fill)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(tone.stroke)
+            )
+    }
+
+    private var standardWrappedBody: some View {
+        pillText(foreground: tone.foreground, lineLimit: 2, alignment: .leading)
+            .padding(.horizontal, WLSpacing.s)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(tone.fill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(tone.stroke)
+            )
+    }
+
+    private var heroGlassCapsuleBody: some View {
+        WLAdaptiveGlassSurface(
+            shape: .capsule,
+            tint: heroGlassTint,
+            fallbackFill: Color.white.opacity(0.12),
+            fallbackStroke: Color.white.opacity(0.12)
+        ) {
+            pillText(foreground: .white, lineLimit: 1, alignment: .center)
+                .padding(.horizontal, WLSpacing.m)
+                .padding(.vertical, 10)
+        }
+    }
+
+    private var heroGlassWrappedBody: some View {
+        WLAdaptiveGlassSurface(
+            shape: .roundedRect(14),
+            tint: heroGlassTint,
+            fallbackFill: Color.white.opacity(0.12),
+            fallbackStroke: Color.white.opacity(0.12)
+        ) {
+            pillText(foreground: .white, lineLimit: 2, alignment: .leading)
+                .padding(.horizontal, WLSpacing.s)
+                .padding(.vertical, 10)
+        }
+    }
+
+    private func pillText(
+        foreground: Color,
+        lineLimit: Int,
+        alignment: TextAlignment
+    ) -> some View {
+        Text(title)
+            .font(WLTypography.captionStrong)
+            .foregroundStyle(foreground)
+            .lineLimit(lineLimit)
+            .minimumScaleFactor(lineLimit == 1 ? 0.82 : 0.90)
+            .allowsTightening(true)
+            .multilineTextAlignment(alignment)
     }
 }
 
@@ -442,18 +613,20 @@ struct WLStatusBadge: View {
     var body: some View {
         switch style {
         case .standard:
-            HStack(spacing: WLSpacing.xs) {
-                if let systemImage {
-                    WLIcon(systemName: systemImage, color: tone.foreground, size: 13)
-                }
-
-                Text(title)
-                    .font(WLTypography.captionStrong)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                    .allowsTightening(true)
+            ViewThatFits(in: .horizontal) {
+                standardCapsuleBody
+                standardWrappedBody
             }
-            .foregroundStyle(tone.foreground)
+        case .heroGlass:
+            ViewThatFits(in: .horizontal) {
+                heroGlassCapsuleBody
+                heroGlassWrappedBody
+            }
+        }
+    }
+
+    private var standardCapsuleBody: some View {
+        badgeLabel(foreground: tone.foreground, lineLimit: 1, alignment: .center)
             .padding(.horizontal, WLSpacing.s)
             .padding(.vertical, 10)
             .background(
@@ -464,29 +637,66 @@ struct WLStatusBadge: View {
                 Capsule(style: .continuous)
                     .stroke(tone.foreground.opacity(0.10))
             )
-        case .heroGlass:
-            WLAdaptiveGlassSurface(
-                shape: .capsule,
-                tint: tone.foreground.opacity(0.18),
-                fallbackFill: Color.white.opacity(0.12),
-                fallbackStroke: Color.white.opacity(0.12)
-            ) {
-                HStack(spacing: WLSpacing.xs) {
-                    if let systemImage {
-                        WLIcon(systemName: systemImage, color: .white, size: 13)
-                    }
+    }
 
-                    Text(title)
-                        .font(WLTypography.captionStrong)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                        .allowsTightening(true)
-                }
-                .foregroundStyle(.white)
+    private var standardWrappedBody: some View {
+        badgeLabel(foreground: tone.foreground, lineLimit: 2, alignment: .leading)
+            .padding(.horizontal, WLSpacing.s)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(tone.fill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(tone.foreground.opacity(0.10))
+            )
+    }
+
+    private var heroGlassCapsuleBody: some View {
+        WLAdaptiveGlassSurface(
+            shape: .capsule,
+            tint: tone.foreground.opacity(0.18),
+            fallbackFill: Color.white.opacity(0.12),
+            fallbackStroke: Color.white.opacity(0.12)
+        ) {
+            badgeLabel(foreground: .white, lineLimit: 1, alignment: .center)
                 .padding(.horizontal, WLSpacing.s)
                 .padding(.vertical, 10)
-            }
         }
+    }
+
+    private var heroGlassWrappedBody: some View {
+        WLAdaptiveGlassSurface(
+            shape: .roundedRect(14),
+            tint: tone.foreground.opacity(0.18),
+            fallbackFill: Color.white.opacity(0.12),
+            fallbackStroke: Color.white.opacity(0.12)
+        ) {
+            badgeLabel(foreground: .white, lineLimit: 2, alignment: .leading)
+                .padding(.horizontal, WLSpacing.s)
+                .padding(.vertical, 10)
+        }
+    }
+
+    private func badgeLabel(
+        foreground: Color,
+        lineLimit: Int,
+        alignment: TextAlignment
+    ) -> some View {
+        HStack(spacing: WLSpacing.xs) {
+            if let systemImage {
+                WLIcon(systemName: systemImage, color: foreground, size: 13)
+            }
+
+            Text(title)
+                .font(WLTypography.captionStrong)
+                .lineLimit(lineLimit)
+                .minimumScaleFactor(lineLimit == 1 ? 0.82 : 0.90)
+                .allowsTightening(true)
+                .multilineTextAlignment(alignment)
+        }
+        .foregroundStyle(foreground)
     }
 }
 
@@ -568,14 +778,18 @@ struct WLLensTile: View {
     }
 }
 
+enum WLButtonWidth {
+    case fill
+    case fit
+}
+
 struct WLPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(WLTypography.bodyEmphasis)
             .foregroundStyle(Color.white)
-            .frame(maxWidth: .infinity)
             .padding(.horizontal, WLSpacing.m)
-            .padding(.vertical, 16)
+            .padding(.vertical, 14)
             .background(
                 Capsule(style: .continuous)
                     .fill(
@@ -604,15 +818,34 @@ struct WLSecondaryButtonStyle: ButtonStyle {
         configuration.label
             .font(WLTypography.bodyEmphasis)
             .foregroundStyle(WLPalette.ink)
-            .frame(maxWidth: .infinity)
             .padding(.horizontal, WLSpacing.m)
-            .padding(.vertical, 16)
+            .padding(.vertical, 12)
             .background(
                 Capsule(style: .continuous)
                     .fill(Color.white.opacity(configuration.isPressed ? 0.78 : 0.90))
             )
             .overlay(
                 Capsule(style: .continuous)
+                    .stroke(WLPalette.strokeStrong)
+            )
+            .scaleEffect(configuration.isPressed ? 0.99 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.84), value: configuration.isPressed)
+    }
+}
+
+struct WLUtilityButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(WLTypography.captionStrong)
+            .foregroundStyle(WLPalette.ink)
+            .padding(.horizontal, WLSpacing.s)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white.opacity(configuration.isPressed ? 0.74 : 0.88))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(WLPalette.strokeStrong)
             )
             .scaleEffect(configuration.isPressed ? 0.99 : 1)
@@ -677,8 +910,6 @@ struct WLPrimaryButton: View {
         .font(WLTypography.bodyEmphasis)
         .foregroundStyle(foreground)
         .frame(maxWidth: .infinity, minHeight: 56)
-        .padding(.horizontal, WLSpacing.m)
-        .padding(.vertical, 16)
     }
 }
 
@@ -689,6 +920,7 @@ struct WLSecondaryButton: View {
     let title: String
     var systemImage: String? = nil
     var chrome: WLButtonChromeStyle = .standard
+    var width: WLButtonWidth = .fit
     let action: () -> Void
 
     var body: some View {
@@ -732,9 +964,109 @@ struct WLSecondaryButton: View {
         }
         .font(WLTypography.bodyEmphasis)
         .foregroundStyle(foreground)
-        .frame(maxWidth: .infinity, minHeight: 56)
-        .padding(.horizontal, WLSpacing.m)
-        .padding(.vertical, 16)
+        .frame(maxWidth: width == .fill ? .infinity : nil, minHeight: 48)
+    }
+}
+
+struct WLUtilityButton: View {
+    let title: String
+    var systemImage: String? = nil
+    var width: WLButtonWidth = .fit
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: WLSpacing.xs) {
+                if let systemImage {
+                    WLIcon(systemName: systemImage, color: WLPalette.ink, size: 13)
+                }
+
+                Text(title)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.88)
+                    .allowsTightening(true)
+                    .multilineTextAlignment(.center)
+            }
+            .font(WLTypography.captionStrong)
+            .foregroundStyle(WLPalette.ink)
+            .frame(maxWidth: width == .fill ? .infinity : nil, minHeight: 36)
+        }
+        .buttonStyle(WLUtilityButtonStyle())
+    }
+}
+
+struct WLActionGroup<Content: View>: View {
+    private let alignment: HorizontalAlignment
+    private let content: () -> Content
+
+    init(alignment: HorizontalAlignment = .leading, @ViewBuilder content: @escaping () -> Content) {
+        self.alignment = alignment
+        self.content = content
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: WLSpacing.s) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: alignment, spacing: WLSpacing.s) {
+                content()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct WLSelectionChip: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: WLSpacing.s) {
+                Text(title)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(isSelected ? WLPalette.rose : WLPalette.ink)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.88)
+                    .allowsTightening(true)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .foregroundStyle(isSelected ? WLPalette.rose : WLPalette.strokeStrong)
+            }
+            .padding(.horizontal, WLSpacing.m)
+            .padding(.vertical, 15)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? LinearGradient(
+                                colors: [WLPalette.rose.opacity(0.12), WLPalette.lavender.opacity(0.18)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            : LinearGradient(
+                                colors: [Color.white.opacity(0.94), WLPalette.canvasWarm],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                    .stroke(isSelected ? WLPalette.rose.opacity(0.18) : WLPalette.stroke)
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

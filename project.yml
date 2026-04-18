@@ -27,6 +27,8 @@ targets:
               - wellnesslens
         LSApplicationCategoryType: public.app-category.healthcare-fitness
         NSCameraUsageDescription: WellnessLens uses the camera to scan barcodes and read product labels.
+        NSHealthShareUsageDescription: WellnessLens reads cycle, sleep, workout, and recovery data only when you opt in so each scan can reflect your current biology and training context.
+        NSHealthUpdateUsageDescription: WellnessLens can write nutrition entries to Health only when you enable write-back for your scan history.
         NSPhotoLibraryUsageDescription: WellnessLens uses your photo library so you can analyze ingredient labels from photos.
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen: {}

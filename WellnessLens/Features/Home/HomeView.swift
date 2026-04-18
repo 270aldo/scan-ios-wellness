@@ -20,6 +20,10 @@ struct HomeView: View {
         model.dailyHomePayloadV2
     }
 
+    private var latestVerdictSurface: ScanVerdictSurfaceContent? {
+        model.latestVerdict.map(ScanVerdictSurfaceContent.build)
+    }
+
     var body: some View {
         WLScreen {
             HomeDailyHero(
@@ -30,6 +34,25 @@ struct HomeView: View {
                 secondaryActionSystemImage: heroSecondaryActionSystemImage,
                 secondaryAction: handleHeroSecondaryAction
             )
+
+            if model.isUsingLocalHomeFallback {
+                HomeFallbackStateCard(
+                    title: "Showing the local daily fallback",
+                    summary: "Home is using the deterministic local brief while the remote refresh catches up. Your goals, plan, gating, and saved memory are still applied."
+                )
+            }
+
+            if let latestVerdictSurface {
+                HomeLatestVerdictCard(
+                    content: latestVerdictSurface,
+                    openHistory: {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                            model.selectedTab = .history
+                        }
+                    },
+                    openScan: openScan
+                )
+            }
 
             HomeSignalSection(payload: payload, saveCheckIn: openCheckIn)
 
@@ -246,7 +269,7 @@ private struct HomePantrySection: View {
                         .foregroundStyle(WLPalette.inkSoft)
                 }
 
-                WLSecondaryButton(
+                WLUtilityButton(
                     title: isUnlocked ? "Open pantry" : "Preview pantry",
                     systemImage: isUnlocked ? "arrow.up.right.circle" : "shippingbox"
                 ) {
@@ -405,7 +428,7 @@ private struct HomeDailyHero: View {
                     }
                 }
 
-                VStack(spacing: WLSpacing.s) {
+                WLActionGroup {
                     WLPrimaryButton(
                         title: payload.nextAction.cta,
                         systemImage: "arrow.up.right.circle",
@@ -488,6 +511,108 @@ private struct HomeDailyHero: View {
     }
 }
 
+private struct HomeFallbackStateCard: View {
+    let title: String
+    let summary: String
+
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                WLStatusBadge(title: "Fallback active", systemImage: "icloud.slash", tone: .caution)
+
+                Text(title)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(summary)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+            }
+        }
+    }
+}
+
+private struct HomeLatestVerdictCard: View {
+    let content: ScanVerdictSurfaceContent
+    let openHistory: () -> Void
+    let openScan: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: WLProductCopy.Home.latestReadTitle,
+                    subtitle: WLProductCopy.Home.latestReadSubtitle,
+                    systemImage: "sparkles.rectangle.stack"
+                )
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: content.fitTitle,
+                            systemImage: content.fit.symbol,
+                            tone: content.fit.badgeTone
+                        )
+
+                        WLPill(title: content.productName, tone: .soft)
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: content.fitTitle,
+                            systemImage: content.fit.symbol,
+                            tone: content.fit.badgeTone
+                        )
+
+                        WLPill(title: content.productName, tone: .soft)
+                    }
+                }
+
+                Text(content.headline)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(content.primaryReason)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                if let betterSwapTitle = content.betterSwapTitle,
+                   let betterSwapReason = content.betterSwapReason {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Better swap")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text("\(betterSwapTitle) looks softer because \(betterSwapReason)")
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                } else if let followUpPrompt = content.followUpPrompt {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Track later")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+
+                        Text(followUpPrompt)
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                }
+
+                WLActionGroup {
+                    WLPrimaryButton(title: "Scan again", systemImage: "viewfinder") {
+                        openScan()
+                    }
+
+                    WLUtilityButton(title: "Open history", systemImage: "clock.arrow.circlepath") {
+                        openHistory()
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct HomeSignalSection: View {
     let payload: DailyHomePayload
     let saveCheckIn: () -> Void
@@ -511,7 +636,7 @@ private struct HomeSignalSection: View {
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
 
-                WLSecondaryButton(title: "Update check-in", systemImage: "heart.text.square") {
+                WLUtilityButton(title: "Update check-in", systemImage: "heart.text.square") {
                     saveCheckIn()
                 }
             }
@@ -643,12 +768,12 @@ private struct HomeRecommendedSwapCard: View {
                     .padding(.vertical, 2)
                 }
 
-                VStack(spacing: WLSpacing.s) {
+                WLActionGroup {
                     WLPrimaryButton(title: "Scan another product", systemImage: "viewfinder") {
                         openScan()
                     }
 
-                    WLSecondaryButton(title: "Ask why this fits", systemImage: "message") {
+                    WLUtilityButton(title: "Ask why this fits", systemImage: "message") {
                         askStrategist()
                     }
                 }
@@ -684,25 +809,13 @@ private struct HomeOpenLoopsSection: View {
                 }
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: WLSpacing.s) {
-                    WLPrimaryButton(title: "Update check-in", systemImage: "heart.text.square") {
-                        openCheckIn()
-                    }
-
-                    WLSecondaryButton(title: "Open history", systemImage: "clock.arrow.circlepath") {
-                        openHistory()
-                    }
+            WLActionGroup {
+                WLPrimaryButton(title: "Update check-in", systemImage: "heart.text.square") {
+                    openCheckIn()
                 }
 
-                VStack(spacing: WLSpacing.s) {
-                    WLPrimaryButton(title: "Update check-in", systemImage: "heart.text.square") {
-                        openCheckIn()
-                    }
-
-                    WLSecondaryButton(title: "Open history", systemImage: "clock.arrow.circlepath") {
-                        openHistory()
-                    }
+                WLUtilityButton(title: "Open history", systemImage: "clock.arrow.circlepath") {
+                    openHistory()
                 }
             }
         }
@@ -754,7 +867,7 @@ private struct HomeStrategistNoteCard: View {
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.ink)
 
-                WLSecondaryButton(title: "Open strategist", systemImage: "message") {
+                WLUtilityButton(title: "Open strategist", systemImage: "message") {
                     openStrategist()
                 }
             }

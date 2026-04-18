@@ -9,10 +9,12 @@ struct StoredAppState: Codable {
     var schemaVersion: Int
     var localProfileID: String
     var hasCompletedOnboarding: Bool
+    var onboardingDraft: OnboardingDraft?
     var userContext: UserContext
     var history: [ScanRecord]
     var checkIns: [CheckInEntry]
     var scanEvents: [ScanEvent]
+    var scanVerdicts: [StoredScanVerdict]
     var checkInEvents: [CheckInEvent]
     var favoriteItems: [FavoriteItem]
     var consentRecords: [ConsentRecord]
@@ -33,13 +35,15 @@ struct StoredAppState: Codable {
 
     static func fresh() -> StoredAppState {
         StoredAppState(
-            schemaVersion: 3,
+            schemaVersion: 5,
             localProfileID: UUID().uuidString,
             hasCompletedOnboarding: false,
+            onboardingDraft: nil,
             userContext: .starter,
             history: [],
             checkIns: [],
             scanEvents: [],
+            scanVerdicts: [],
             checkInEvents: [],
             favoriteItems: [],
             consentRecords: [],
@@ -68,10 +72,12 @@ struct StoredAppState: Codable {
         case schemaVersion
         case localProfileID
         case hasCompletedOnboarding
+        case onboardingDraft
         case userContext
         case history
         case checkIns
         case scanEvents
+        case scanVerdicts
         case checkInEvents
         case favoriteItems
         case consentRecords
@@ -95,10 +101,12 @@ struct StoredAppState: Codable {
         schemaVersion: Int,
         localProfileID: String,
         hasCompletedOnboarding: Bool,
+        onboardingDraft: OnboardingDraft?,
         userContext: UserContext,
         history: [ScanRecord],
         checkIns: [CheckInEntry],
         scanEvents: [ScanEvent],
+        scanVerdicts: [StoredScanVerdict],
         checkInEvents: [CheckInEvent],
         favoriteItems: [FavoriteItem],
         consentRecords: [ConsentRecord],
@@ -120,10 +128,12 @@ struct StoredAppState: Codable {
         self.schemaVersion = schemaVersion
         self.localProfileID = localProfileID
         self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.onboardingDraft = onboardingDraft
         self.userContext = userContext
         self.history = history
         self.checkIns = checkIns
         self.scanEvents = scanEvents
+        self.scanVerdicts = scanVerdicts
         self.checkInEvents = checkInEvents
         self.favoriteItems = favoriteItems
         self.consentRecords = consentRecords
@@ -149,18 +159,21 @@ struct StoredAppState: Codable {
         let decodedLocalProfileID = try container.decodeIfPresent(String.self, forKey: .localProfileID) ?? UUID().uuidString
         localProfileID = decodedLocalProfileID
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        onboardingDraft = try container.decodeIfPresent(OnboardingDraft.self, forKey: .onboardingDraft)
         userContext = try container.decodeIfPresent(UserContext.self, forKey: .userContext) ?? .starter
         let decodedHistory = try container.decodeIfPresent([ScanRecord].self, forKey: .history) ?? []
         let decodedCheckIns = try container.decodeIfPresent([CheckInEntry].self, forKey: .checkIns) ?? []
         history = decodedHistory
         checkIns = decodedCheckIns
         let decodedScanEvents = try container.decodeIfPresent([ScanEvent].self, forKey: .scanEvents) ?? []
+        let decodedScanVerdicts = try container.decodeIfPresent([StoredScanVerdict].self, forKey: .scanVerdicts) ?? []
         let decodedCheckInEvents = try container.decodeIfPresent([CheckInEvent].self, forKey: .checkInEvents) ?? []
         favoriteItems = try container.decodeIfPresent([FavoriteItem].self, forKey: .favoriteItems) ?? []
         consentRecords = try container.decodeIfPresent([ConsentRecord].self, forKey: .consentRecords) ?? []
         subscriptionStatus = try container.decodeIfPresent(SubscriptionStatus.self, forKey: .subscriptionStatus) ?? .free
         lastDemoScenarioID = try container.decodeIfPresent(String.self, forKey: .lastDemoScenarioID)
         userProfile = try container.decodeIfPresent(UserProfile.self, forKey: .userProfile)
+        let profileForVerdicts = userProfile ?? UserProfile.migrated(from: userContext)
         activeGoals = try container.decodeIfPresent([ActiveGoal].self, forKey: .activeGoals) ?? []
         firstWeekPlan = try container.decodeIfPresent(FirstWeekPlan.self, forKey: .firstWeekPlan)
         routines = try container.decodeIfPresent([RoutineItem].self, forKey: .routines) ?? []
@@ -211,6 +224,23 @@ struct StoredAppState: Codable {
             scanEvents = decodedScanEvents
         }
 
+        if decodedScanVerdicts.isEmpty {
+            let context = profileForVerdicts.lilaContext()
+            scanVerdicts = scanEvents.map { event in
+                let verdict = event.analysis.lilaVerdict(
+                    fallbackAnalysis: event.legacyAnalysis,
+                    context: context
+                )
+                return StoredScanVerdict(
+                    scanEventID: event.id,
+                    verdict: verdict,
+                    createdAt: event.timestamp
+                )
+            }
+        } else {
+            scanVerdicts = decodedScanVerdicts
+        }
+
         if decodedCheckInEvents.isEmpty {
             checkInEvents = decodedCheckIns.map { entry in
                 entry.makeEvent(localProfileID: decodedLocalProfileID, linkedScanIDs: [], readHelpful: nil, satiety: 3)
@@ -241,6 +271,10 @@ struct StoredAppState: Codable {
                 )
             ]
         }
+
+        if hasCompletedOnboarding {
+            onboardingDraft = nil
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -248,10 +282,12 @@ struct StoredAppState: Codable {
         try container.encode(schemaVersion, forKey: .schemaVersion)
         try container.encode(localProfileID, forKey: .localProfileID)
         try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
+        try container.encodeIfPresent(onboardingDraft, forKey: .onboardingDraft)
         try container.encode(userContext, forKey: .userContext)
         try container.encode(history, forKey: .history)
         try container.encode(checkIns, forKey: .checkIns)
         try container.encode(scanEvents, forKey: .scanEvents)
+        try container.encode(scanVerdicts, forKey: .scanVerdicts)
         try container.encode(checkInEvents, forKey: .checkInEvents)
         try container.encode(favoriteItems, forKey: .favoriteItems)
         try container.encode(consentRecords, forKey: .consentRecords)
@@ -518,6 +554,8 @@ struct AppServices {
     var labelOCRService: LabelOCRService
     var backendAPI: WellnessBackendAPI?
     var identityProvider: IdentityProviding
+    var scanVerdictAgent: ScanVerdictServing = DeterministicScanVerdictAgent()
+    var healthKitService: HealthKitServicing = NoopHealthKitService()
 
     @MainActor
     static func makePreviewServices() -> AppServices {
@@ -574,7 +612,15 @@ struct AppServices {
             subscription: subscription,
             labelOCRService: LabelOCRService(),
             backendAPI: backendAPI,
-            identityProvider: identityProvider
+            identityProvider: identityProvider,
+            scanVerdictAgent: DeterministicScanVerdictAgent(),
+            healthKitService: {
+                #if canImport(HealthKit)
+                return HealthKitService()
+                #else
+                return NoopHealthKitService()
+                #endif
+            }()
         )
     }
 }
