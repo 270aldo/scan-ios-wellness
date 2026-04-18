@@ -13,6 +13,8 @@ The current state is:
 - `ScanVerdict` is now a first-class runtime concept
 - PRD 1 is implemented in the iOS app
 - PRD 2 is implemented in `agent-service`
+- PRD 3 coach replies are implemented end-to-end across `agent-service` and iOS
+- `StrategistChatView` stays visually unchanged while `AppModel.sendStrategistMessage(...)` routes through `coachAgent`
 - fallback behavior remains available when remote provider output is missing or invalid
 
 The repo should be treated as an incremental migration, not a rewrite candidate.
@@ -53,12 +55,35 @@ The repo should be treated as an incremental migration, not a rewrite candidate.
   - attempts provider-backed structured output in Vertex mode
   - falls back to deterministic local output if provider execution fails or returns invalid JSON
 
+### PRD 3: Coach Agent
+
+- real runtime assets are now stored in:
+  - `agent-service/assets/coach_agent/LILA_CoachPrompt.md`
+  - `agent-service/assets/coach_agent/CoachReplySchema.json`
+  - `agent-service/assets/coach_agent/LILA_CoachGoldenExamples.md`
+- `agent-service/app/coach_runtime.py` now:
+  - loads and fingerprints coach assets
+  - validates golden examples at startup
+  - validates every `CoachReply` against the repo-stored schema
+- `agent-service` now serves `POST /v1/coach/reply`
+- iOS now contains:
+  - `WellnessLens/Infrastructure/CoachAgent.swift`
+  - `WellnessLens/Infrastructure/RemoteCoachAgent.swift`
+- `AppServices` now exposes `coachAgent`
+- `AppModel.sendStrategistMessage(...)` now:
+  - appends the user message immediately
+  - serializes coach replies to keep thread ordering stable
+  - maps `CoachReply` into `ConversationMessage`
+  - preserves strategist UI while switching the underlying provider path
+- deterministic local fallback remains available offline and is also used when remote coach calls fail
+- Gap 1 was closed by translating iOS fallback LILA headlines to es-MX in `LILACompatibility.swift`
+
 ## Verification status
 
-The following commands were run successfully after the PRD 2 implementation:
+The following commands were run successfully after the PRD 3 implementation:
 
 ```bash
-pytest /Users/aldoolivas/IOS_ngx-silver/agent-service/tests/test_agent_api.py
+pytest /Users/aldoolivas/IOS_ngx-silver/agent-service/tests/
 xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' build CODE_SIGNING_ALLOWED=NO
 xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO
 ```
@@ -85,7 +110,6 @@ Observed result:
 
 ## What is still not done
 
-- PRD 3: separate coach agent contract and runtime
 - real product graph and resolution layer
 - nutrient intelligence engine that replaces demo heuristics
 - remote iOS hookup to live scan verdict provider behavior
@@ -104,6 +128,9 @@ Imported repo paths:
 - `agent-service/assets/scan_verdict/LILA_SystemPrompt.md`
 - `agent-service/assets/scan_verdict/ScanVerdictSchema.json`
 - `agent-service/assets/scan_verdict/LILA_GoldenExamples.md`
+- `agent-service/assets/coach_agent/LILA_CoachPrompt.md`
+- `agent-service/assets/coach_agent/CoachReplySchema.json`
+- `agent-service/assets/coach_agent/LILA_CoachGoldenExamples.md`
 
 One detail worth knowing:
 
@@ -112,11 +139,11 @@ One detail worth knowing:
 
 ## Recommended next step
 
-The next safest implementation step is PRD 3:
+The next safest implementation step is PRD 4:
 
-- formalize a separate coach agent
-- keep it consuming `ScanVerdict`, check-ins, and memory
-- do not block scan execution on coach availability
+- formalize the real product graph and resolution layer
+- keep `DemoScanService` as a deterministic fallback while live sources come online
+- preserve coach and scan verdict separation as richer product data lands
 
 ## Minimal context packet for Claude Code
 
@@ -131,7 +158,10 @@ Then point it at:
 
 - `WellnessLens/Domain/LILA/LILACompatibility.swift`
 - `WellnessLens/Infrastructure/ScanVerdictAgent.swift`
+- `WellnessLens/Infrastructure/CoachAgent.swift`
+- `WellnessLens/Infrastructure/RemoteCoachAgent.swift`
 - `WellnessLens/App/AppModel.swift`
 - `agent-service/app/contracts.py`
+- `agent-service/app/coach_runtime.py`
 - `agent-service/app/service.py`
 - `agent-service/app/scan_verdict_runtime.py`

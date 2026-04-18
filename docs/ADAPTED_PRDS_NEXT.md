@@ -4,6 +4,9 @@ Estos PRDs están adaptados al estado real del repo después del milestone found
 
 ## PRD 1. Scan Verdict Surface
 
+### Estado
+Implementado y verificado en el repo real.
+
 ### Objetivo
 Hacer que `ScanVerdict` sea la salida principal visible para la usuaria sin romper el flujo legacy existente.
 
@@ -40,6 +43,9 @@ Hacer que `ScanVerdict` sea la salida principal visible para la usuaria sin romp
 
 ## PRD 2. Runtime Prompt + Schema Real
 
+### Estado
+Implementado y verificado en `agent-service`.
+
 ### Objetivo
 Conectar `lila-agents.zip` al runtime real del `Scan Verdict Agent`, sin mezclarlo con el strategist.
 
@@ -68,6 +74,9 @@ Conectar `lila-agents.zip` al runtime real del `Scan Verdict Agent`, sin mezclar
 
 ## PRD 3. Coach Agent Separado
 
+### Estado
+Implementado y verificado en backend + iOS.
+
 ### Objetivo
 Formalizar el `Coach Agent` como servicio independiente que consuma `ScanVerdict`, check-ins y memoria.
 
@@ -79,7 +88,7 @@ Formalizar el `Coach Agent` como servicio independiente que consuma `ScanVerdict
 ### Entregables
 - contrato explícito `CoachReply`
 - service separado en backend
-- adapter temporal para reutilizar `StrategistChatView`
+- adapter temporal para reutilizar `StrategistChatView` sin cambiar su UI
 - consumo de:
   - latest verdict
   - check-ins
@@ -93,7 +102,10 @@ Formalizar el `Coach Agent` como servicio independiente que consuma `ScanVerdict
 
 ### Definition of Done
 - coach responde desde contrato propio
-- strategist legacy puede quedar como fallback temporal
+- `POST /v1/coach/reply` responde bajo schema estable
+- golden examples del coach validan al startup
+- iOS usa `RemoteCoachAgent` con auto-fallback a `DeterministicCoachAgent`
+- `AppModel.sendStrategistMessage(...)` integra el coach sin tocar visualmente `StrategistChatView`
 
 ## PRD 4. Product Graph / Resolution Layer
 
@@ -151,8 +163,5 @@ Reemplazar el scoring por tags con un motor más serio basado en nutrientes/cont
 - tests unitarios de scoring
 
 ## Orden recomendado
-1. PRD 1: Scan Verdict Surface
-2. PRD 2: Runtime Prompt + Schema Real
-3. PRD 3: Coach Agent Separado
-4. PRD 4: Product Graph / Resolution Layer
-5. PRD 5: Nutrient Intelligence Engine
+1. PRD 4: Product Graph / Resolution Layer
+2. PRD 5: Nutrient Intelligence Engine

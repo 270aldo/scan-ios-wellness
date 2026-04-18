@@ -24,7 +24,8 @@ Before changing code, read these files in this order:
 - Foundation-first is implemented.
 - PRD 1 "Scan Verdict Surface" is implemented on the real repo.
 - PRD 2 "Runtime Prompt + Schema Real" is implemented in `agent-service`.
-- PRD 3 and later are not implemented yet.
+- PRD 3 "Coach Agent" is implemented across `agent-service` and iOS.
+- PRD 4 and later are not implemented yet.
 
 ## Hard guardrails
 
@@ -53,10 +54,13 @@ If a task requires touching them, make the smallest viable change and preserve t
 - LILA domain: `WellnessLens/Domain/LILA/`
 - Compatibility bridge: `WellnessLens/Domain/LILA/LILACompatibility.swift`
 - Scan verdict agent: `WellnessLens/Infrastructure/ScanVerdictAgent.swift`
+- Coach agents: `WellnessLens/Infrastructure/CoachAgent.swift`, `WellnessLens/Infrastructure/RemoteCoachAgent.swift`
 - HealthKit service: `WellnessLens/Infrastructure/HealthKitService.swift`
 - App state owner: `WellnessLens/App/AppModel.swift`
 - Agent runtime assets: `agent-service/assets/scan_verdict/`
+- Coach runtime assets: `agent-service/assets/coach_agent/`
 - Agent runtime loader: `agent-service/app/scan_verdict_runtime.py`
+- Coach runtime loader: `agent-service/app/coach_runtime.py`
 - Agent contracts: `agent-service/app/contracts.py`
 - Agent service: `agent-service/app/service.py`
 
@@ -68,6 +72,12 @@ The scan verdict runtime now uses real repo-stored assets:
 - `agent-service/assets/scan_verdict/ScanVerdictSchema.json`
 - `agent-service/assets/scan_verdict/LILA_GoldenExamples.md`
 
+The coach runtime now also uses real repo-stored assets:
+
+- `agent-service/assets/coach_agent/LILA_CoachPrompt.md`
+- `agent-service/assets/coach_agent/CoachReplySchema.json`
+- `agent-service/assets/coach_agent/LILA_CoachGoldenExamples.md`
+
 These are validated at runtime. Do not replace them with invented content.
 
 ## Verification commands
@@ -77,11 +87,12 @@ Run these before calling work complete:
 ```bash
 xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' build CODE_SIGNING_ALLOWED=NO
 xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO
-pytest /Users/aldoolivas/IOS_ngx-silver/agent-service/tests/test_agent_api.py
+pytest /Users/aldoolivas/IOS_ngx-silver/agent-service/tests/
 ```
 
 ## Working assumptions
 
 - `artifacts/ui-audit/` contains audit screenshots and working collateral. Treat it as reference material, not product code.
-- The safest next implementation track is PRD 3: a separate coach agent that consumes `ScanVerdict` and memory without blocking scans.
+- `StrategistChatView` remains visually stable; coach integration now happens in `AppModel.sendStrategistMessage(...)` via `coachAgent`.
+- The safest next implementation track is PRD 4: a real product graph and resolution layer on top of the existing scan + coach foundation.
 - If provider-backed scan verdict behavior is being changed, preserve deterministic local fallback.
