@@ -512,6 +512,53 @@ struct ConversationMessage: Codable, Hashable, Identifiable {
     var text: String
     var createdAt: Date
     var citedMemoryIDs: [UUID] = []
+    var coachPayload: ConversationMessageCoachPayload? = nil
+
+    var coachHistoryText: String {
+        guard let followUpQuestion = coachPayload?.followUpQuestion, !followUpQuestion.isEmpty else {
+            return text
+        }
+
+        return "\(text)\n\n\(followUpQuestion)"
+    }
+}
+
+struct ConversationMessageCoachPayload: Codable, Hashable {
+    var replyID: String
+    var referencedVerdictID: String?
+    var referencedVerdictSummary: String?
+    var referencedPatterns: [String]
+    var suggestedActions: [CoachSuggestedAction]
+    var followUpQuestion: String?
+    var safetyFlags: [CoachSafetyFlag]
+    var evidenceTier: CoachEvidenceTier
+    var disclaimer: String
+    var voiceTags: [CoachVoiceTag]
+    var voiceDirective: String?
+    var spokenVersion: String?
+
+    init(reply: CoachReply) {
+        replyID = reply.replyId
+        referencedVerdictID = reply.referencedVerdictId
+        referencedVerdictSummary = reply.referencedVerdictSummary
+        referencedPatterns = reply.referencedPatterns
+        suggestedActions = reply.suggestedActions
+        followUpQuestion = reply.followUpQuestion
+        safetyFlags = reply.safetyFlags
+        evidenceTier = reply.evidenceTier
+        disclaimer = reply.disclaimer
+        voiceTags = reply.voiceTags ?? []
+        voiceDirective = reply.voiceDirective
+        spokenVersion = reply.spokenVersion
+    }
+
+    var hasVoiceMetadata: Bool {
+        spokenVersion != nil || !voiceTags.isEmpty || voiceDirective != nil
+    }
+
+    var hasSafetyNotice: Bool {
+        !safetyFlags.isEmpty
+    }
 }
 
 struct ConversationThread: Codable, Hashable, Identifiable {

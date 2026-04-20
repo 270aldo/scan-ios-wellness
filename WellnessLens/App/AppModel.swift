@@ -142,6 +142,7 @@ final class AppModel {
     var hasAttemptedRemoteInsightsRefresh = false
     var hasAttemptedRemoteHomeRefresh = false
     var bootstrapCompleted = false
+    var pendingStrategistReplyMessageIDs = Set<ConversationMessage.ID>()
 
     private let homeComposer = HomeComposer()
     private let onboardingPlanner = OnboardingPlanner()
@@ -1165,6 +1166,29 @@ final class AppModel {
         return fallbackStrategistThread()
     }
 
+    func isAwaitingStrategistReply(to messageID: ConversationMessage.ID) -> Bool {
+        pendingStrategistReplyMessageIDs.contains(messageID)
+    }
+
+    func sendStrategistPrompt(
+        _ prompt: String,
+        entryPoint: StrategistEntryPoint,
+        linkedAnalysis: ScanAnalysis? = nil
+    ) {
+        sendStrategistMessage(prompt, entryPoint: entryPoint, linkedAnalysis: linkedAnalysis)
+    }
+
+    func supportedStrategistTab(for action: CoachSuggestedAction) -> AppTab? {
+        switch action.type {
+        case .scan:
+            return .scan
+        case .checkIn:
+            return .checkIn
+        case .viewVerdict, .consultProfessional, .none:
+            return nil
+        }
+    }
+
     func strategistStarterPrompts(
         for entryPoint: StrategistEntryPoint,
         linkedAnalysis: ScanAnalysis? = nil
@@ -1218,6 +1242,7 @@ final class AppModel {
         conversationThreads[threadIndex].updatedAt = .now
         conversationThreads[threadIndex].title = "Daily strategist"
         conversationThreads[threadIndex].entryPoint = .home
+        pendingStrategistReplyMessageIDs.insert(userMessage.id)
 
         if threadIndex != 0 {
             let primaryThread = conversationThreads.remove(at: threadIndex)
@@ -1688,7 +1713,7 @@ final class AppModel {
     private func persist() {
         services.store.save(
             StoredAppState(
-                schemaVersion: 5,
+                schemaVersion: 6,
                 localProfileID: localProfileID,
                 hasCompletedOnboarding: hasCompletedOnboarding,
                 onboardingDraft: onboardingDraft,
@@ -1792,7 +1817,7 @@ final class AppModel {
         return scopedMessages.map {
             CoachThreadTurn(
                 role: $0.speaker == .user ? "user" : "assistant",
-                content: $0.text,
+                content: $0.coachHistoryText,
                 timestamp: $0.createdAt
             )
         }
@@ -1804,13 +1829,18 @@ final class AppModel {
         after userMessageID: ConversationMessage.ID,
         linkedAnalysis: ScanAnalysis?
     ) {
+        defer {
+            pendingStrategistReplyMessageIDs.remove(userMessageID)
+        }
+
         guard let threadIndex = conversationThreads.firstIndex(where: { $0.id == threadID }) else { return }
 
         let message = ConversationMessage(
             speaker: .strategist,
-            text: coachMessageText(from: reply),
+            text: reply.message,
             createdAt: reply.createdAt,
-            citedMemoryIDs: []
+            citedMemoryIDs: [],
+            coachPayload: ConversationMessageCoachPayload(reply: reply)
         )
 
         if let userIndex = conversationThreads[threadIndex].messages.firstIndex(where: { $0.id == userMessageID }) {
@@ -1835,13 +1865,6 @@ final class AppModel {
         }
 
         persist()
-    }
-
-    private func coachMessageText(from reply: CoachReply) -> String {
-        guard let followUpQuestion = reply.followUpQuestion, !followUpQuestion.isEmpty else {
-            return reply.message
-        }
-        return "\(reply.message)\n\n\(followUpQuestion)"
     }
 
     private func primaryConversationThreadIndex() -> Int? {

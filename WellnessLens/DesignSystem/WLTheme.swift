@@ -7,6 +7,8 @@ enum WLPalette {
     static let surface = Color.white.opacity(0.94)
     static let surfaceElevated = Color.white.opacity(0.985)
     static let surfaceMuted = Color(red: 0.973, green: 0.963, blue: 0.979)
+    static let surfaceQuiet = Color.white.opacity(0.90)
+    static let surfaceSoft = Color(red: 0.982, green: 0.971, blue: 0.983)
     static let ink = Color(red: 0.135, green: 0.104, blue: 0.173)
     static let inkSoft = Color(red: 0.453, green: 0.415, blue: 0.490)
     static let stroke = Color.black.opacity(0.055)
@@ -98,6 +100,77 @@ struct WLLiquidGlassPolicy {
 enum WLElevation {
     static let shadow = Color(red: 0.498, green: 0.328, blue: 0.492).opacity(0.12)
     static let heroShadow = Color(red: 0.524, green: 0.338, blue: 0.594).opacity(0.24)
+    static let quietShadow = Color(red: 0.498, green: 0.328, blue: 0.492).opacity(0.07)
+    static let emphasisShadow = Color(red: 0.524, green: 0.338, blue: 0.594).opacity(0.16)
+}
+
+enum WLSurfaceStyle {
+    case primary
+    case secondary
+    case quiet
+    case emphasis
+    case caution
+
+    var fill: AnyShapeStyle {
+        switch self {
+        case .primary:
+            AnyShapeStyle(WLGradient.blushSurface)
+        case .secondary:
+            AnyShapeStyle(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.985), WLPalette.surfaceMuted.opacity(0.96)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .quiet:
+            AnyShapeStyle(
+                LinearGradient(
+                    colors: [WLPalette.surfaceQuiet, WLPalette.surfaceSoft],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .emphasis:
+            AnyShapeStyle(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.99), WLPalette.blush.opacity(0.18), WLPalette.canvasWarm],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .caution:
+            AnyShapeStyle(
+                LinearGradient(
+                    colors: [WLPalette.caution.opacity(0.12), Color.white.opacity(0.98)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        }
+    }
+
+    var stroke: Color {
+        switch self {
+        case .primary, .secondary, .quiet:
+            WLPalette.stroke
+        case .emphasis:
+            WLPalette.rose.opacity(0.14)
+        case .caution:
+            WLPalette.caution.opacity(0.18)
+        }
+    }
+
+    var shadowColor: Color {
+        switch self {
+        case .primary, .secondary:
+            WLElevation.shadow
+        case .quiet:
+            WLElevation.quietShadow
+        case .emphasis, .caution:
+            WLElevation.emphasisShadow
+        }
+    }
 }
 
 enum WLProductCopy {
@@ -309,6 +382,20 @@ extension View {
                 fill: AnyShapeStyle(fill),
                 stroke: stroke,
                 shadowColor: shadowColor,
+                radius: radius
+            )
+        )
+    }
+
+    func wlCardSurface(
+        style: WLSurfaceStyle,
+        radius: CGFloat = WLCorner.l
+    ) -> some View {
+        modifier(
+            WLCardModifier(
+                fill: style.fill,
+                stroke: style.stroke,
+                shadowColor: style.shadowColor,
                 radius: radius
             )
         )

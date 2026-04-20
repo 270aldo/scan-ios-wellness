@@ -428,10 +428,6 @@ struct AnalysisView: View {
                     verdictSurface: verdictSurface
                 )
 
-                ScanVerdictSurfaceCard(
-                    content: verdictSurface
-                )
-
                 AnalysisOutcomeCard(
                     presentation: presentation,
                     followUpPrompt: nil,
@@ -443,6 +439,11 @@ struct AnalysisView: View {
                             handleAction(action)
                         }
                     }
+                )
+
+                AnalysisImpactCard(
+                    content: verdictSurface,
+                    lensScores: sortedLensScores
                 )
 
                 if model.featureFlags.patternAgent, let patternInsight {
@@ -476,31 +477,17 @@ struct AnalysisView: View {
                 if !analysis.topReasons.isEmpty || !analysis.warnings.isEmpty {
                     VStack(alignment: .leading, spacing: WLSpacing.m) {
                         WLSectionHeader(
-                            title: "What shaped this read",
-                            subtitle: "Supportive signals and friction points that drove the verdict.",
+                            title: "Why it landed here",
+                            subtitle: "The strongest supporting and caution signals behind the recommendation.",
                             systemImage: "slider.horizontal.3"
                         )
 
-                        ForEach(analysis.topReasons) { reason in
+                        ForEach(Array(analysis.topReasons.prefix(3))) { reason in
                             AnalysisReasonCard(reason: reason)
                         }
 
-                        ForEach(analysis.warnings, id: \.self) { warning in
+                        ForEach(Array(analysis.warnings.prefix(2)), id: \.self) { warning in
                             AnalysisWarningCard(warning: warning)
-                        }
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: WLSpacing.m) {
-                    WLSectionHeader(
-                        title: "Lens breakdown",
-                        subtitle: "A directional view across the five WellnessLens lenses.",
-                        systemImage: "circle.grid.2x2"
-                    )
-
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 156), spacing: WLSpacing.s)], spacing: WLSpacing.s) {
-                        ForEach(sortedLensScores) { score in
-                            WLLensTile(score: score)
                         }
                     }
                 }
@@ -635,6 +622,11 @@ private struct AnalysisHero: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text(verdictSurface.headline)
+                    .font(WLTypography.title)
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(verdictSurface.primaryReason)
                     .font(WLTypography.body)
                     .foregroundStyle(Color.white.opacity(0.90))
                     .fixedSize(horizontal: false, vertical: true)
@@ -679,16 +671,17 @@ private struct AnalysisHero: View {
     }
 }
 
-private struct ScanVerdictSurfaceCard: View {
+private struct AnalysisImpactCard: View {
     let content: ScanVerdictSurfaceContent
+    let lensScores: [LensScore]
 
     var body: some View {
-        WLPrimaryCard {
+        WLFeatureCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
-                    title: "Today's verdict",
-                    subtitle: "This is the primary read to use before drilling into the legacy detail.",
-                    systemImage: "sparkles"
+                    title: "Impact on your goals",
+                    subtitle: "Where this looks supportive, where it softens, and what deserves extra attention.",
+                    systemImage: "scope"
                 )
 
                 ViewThatFits(in: .horizontal) {
@@ -721,6 +714,12 @@ private struct ScanVerdictSurfaceCard: View {
                     .font(WLTypography.bodyEmphasis)
                     .foregroundStyle(WLPalette.inkSoft)
 
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 156), spacing: WLSpacing.s)], spacing: WLSpacing.s) {
+                    ForEach(lensScores) { score in
+                        WLLensTile(score: score)
+                    }
+                }
+
                 if !content.watchouts.isEmpty {
                     VStack(alignment: .leading, spacing: WLSpacing.s) {
                         Text("Watchouts")
@@ -750,13 +749,7 @@ private struct ScanVerdictSurfaceCard: View {
                     }
                     .padding(WLSpacing.l)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .wlCardSurface(
-                        fill: LinearGradient(
-                            colors: [WLPalette.blush.opacity(0.24), Color.white.opacity(0.98)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .wlCardSurface(style: .quiet)
                 }
 
                 if let followUpPrompt = content.followUpPrompt {
@@ -812,13 +805,7 @@ private struct ScanVerdictWatchoutCard: View {
         }
         .padding(WLSpacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .wlCardSurface(
-            fill: LinearGradient(
-                colors: [WLPalette.caution.opacity(0.12), Color.white.opacity(0.98)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .wlCardSurface(style: .caution)
     }
 }
 
@@ -829,7 +816,7 @@ private struct AnalysisOutcomeCard: View {
     let secondaryAction: (() -> Void)?
 
     var body: some View {
-        WLPrimaryCard {
+        WLFeatureCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "Best next step",
@@ -1023,7 +1010,7 @@ private struct AnalysisConfidenceCard: View {
     }
 
     var body: some View {
-        WLSurfaceCard {
+        WLQuietCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: WLSpacing.s) {
@@ -1072,7 +1059,7 @@ private struct AnalysisSupportingActionsCard: View {
     let trackAgain: () -> Void
 
     var body: some View {
-        WLCompactCard {
+        WLQuietCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: WLSpacing.s) {
@@ -1139,7 +1126,7 @@ private struct AnalysisPatternInsightCard: View {
     let unlock: () -> Void
 
     var body: some View {
-        WLCompactCard {
+        WLQuietCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "Pattern context",
@@ -1245,7 +1232,7 @@ private struct AnalysisReasonCard: View {
         }
         .padding(WLSpacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .wlCardSurface(fill: fill)
+        .wlCardSurface(style: reason.impact == .caution ? .caution : .quiet)
     }
 
     private var badgeTitle: String {
@@ -1289,13 +1276,7 @@ private struct AnalysisWarningCard: View {
         }
         .padding(WLSpacing.l)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .wlCardSurface(
-            fill: LinearGradient(
-                colors: [WLPalette.caution.opacity(0.12), Color.white.opacity(0.97)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .wlCardSurface(style: .caution)
     }
 }
 
@@ -1303,7 +1284,7 @@ private struct AnalysisSuggestionCard: View {
     let suggestion: AlternativeSuggestion
 
     var body: some View {
-        WLSurfaceCard {
+        WLQuietCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: WLSpacing.xs) {

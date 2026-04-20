@@ -224,15 +224,41 @@ struct WLSecondarySurfaceCard<Content: View>: View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .wlCardSurface(
-                fill: LinearGradient(
-                    colors: [Color.white.opacity(0.985), WLPalette.surfaceMuted.opacity(0.96)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                shadowColor: WLElevation.shadow.opacity(0.24),
-                radius: WLCorner.secondary
-            )
+            .wlCardSurface(style: .secondary, radius: WLCorner.secondary)
+    }
+}
+
+struct WLQuietCard<Content: View>: View {
+    private let content: Content
+    private let padding: CGFloat
+
+    init(padding: CGFloat = WLSpacing.l, @ViewBuilder content: () -> Content) {
+        self.padding = padding
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .wlCardSurface(style: .quiet, radius: WLCorner.secondary)
+    }
+}
+
+struct WLFeatureCard<Content: View>: View {
+    private let content: Content
+    private let padding: CGFloat
+
+    init(padding: CGFloat = WLSpacing.l, @ViewBuilder content: () -> Content) {
+        self.padding = padding
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .wlCardSurface(style: .emphasis, radius: WLCorner.secondary)
     }
 }
 
@@ -730,13 +756,19 @@ struct WLLensTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
-            HStack(spacing: WLSpacing.s) {
-                WLIcon(systemName: score.lens.icon, color: WLPalette.rose, size: 14)
+            HStack(alignment: .top, spacing: WLSpacing.s) {
+                HStack(spacing: WLSpacing.s) {
+                    WLIcon(systemName: score.lens.icon, color: band.foreground, size: 14)
 
-                Text(score.lens.title)
-                    .font(WLTypography.captionStrong)
-                    .foregroundStyle(WLPalette.ink)
-                    .lineLimit(2)
+                    Text(score.lens.title)
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.ink)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: WLSpacing.xs)
+
+                WLPill(title: descriptor, tone: descriptorTone)
             }
 
             VStack(alignment: .leading, spacing: WLSpacing.xs) {
@@ -745,7 +777,7 @@ struct WLLensTile: View {
                     .foregroundStyle(WLPalette.ink)
                     .contentTransition(.numericText())
 
-                Text(descriptor)
+                Text(scoreBandTitle)
                     .font(WLTypography.caption)
                     .foregroundStyle(band.foreground)
             }
@@ -759,22 +791,32 @@ struct WLLensTile: View {
         }
         .frame(maxWidth: .infinity, minHeight: 158, alignment: .leading)
         .padding(WLSpacing.l)
-        .background(
-            RoundedRectangle(cornerRadius: WLCorner.l, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.98), WLPalette.canvasWarm],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: WLCorner.l, style: .continuous)
-                .stroke(band.foreground.opacity(0.09))
-        )
-        .shadow(color: WLElevation.shadow.opacity(0.8), radius: 18, x: 0, y: 10)
+        .wlCardSurface(style: score.score >= 82 ? .emphasis : .quiet)
         .animation(.spring(response: 0.42, dampingFraction: 0.88), value: score.score)
+    }
+
+    private var descriptorTone: WLPill.Tone {
+        switch score.score {
+        case 82...:
+            .accent
+        case 66...:
+            .soft
+        default:
+            .neutral
+        }
+    }
+
+    private var scoreBandTitle: String {
+        switch score.score {
+        case 82...:
+            "High support"
+        case 66...:
+            "Useful support"
+        case 50...:
+            "Mixed support"
+        default:
+            "Needs caution"
+        }
     }
 }
 

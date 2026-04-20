@@ -43,9 +43,16 @@
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
-	<key>WLBackendBaseURL</key>
-	<string></string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+	</array>
 	<key>WLAgentServiceBaseURL</key>
+	<string></string>
+	<key>WLBackendBaseURL</key>
 	<string></string>
 	<key>WLFirebaseEnabled</key>
 	<false/>

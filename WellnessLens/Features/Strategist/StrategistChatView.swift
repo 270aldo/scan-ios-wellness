@@ -1,5 +1,10 @@
 import SwiftUI
 
+private enum StrategistTranscriptTarget: Hashable {
+    case message(ConversationMessage.ID)
+    case pending(ConversationMessage.ID)
+}
+
 private struct StrategistSurfacePlan {
     let badgeTitle: String
     let headline: String
@@ -9,13 +14,70 @@ private struct StrategistSurfacePlan {
     let composerPlaceholder: String
 }
 
-private struct StrategistContextCardData: Identifiable {
+private struct StrategistContextPillData: Identifiable {
     let id = UUID()
-    let badgeTitle: String
-    let badgeSymbol: String
-    let badgeTone: WLStatusBadge.Tone
     let title: String
-    let summary: String
+    let systemImage: String
+    let tone: WLStatusBadge.Tone
+}
+
+private enum StrategistVoiceDockStatus {
+    case future
+    case thinking
+    case ready(voiceTags: [CoachVoiceTag], hasSpokenVersion: Bool)
+
+    var title: String {
+        switch self {
+        case .future:
+            return "Voice dock ready"
+        case .thinking:
+            return "Strategist is thinking"
+        case let .ready(voiceTags, hasSpokenVersion):
+            if hasSpokenVersion {
+                return voiceTags.isEmpty ? "Playback shell ready" : "Playback shell • \(Self.voiceTagsTitle(voiceTags))"
+            }
+            return voiceTags.isEmpty ? "Voice-ready shell" : "Voice-ready • \(Self.voiceTagsTitle(voiceTags))"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .future:
+            return "Mic, transcript, and playback stay visible so voice-first mode can land cleanly later."
+        case .thinking:
+            return "The next reply is still in flight. The dock is already reserving room for transcript and speech."
+        case let .ready(_, hasSpokenVersion):
+            return hasSpokenVersion
+                ? "This reply already carries voice metadata, so the future player can sit on top of the real contract."
+                : "The contract already carries voice tags and directives, even before audio playback is turned on."
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .future:
+            return WLPalette.inkSoft
+        case .thinking:
+            return WLPalette.rose
+        case .ready:
+            return WLPalette.lilac
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .future:
+            return "Listening shell"
+        case .thinking:
+            return "Thinking"
+        case .ready:
+            return "Speaking shell"
+        }
+    }
+
+    private static func voiceTagsTitle(_ voiceTags: [CoachVoiceTag]) -> String {
+        voiceTags.prefix(2).map { $0.rawValue.capitalized }.joined(separator: " • ")
+    }
 }
 
 struct StrategistChatView: View {
@@ -26,6 +88,7 @@ struct StrategistChatView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var draft = ""
+    @FocusState private var isComposerFocused: Bool
 
     private var thread: ConversationThread {
         model.conversationThread(for: entryPoint)
@@ -50,58 +113,103 @@ struct StrategistChatView: View {
         model.strategistStarterPrompts(for: entryPoint, linkedAnalysis: linkedAnalysis)
     }
 
-    private var contextCards: [StrategistContextCardData] {
-        var cards = [StrategistContextCardData]()
+    private var introPrompts: [String] {
+        Array(starterPrompts.prefix(3))
+    }
 
-        if let linkedAnalysis {
-            cards.append(
-                StrategistContextCardData(
-                    badgeTitle: linkedVerdictTitle,
-                    badgeSymbol: "viewfinder",
-                    badgeTone: linkedVerdictTone,
-                    title: linkedReadTitle(for: linkedAnalysis),
-                    summary: linkedScanEvent?.analysis.whyToday.first ?? linkedAnalysis.overallSummary
+    private var showsIntroState: Bool {
+        !thread.messages.contains(where: { $0.speaker == .user })
+    }
+
+    private var pendingReplyCount: Int {
+        thread.messages.reduce(into: 0) { count, message in
+            if message.speaker == .user, model.isAwaitingStrategistReply(to: message.id) {
+                count += 1
+            }
+        }
+    }
+
+    private var lastStrategistPayload: ConversationMessageCoachPayload? {
+        thread.messages.last(where: { $0.speaker == .strategist })?.coachPayload
+    }
+
+    private var bubbleMaxWidth: CGFloat {
+        300
+    }
+
+    private var voiceDockStatus: StrategistVoiceDockStatus {
+        if pendingReplyCount > 0 {
+            return .thinking
+        }
+
+        if let payload = lastStrategistPayload, payload.hasVoiceMetadata {
+            return .ready(
+                voiceTags: payload.voiceTags,
+                hasSpokenVersion: payload.spokenVersion != nil
+            )
+        }
+
+        return .future
+    }
+
+    private var openingMessage: ConversationMessage? {
+        thread.messages.first(where: { $0.speaker == .strategist })
+    }
+
+    private var latestTranscriptTarget: StrategistTranscriptTarget? {
+        guard let lastMessage = thread.messages.last else { return nil }
+
+        if lastMessage.speaker == .user, model.isAwaitingStrategistReply(to: lastMessage.id) {
+            return .pending(lastMessage.id)
+        }
+
+        return .message(lastMessage.id)
+    }
+
+    private var contextPills: [StrategistContextPillData] {
+        var pills = [StrategistContextPillData]()
+
+        if linkedAnalysis != nil {
+            pills.append(
+                StrategistContextPillData(
+                    title: linkedVerdictTitle,
+                    systemImage: "viewfinder",
+                    tone: linkedVerdictTone
                 )
             )
         }
 
-        if let weeklyNarrative = model.weeklyNarrative {
-            cards.append(
-                StrategistContextCardData(
-                    badgeTitle: "Weekly layer",
-                    badgeSymbol: "sparkles",
-                    badgeTone: .accent,
-                    title: weeklyNarrative.headline,
-                    summary: weeklyNarrative.patternSummary
+        if model.weeklyNarrative != nil {
+            pills.append(
+                StrategistContextPillData(
+                    title: "Weekly layer",
+                    systemImage: "sparkles",
+                    tone: .accent
                 )
             )
         }
 
         if let latestPattern {
-            cards.append(
-                StrategistContextCardData(
-                    badgeTitle: latestPattern.signal.title,
-                    badgeSymbol: "waveform.path.ecg.rectangle",
-                    badgeTone: .accent,
-                    title: latestPattern.title,
-                    summary: latestPattern.summary
+            pills.append(
+                StrategistContextPillData(
+                    title: latestPattern.signal.title,
+                    systemImage: "waveform.path.ecg.rectangle",
+                    tone: .accent
                 )
             )
         }
 
-        if let latestCheckIn {
-            cards.append(
-                StrategistContextCardData(
-                    badgeTitle: "Latest body signal",
-                    badgeSymbol: "heart.text.square",
-                    badgeTone: .caution,
-                    title: latestCheckIn.readHelpful == false ? "Recent read still feels off" : "Recent body signal",
-                    summary: "Energy \(latestCheckIn.energy)/5 • Mood \(latestCheckIn.mood)/5 • Digestion \(latestCheckIn.bloating)/5 • Satiety \(latestCheckIn.satiety)/5"
+        if latestCheckIn != nil {
+            pills.append(
+                StrategistContextPillData(
+                    title: "Body signal",
+                    systemImage: "heart.text.square",
+                    tone: .caution
                 )
             )
         }
 
-        return Array(cards.prefix(3))
+        return Array(pills.prefix(3))
     }
 
     private var presentation: StrategistSurfacePlan {
@@ -141,7 +249,7 @@ struct StrategistChatView: View {
         return StrategistSurfacePlan(
             badgeTitle: "Shared strategist",
             headline: "Ask for the next decision, not more noise.",
-            summary: "This thread carries context across Home, Scan, Check-in, and Profile so the recommendation stays cumulative instead of resetting by surface.",
+            summary: "This thread carries context across Home, Scan, Check-In, and Profile so the recommendation stays cumulative instead of resetting by surface.",
             composerSeedTitle: "Use today’s focus",
             composerSeedPrompt: "What’s the one decision that matters most today?",
             composerPlaceholder: "Ask for one action, one reason, or one swap recommendation."
@@ -150,22 +258,29 @@ struct StrategistChatView: View {
 
     var body: some View {
         NavigationStack {
-            WLScreen {
-                hero
+            ZStack {
+                WLScreenBackground()
 
-                if !contextCards.isEmpty {
-                    contextSection
+                VStack(spacing: 0) {
+                    transcriptSection
+
+                    StrategistComposerBar(
+                        draft: $draft,
+                        isFocused: $isComposerFocused,
+                        voiceStatus: voiceDockStatus,
+                        placeholder: presentation.composerPlaceholder,
+                        seedTitle: presentation.composerSeedTitle,
+                        seedPrompt: presentation.composerSeedPrompt,
+                        sendMessage: sendMessage,
+                        seedPromptAction: seedPrompt
+                    )
+                    .padding(.horizontal, WLSpacing.l)
+                    .padding(.top, WLSpacing.s)
+                    .padding(.bottom, WLSpacing.s)
+                    .background(composerBackground)
                 }
-
-                conversationSection
-
-                if !starterPrompts.isEmpty {
-                    promptSection
-                }
-
-                composer
             }
-            .navigationTitle(entryPoint.title)
+            .navigationTitle("Strategist")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -176,155 +291,99 @@ struct StrategistChatView: View {
         }
     }
 
-    private var hero: some View {
-        WLHeroSurface {
-            VStack(alignment: .leading, spacing: WLSpacing.m) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: WLSpacing.s) {
-                        WLStatusBadge(
-                            title: presentation.badgeTitle,
-                            systemImage: "sparkles",
-                            tone: .accent,
-                            style: .heroGlass
+    private var transcriptSection: some View {
+        ScrollViewReader { scrollView in
+            ScrollView(.vertical, showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: WLSpacing.l) {
+                    if showsIntroState {
+                        StrategistIntroState(
+                            plan: presentation,
+                            openingMessage: openingMessage?.text ?? presentation.summary,
+                            prompts: introPrompts,
+                            contextPills: contextPills,
+                            voiceStatus: voiceDockStatus,
+                            sendPrompt: sendPromptImmediately
+                        )
+                    } else {
+                        StrategistContextRibbon(
+                            badgeTitle: presentation.badgeTitle,
+                            headline: presentation.headline,
+                            summary: presentation.summary,
+                            contextPills: contextPills
                         )
 
-                        WLPill(title: "Shared thread", tone: .neutral, style: .heroGlass)
-                    }
+                        ForEach(thread.messages) { message in
+                            StrategistMessageRow(
+                                message: message,
+                                maxBubbleWidth: bubbleMaxWidth,
+                                supportedTab: model.supportedStrategistTab(for:),
+                                performSuggestedAction: handleSuggestedAction
+                            )
+                            .id(StrategistTranscriptTarget.message(message.id))
 
-                    VStack(alignment: .leading, spacing: WLSpacing.s) {
-                        WLStatusBadge(
-                            title: presentation.badgeTitle,
-                            systemImage: "sparkles",
-                            tone: .accent,
-                            style: .heroGlass
-                        )
-
-                        WLPill(title: "Shared thread", tone: .neutral, style: .heroGlass)
+                            if message.speaker == .user,
+                               model.isAwaitingStrategistReply(to: message.id) {
+                                StrategistThinkingRow(maxBubbleWidth: bubbleMaxWidth)
+                                    .id(StrategistTranscriptTarget.pending(message.id))
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            }
+                        }
                     }
                 }
-
-                VStack(alignment: .leading, spacing: WLSpacing.s) {
-                    Text(presentation.headline)
-                        .font(WLTypography.hero)
-                        .foregroundStyle(.white)
-
-                    Text(presentation.summary)
-                        .font(WLTypography.body)
-                        .foregroundStyle(Color.white.opacity(0.88))
-                }
+                .padding(.horizontal, WLSpacing.l)
+                .padding(.top, WLSpacing.l)
+                .padding(.bottom, WLSpacing.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onAppear {
+                scrollTranscript(using: scrollView, animated: false)
+            }
+            .onChange(of: thread.messages.count) { _, _ in
+                scrollTranscript(using: scrollView)
+            }
+            .onChange(of: pendingReplyCount) { _, _ in
+                scrollTranscript(using: scrollView)
             }
         }
     }
 
-    private var contextSection: some View {
-        VStack(alignment: .leading, spacing: WLSpacing.m) {
-            WLSectionHeader(
-                title: "What strategist is using right now",
-                subtitle: "Ground the answer in live context, not just the surface that opened chat.",
-                systemImage: "brain.head.profile"
-            )
-
-            ForEach(contextCards) { card in
-                StrategistContextCard(card: card)
-            }
-        }
-    }
-
-    private var conversationSection: some View {
-        VStack(alignment: .leading, spacing: WLSpacing.m) {
-            WLSectionHeader(
-                title: "Conversation",
-                subtitle: "One shared strategist thread across Home, Scan, Check-in, and Profile.",
-                systemImage: "message"
-            )
-
-            ForEach(thread.messages) { message in
-                StrategistMessageBubble(message: message)
-            }
-        }
-    }
-
-    private var promptSection: some View {
-        VStack(alignment: .leading, spacing: WLSpacing.m) {
-            WLSectionHeader(
-                title: "Suggested prompts",
-                subtitle: "Tuned to the current read, weekly layer, and latest body signal.",
-                systemImage: "sparkles"
-            )
-
-            ForEach(starterPrompts, id: \.self) { prompt in
-                Button {
-                    draft = prompt
-                } label: {
-                    HStack(spacing: WLSpacing.s) {
-                        Text(prompt)
-                            .font(WLTypography.body)
-                            .foregroundStyle(WLPalette.ink)
-                            .multilineTextAlignment(.leading)
-
-                        Spacer(minLength: 0)
-
-                        WLIcon(systemName: "arrow.up.left", color: WLPalette.rose, size: 14)
-                    }
-                    .padding(WLSpacing.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .wlCardSurface(
-                        fill: LinearGradient(
-                            colors: [Color.white.opacity(0.98), WLPalette.surfaceMuted],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        shadowColor: WLElevation.shadow.opacity(0.30),
-                        radius: WLCorner.m
+    private var composerBackground: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.0), Color.white.opacity(0.82)],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
-                }
-                .buttonStyle(.plain)
-            }
+                )
+                .frame(height: 18)
+
+            Rectangle()
+                .fill(WLPalette.canvasWarm.opacity(0.92))
         }
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(WLPalette.stroke.opacity(0.8))
+                .frame(height: 1)
+        }
+        .ignoresSafeArea(edges: .bottom)
     }
 
-    private var composer: some View {
-        WLPrimaryCard {
-            VStack(alignment: .leading, spacing: WLSpacing.m) {
-                WLSectionHeader(
-                    title: "Ask something specific",
-                    subtitle: "Ask for one action, one reason, or one swap.",
-                    systemImage: "text.bubble"
-                )
+    private func scrollTranscript(using scrollView: ScrollViewProxy, animated: Bool = true) {
+        guard let target = latestTranscriptTarget else { return }
 
-                ZStack(alignment: .topLeading) {
-                    TextEditor(text: $draft)
-                        .frame(minHeight: 120)
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
-                                .fill(WLPalette.surfaceMuted)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
-                                .stroke(WLPalette.stroke)
-                        )
+        DispatchQueue.main.async {
+            let action = {
+                scrollView.scrollTo(target, anchor: .bottomLeading)
+            }
 
-                    if draft.isEmpty {
-                        Text(presentation.composerPlaceholder)
-                            .font(WLTypography.body)
-                            .foregroundStyle(WLPalette.inkSoft)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 24)
-                            .allowsHitTesting(false)
-                    }
+            if animated {
+                withAnimation(.spring(response: 0.30, dampingFraction: 0.86)) {
+                    action()
                 }
-
-                WLActionGroup {
-                    WLPrimaryButton(title: "Send", systemImage: "arrow.up.circle.fill") {
-                        sendMessage()
-                    }
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                    WLUtilityButton(title: presentation.composerSeedTitle, systemImage: "sparkles") {
-                        draft = presentation.composerSeedPrompt
-                    }
-                }
+            } else {
+                action()
             }
         }
     }
@@ -360,12 +419,22 @@ struct StrategistChatView: View {
     private func linkedReadTitle(for analysis: ScanAnalysis) -> String {
         switch analysis.source {
         case .mealPhoto:
-            return "Meal Snapshot"
+            return "Meal snapshot"
         case .menuPhoto:
-            return "Menu Scanner"
+            return "Menu scan"
         default:
             return analysis.resolvedProduct.name
         }
+    }
+
+    private func seedPrompt() {
+        draft = presentation.composerSeedPrompt
+        isComposerFocused = true
+    }
+
+    private func sendPromptImmediately(_ prompt: String) {
+        model.sendStrategistPrompt(prompt, entryPoint: entryPoint, linkedAnalysis: linkedAnalysis)
+        draft = ""
     }
 
     private func sendMessage() {
@@ -374,45 +443,206 @@ struct StrategistChatView: View {
         model.sendStrategistMessage(trimmed, entryPoint: entryPoint, linkedAnalysis: linkedAnalysis)
         draft = ""
     }
+
+    private func handleSuggestedAction(_ action: CoachSuggestedAction) {
+        guard let tab = model.supportedStrategistTab(for: action) else { return }
+        model.selectedTab = tab
+        dismiss()
+    }
+
 }
 
-private struct StrategistContextCard: View {
-    let card: StrategistContextCardData
+private struct StrategistIntroState: View {
+    let plan: StrategistSurfacePlan
+    let openingMessage: String
+    let prompts: [String]
+    let contextPills: [StrategistContextPillData]
+    let voiceStatus: StrategistVoiceDockStatus
+    let sendPrompt: (String) -> Void
 
     var body: some View {
-        WLCompactCard {
-            VStack(alignment: .leading, spacing: WLSpacing.s) {
-                WLStatusBadge(
-                    title: card.badgeTitle,
-                    systemImage: card.badgeSymbol,
-                    tone: card.badgeTone
-                )
+        VStack(alignment: .leading, spacing: WLSpacing.l) {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                HStack(spacing: WLSpacing.s) {
+                    WLStatusBadge(
+                        title: plan.badgeTitle,
+                        systemImage: "sparkles",
+                        tone: .accent
+                    )
 
-                Text(card.title)
-                    .font(WLTypography.bodyEmphasis)
+                    WLPill(title: "Shared thread", tone: .soft)
+                }
+
+                Text(plan.headline)
+                    .font(WLTypography.hero)
                     .foregroundStyle(WLPalette.ink)
 
-                Text(card.summary)
+                Text(plan.summary)
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
+
+                StrategistContextPillWrap(contextPills: contextPills)
             }
+            .padding(WLSpacing.xl)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .wlCardSurface(
+                fill: LinearGradient(
+                    colors: [Color.white.opacity(0.94), WLPalette.canvasWarm.opacity(0.96)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                shadowColor: WLElevation.heroShadow.opacity(0.18),
+                radius: WLCorner.xl
+            )
+
+            WLSecondarySurfaceCard {
+                VStack(alignment: .leading, spacing: WLSpacing.s) {
+                    HStack(spacing: WLSpacing.xs) {
+                        WLIcon(systemName: "quote.bubble", color: WLPalette.rose, size: 13)
+                        Text("Opening read")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+                    }
+
+                    Text(openingMessage)
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.ink)
+                }
+            }
+
+            if !prompts.isEmpty {
+                VStack(alignment: .leading, spacing: WLSpacing.s) {
+                    Text("Quick starts")
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.inkSoft)
+
+                    ForEach(prompts, id: \.self) { prompt in
+                        Button(action: { sendPrompt(prompt) }) {
+                            HStack(spacing: WLSpacing.s) {
+                                Text(prompt)
+                                    .font(WLTypography.bodyEmphasis)
+                                    .foregroundStyle(WLPalette.ink)
+                                    .multilineTextAlignment(.leading)
+
+                                Spacer(minLength: 0)
+
+                                WLIcon(systemName: "arrow.up.left", color: WLPalette.rose, size: 13)
+                            }
+                            .padding(WLSpacing.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .wlCardSurface(
+                                fill: LinearGradient(
+                                    colors: [Color.white.opacity(0.98), WLPalette.surfaceMuted],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                shadowColor: WLElevation.shadow.opacity(0.22),
+                                radius: WLCorner.m
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            StrategistVoiceDock(status: voiceStatus)
         }
     }
 }
 
-private struct StrategistMessageBubble: View {
-    let message: ConversationMessage
+private struct StrategistContextRibbon: View {
+    let badgeTitle: String
+    let headline: String
+    let summary: String
+    let contextPills: [StrategistContextPillData]
 
     var body: some View {
-        HStack {
-            if message.speaker == .strategist {
-                bubble(horizontal: .leading, frameAlignment: .leading, fill: strategistFill, foreground: WLPalette.ink)
-                Spacer(minLength: 32)
-            } else {
-                Spacer(minLength: 32)
-                bubble(horizontal: .trailing, frameAlignment: .trailing, fill: userFill, foreground: .white)
+        VStack(alignment: .leading, spacing: WLSpacing.s) {
+            HStack(spacing: WLSpacing.s) {
+                WLStatusBadge(
+                    title: badgeTitle,
+                    systemImage: "brain.head.profile",
+                    tone: .accent
+                )
+
+                if !contextPills.isEmpty {
+                    StrategistContextPillWrap(contextPills: contextPills)
+                }
+            }
+
+            Text(headline)
+                .font(WLTypography.title)
+                .foregroundStyle(WLPalette.ink)
+                .lineLimit(2)
+
+            Text(summary)
+                .font(WLTypography.caption)
+                .foregroundStyle(WLPalette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(WLSpacing.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .wlCardSurface(
+            fill: LinearGradient(
+                colors: [Color.white.opacity(0.94), WLPalette.canvasWarm.opacity(0.92)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            shadowColor: WLElevation.shadow.opacity(0.16),
+            radius: WLCorner.l
+        )
+    }
+}
+
+private struct StrategistContextPillWrap: View {
+    let contextPills: [StrategistContextPillData]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: WLSpacing.s) {
+                pillContent
+            }
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                pillContent
             }
         }
+    }
+
+    @ViewBuilder
+    private var pillContent: some View {
+        ForEach(contextPills) { pill in
+            WLStatusBadge(
+                title: pill.title,
+                systemImage: pill.systemImage,
+                tone: pill.tone
+            )
+        }
+    }
+}
+
+private struct StrategistMessageRow: View {
+    let message: ConversationMessage
+    let maxBubbleWidth: CGFloat
+    let supportedTab: (CoachSuggestedAction) -> AppTab?
+    let performSuggestedAction: (CoachSuggestedAction) -> Void
+
+    private var isStrategist: Bool {
+        message.speaker == .strategist
+    }
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: WLSpacing.s) {
+            if isStrategist {
+                messageBubble(fill: strategistFill, foreground: WLPalette.ink)
+                    .frame(maxWidth: maxBubbleWidth, alignment: .leading)
+                Spacer(minLength: 28)
+            } else {
+                Spacer(minLength: 28)
+                messageBubble(fill: userFill, foreground: .white)
+                    .frame(maxWidth: maxBubbleWidth, alignment: .trailing)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var strategistFill: LinearGradient {
@@ -431,32 +661,447 @@ private struct StrategistMessageBubble: View {
         )
     }
 
-    private func bubble(
-        horizontal: HorizontalAlignment,
-        frameAlignment: Alignment,
-        fill: LinearGradient,
-        foreground: Color
-    ) -> some View {
-        VStack(alignment: horizontal, spacing: WLSpacing.xs) {
-            Text(message.speaker == .strategist ? "Strategist" : "You")
-                .font(WLTypography.captionStrong)
-                .foregroundStyle(message.speaker == .strategist ? WLPalette.rose : Color.white.opacity(0.88))
+    private func messageBubble(fill: LinearGradient, foreground: Color) -> some View {
+        VStack(alignment: isStrategist ? .leading : .trailing, spacing: WLSpacing.s) {
+            topMetaRow
+
+            if let referencedVerdictSummary = message.coachPayload?.referencedVerdictSummary,
+               !referencedVerdictSummary.isEmpty,
+               isStrategist {
+                Text(referencedVerdictSummary)
+                    .font(WLTypography.captionStrong)
+                    .foregroundStyle(WLPalette.inkSoft)
+            }
 
             Text(message.text)
                 .font(WLTypography.body)
                 .foregroundStyle(foreground)
-                .multilineTextAlignment(horizontal == .leading ? .leading : .trailing)
+                .multilineTextAlignment(isStrategist ? .leading : .trailing)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let followUpQuestion = message.coachPayload?.followUpQuestion,
+               !followUpQuestion.isEmpty,
+               isStrategist {
+                Text(followUpQuestion)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.rose)
+                    .padding(.top, WLSpacing.xs)
+            }
+
+            if let referencedPatterns = message.coachPayload?.referencedPatterns,
+               !referencedPatterns.isEmpty,
+               isStrategist {
+                Text(referencedPatterns.joined(separator: " • "))
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+            }
+
+            if let coachPayload = message.coachPayload,
+               !coachPayload.suggestedActions.isEmpty,
+               isStrategist {
+                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                    ForEach(Array(coachPayload.suggestedActions.enumerated()), id: \.offset) { _, action in
+                        StrategistSuggestedActionRow(
+                            action: action,
+                            isSupported: supportedTab(action) != nil,
+                            performSuggestedAction: performSuggestedAction
+                        )
+                    }
+                }
+            }
+
+            if let coachPayload = message.coachPayload,
+               coachPayload.hasSafetyNotice,
+               isStrategist {
+                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                    HStack(spacing: WLSpacing.xs) {
+                        WLIcon(systemName: "shield.lefthalf.filled", color: WLPalette.caution, size: 12)
+                        Text("Safety note")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.caution)
+                    }
+
+                    Text(coachPayload.disclaimer)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+                .padding(WLSpacing.s)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.white.opacity(0.72))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(WLPalette.caution.opacity(0.14))
+                )
+            }
         }
         .padding(WLSpacing.m)
-        .frame(maxWidth: .infinity, alignment: frameAlignment)
         .background(
             RoundedRectangle(cornerRadius: WLCorner.l, style: .continuous)
                 .fill(fill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: WLCorner.l, style: .continuous)
-                .stroke(message.speaker == .strategist ? WLPalette.stroke : Color.white.opacity(0.16))
+                .stroke(isStrategist ? WLPalette.stroke : Color.white.opacity(0.18))
         )
+        .shadow(
+            color: isStrategist ? WLElevation.shadow.opacity(0.12) : WLElevation.heroShadow.opacity(0.16),
+            radius: 14,
+            x: 0,
+            y: 8
+        )
+    }
+
+    private var topMetaRow: some View {
+        HStack(spacing: WLSpacing.xs) {
+            Text(isStrategist ? "Strategist" : "You")
+                .font(WLTypography.captionStrong)
+                .foregroundStyle(isStrategist ? WLPalette.rose : Color.white.opacity(0.88))
+
+            if let coachPayload = message.coachPayload, isStrategist {
+                StrategistEvidencePill(evidenceTier: coachPayload.evidenceTier)
+
+                if coachPayload.hasVoiceMetadata {
+                    WLPill(title: "Voice-ready", tone: .soft)
+                }
+            }
+        }
+    }
+}
+
+private struct StrategistEvidencePill: View {
+    let evidenceTier: CoachEvidenceTier
+
+    private var title: String {
+        switch evidenceTier {
+        case .high:
+            return "High signal"
+        case .emerging:
+            return "Emerging signal"
+        case .personalPattern:
+            return "Pattern-based"
+        }
+    }
+
+    var body: some View {
+        WLPill(title: title, tone: .soft)
+    }
+}
+
+private struct StrategistSuggestedActionRow: View {
+    let action: CoachSuggestedAction
+    let isSupported: Bool
+    let performSuggestedAction: (CoachSuggestedAction) -> Void
+
+    var body: some View {
+        Group {
+            if isSupported {
+                Button(action: { performSuggestedAction(action) }) {
+                    rowContent(accentColor: WLPalette.rose, trailingSymbol: "arrow.right")
+                }
+                .buttonStyle(.plain)
+            } else {
+                rowContent(accentColor: WLPalette.inkSoft, trailingSymbol: nil)
+            }
+        }
+    }
+
+    private func rowContent(
+        accentColor: Color,
+        trailingSymbol: String?
+    ) -> some View {
+        HStack(spacing: WLSpacing.s) {
+            WLIcon(systemName: iconName, color: accentColor, size: 12)
+
+            Text(action.label)
+                .font(WLTypography.captionStrong)
+                .foregroundStyle(WLPalette.ink)
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 0)
+
+            if let trailingSymbol {
+                WLIcon(systemName: trailingSymbol, color: accentColor, size: 11)
+            }
+        }
+        .padding(.horizontal, WLSpacing.s)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.82))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(accentColor.opacity(isSupported ? 0.18 : 0.08))
+        )
+    }
+
+    private var iconName: String {
+        switch action.type {
+        case .scan:
+            return "viewfinder"
+        case .checkIn:
+            return "heart.text.square"
+        case .viewVerdict:
+            return "doc.text.magnifyingglass"
+        case .consultProfessional:
+            return "cross.case"
+        case .none:
+            return "ellipsis.circle"
+        }
+    }
+}
+
+private struct StrategistThinkingRow: View {
+    let maxBubbleWidth: CGFloat
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: WLSpacing.s) {
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                HStack(spacing: WLSpacing.xs) {
+                    Text("Strategist")
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.rose)
+
+                    WLPill(title: "Thinking", tone: .soft)
+                }
+
+                HStack(spacing: WLSpacing.s) {
+                    StrategistTypingDots()
+                    Text("Working through the next move with the current signal.")
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+            }
+            .padding(WLSpacing.m)
+            .frame(maxWidth: maxBubbleWidth, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: WLCorner.l, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.98), WLPalette.surfaceMuted],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: WLCorner.l, style: .continuous)
+                    .stroke(WLPalette.stroke)
+            )
+
+            Spacer(minLength: 28)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct StrategistTypingDots: View {
+    var body: some View {
+        TimelineView(.animation) { context in
+            let phase = context.date.timeIntervalSinceReferenceDate
+
+            HStack(spacing: 6) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(WLPalette.rose)
+                        .frame(width: 8, height: 8)
+                        .opacity(opacity(for: index, phase: phase))
+                        .scaleEffect(scale(for: index, phase: phase))
+                }
+            }
+        }
+    }
+
+    private func opacity(for index: Int, phase: TimeInterval) -> Double {
+        let shifted = phase * 3.0 - Double(index) * 0.3
+        return 0.35 + ((sin(shifted) + 1) * 0.325)
+    }
+
+    private func scale(for index: Int, phase: TimeInterval) -> CGFloat {
+        let shifted = phase * 3.0 - Double(index) * 0.3
+        return 0.86 + CGFloat((sin(shifted) + 1) * 0.10)
+    }
+}
+
+private struct StrategistComposerBar: View {
+    @Binding var draft: String
+    var isFocused: FocusState<Bool>.Binding
+
+    let voiceStatus: StrategistVoiceDockStatus
+    let placeholder: String
+    let seedTitle: String
+    let seedPrompt: String
+    let sendMessage: () -> Void
+    let seedPromptAction: () -> Void
+
+    private var trimmedDraft: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.s) {
+            StrategistVoiceDock(status: voiceStatus)
+
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                HStack(alignment: .bottom, spacing: WLSpacing.s) {
+                    VStack(spacing: 6) {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [WLPalette.blush.opacity(0.9), Color.white.opacity(0.92)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 44, height: 44)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.72))
+                            )
+                            .overlay(
+                                WLIcon(systemName: "mic.fill", color: WLPalette.rose, size: 16)
+                            )
+
+                        Text("Mic")
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+
+                    TextField(placeholder, text: $draft, axis: .vertical)
+                        .focused(isFocused)
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.ink)
+                        .lineLimit(1...4)
+                        .textInputAutocapitalization(.sentences)
+                        .submitLabel(.send)
+                        .onSubmit(sendMessage)
+                        .padding(.horizontal, WLSpacing.m)
+                        .padding(.vertical, 14)
+                        .background(
+                            RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                                .fill(Color.white.opacity(0.9))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
+                                .stroke(isFocused.wrappedValue ? WLPalette.rose.opacity(0.22) : WLPalette.strokeStrong)
+                        )
+
+                    Button(action: sendMessage) {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: trimmedDraft.isEmpty
+                                        ? [WLPalette.lavender.opacity(0.6), WLPalette.surfaceMuted]
+                                        : [WLPalette.rose, Color(red: 0.862, green: 0.436, blue: 0.700)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 52, height: 52)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(trimmedDraft.isEmpty ? 0.2 : 0.16))
+                            )
+                            .overlay(
+                                WLIcon(
+                                    systemName: "arrow.up",
+                                    color: trimmedDraft.isEmpty ? WLPalette.inkSoft : .white,
+                                    size: 17
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(trimmedDraft.isEmpty)
+                }
+
+                HStack(spacing: WLSpacing.s) {
+                    WLUtilityButton(title: seedTitle, systemImage: "sparkles") {
+                        seedPromptAction()
+                    }
+
+                    Text(seedPrompt)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(WLSpacing.s)
+            .background(
+                RoundedRectangle(cornerRadius: WLCorner.xl, style: .continuous)
+                    .fill(Color.white.opacity(0.82))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: WLCorner.xl, style: .continuous)
+                    .stroke(Color.white.opacity(0.68))
+            )
+            .shadow(color: WLElevation.heroShadow.opacity(0.16), radius: 22, x: 0, y: 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct StrategistVoiceDock: View {
+    let status: StrategistVoiceDockStatus
+
+    var body: some View {
+        HStack(spacing: WLSpacing.s) {
+            HStack(spacing: WLSpacing.s) {
+                voiceCircle(systemName: "mic.fill")
+                voiceCircle(systemName: "play.fill")
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(status.caption)
+                    .font(WLTypography.captionStrong)
+                    .foregroundStyle(status.accentColor)
+
+                Text(status.title)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(status.subtitle)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(WLSpacing.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: WLCorner.l, style: .continuous)
+                .fill(Color.white.opacity(0.78))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: WLCorner.l, style: .continuous)
+                .stroke(status.accentColor.opacity(0.14))
+        )
+    }
+
+    private func voiceCircle(systemName: String) -> some View {
+        Circle()
+            .fill(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.98), status.accentColor.opacity(0.14)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .frame(width: 42, height: 42)
+            .overlay(
+                Circle()
+                    .stroke(status.accentColor.opacity(0.16))
+            )
+            .overlay(
+                WLIcon(systemName: systemName, color: status.accentColor, size: 14)
+            )
     }
 }
