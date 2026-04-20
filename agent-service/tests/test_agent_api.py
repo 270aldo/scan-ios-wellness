@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.scan_verdict_runtime import get_scan_verdict_assets
+from app.security import SecurityVerificationError
+from app.coach_runtime import CoachAssetError
+from app.scan_verdict_runtime import ScanVerdictAssetError, get_scan_verdict_assets
 from app.service import StrategistService, get_settings
 
 
@@ -105,3 +108,146 @@ def test_scan_verdict_vertex_provider_falls_back_to_local(monkeypatch):
     monkeypatch.delenv("WELLNESSLENS_AGENT_VERTEX_PROJECT", raising=False)
     get_settings.cache_clear()
     app.state.strategist_service = StrategistService(settings=get_settings())
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/v1/strategist/reply",
+            {
+                "profileSummary": "User is optimizing calmer energy and digestion.",
+                "tone": "calm_and_direct",
+                "userMessage": "What should I do next?",
+                "context": {
+                    "activeGoals": ["Steadier energy"],
+                    "recentSignals": [],
+                    "recentProducts": [],
+                    "openLoops": [],
+                    "memorySummaries": [],
+                    "weeklyNarrative": None,
+                },
+            },
+        ),
+        (
+            "/v1/scan/verdict",
+            {
+                "scanId": "scan-auth-test",
+                "productName": "Berry Yogurt",
+                "source": "meal_photo",
+                "userContextSummary": "User is protecting steadier energy.",
+                "structuredSummary": "Likely higher sugar load than ideal.",
+            },
+        ),
+        (
+            "/v1/coach/reply",
+            {
+                "userMessage": "Hola",
+                "userContextSummary": "User is testing auth.",
+            },
+        ),
+    ],
+)
+def test_agent_endpoints_require_auth_when_enforced(monkeypatch, path, payload):
+    monkeypatch.setenv("WELLNESSLENS_AGENT_ENV", "prod")
+    get_settings.cache_clear()
+    app.state.strategist_service = StrategistService(
+        settings=get_settings(),
+        scan_assets=get_scan_verdict_assets(),
+    )
+
+    response = client.post(path, json=payload)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Missing Authorization header."
+
+    monkeypatch.delenv("WELLNESSLENS_AGENT_ENV", raising=False)
+    get_settings.cache_clear()
+    app.state.strategist_service = StrategistService(settings=get_settings())
+
+
+def test_agent_endpoints_verify_tokens_when_enforced(monkeypatch):
+    monkeypatch.setenv("WELLNESSLENS_AGENT_ENV", "prod")
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.main.verify_firebase_id_token", lambda header: {"sub": "user-123"})
+    monkeypatch.setattr("app.main.verify_firebase_app_check_token", lambda token: {"sub": "app-123"})
+    app.state.strategist_service = StrategistService(
+        settings=get_settings(),
+        scan_assets=get_scan_verdict_assets(),
+    )
+
+    response = client.post(
+        "/v1/coach/reply",
+        json={
+            "userMessage": "Hola",
+            "userContextSummary": "User is testing auth.",
+        },
+        headers={
+            "Authorization": "Bearer valid-token",
+            "X-Firebase-AppCheck": "valid-app-check",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["replyId"]
+
+    monkeypatch.delenv("WELLNESSLENS_AGENT_ENV", raising=False)
+    get_settings.cache_clear()
+    app.state.strategist_service = StrategistService(settings=get_settings())
+
+
+def test_agent_endpoints_reject_invalid_tokens(monkeypatch):
+    monkeypatch.setenv("WELLNESSLENS_AGENT_ENV", "prod")
+    monkeypatch.setenv("WELLNESSLENS_AGENT_APP_CHECK_ENFORCED", "false")
+    get_settings.cache_clear()
+
+    def fail_auth(_: str):
+        raise SecurityVerificationError("Invalid Firebase ID token: bad token")
+
+    monkeypatch.setattr("app.main.verify_firebase_id_token", fail_auth)
+    app.state.strategist_service = StrategistService(
+        settings=get_settings(),
+        scan_assets=get_scan_verdict_assets(),
+    )
+
+    response = client.post(
+        "/v1/scan/verdict",
+        json={
+            "productName": "Berry Yogurt",
+            "source": "meal_photo",
+            "userContextSummary": "User is testing auth.",
+        },
+        headers={"Authorization": "Bearer fake-token"},
+    )
+
+    assert response.status_code == 401
+    assert "Invalid Firebase ID token" in response.json()["detail"]
+
+    monkeypatch.delenv("WELLNESSLENS_AGENT_ENV", raising=False)
+    monkeypatch.delenv("WELLNESSLENS_AGENT_APP_CHECK_ENFORCED", raising=False)
+    get_settings.cache_clear()
+    app.state.strategist_service = StrategistService(settings=get_settings())
+
+
+def test_agent_startup_fails_when_scan_assets_are_missing(monkeypatch):
+    monkeypatch.setenv("WELLNESSLENS_AGENT_SCAN_ASSETS_DIR", "/tmp/does-not-exist")
+    get_settings.cache_clear()
+
+    with pytest.raises(ScanVerdictAssetError):
+        with TestClient(app):
+            pass
+
+    monkeypatch.delenv("WELLNESSLENS_AGENT_SCAN_ASSETS_DIR", raising=False)
+    get_settings.cache_clear()
+
+
+def test_agent_startup_fails_when_coach_assets_are_missing(monkeypatch):
+    monkeypatch.setenv("WELLNESSLENS_AGENT_COACH_ASSETS_DIR", "/tmp/does-not-exist")
+    get_settings.cache_clear()
+
+    with pytest.raises(CoachAssetError):
+        with TestClient(app):
+            pass
+
+    monkeypatch.delenv("WELLNESSLENS_AGENT_COACH_ASSETS_DIR", raising=False)
+    get_settings.cache_clear()

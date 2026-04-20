@@ -35,7 +35,7 @@ struct StoredAppState: Codable {
 
     static func fresh() -> StoredAppState {
         StoredAppState(
-            schemaVersion: 5,
+            schemaVersion: 6,
             localProfileID: UUID().uuidString,
             hasCompletedOnboarding: false,
             onboardingDraft: nil,
@@ -606,7 +606,11 @@ struct AppServices {
         }
 
         let coachAgent: any CoachAgentServing = configuration.agentServiceBaseURL.map {
-            RemoteCoachAgent(endpoint: $0.appending(path: "v1/coach/reply"))
+            RemoteCoachAgent(
+                endpoint: $0.appending(path: "v1/coach/reply"),
+                identityProvider: identityProvider,
+                appCheckProvider: appCheckProvider
+            )
         } ?? DeterministicCoachAgent()
 
         return AppServices(

@@ -18,12 +18,14 @@ from app.contracts import (
     StrategistReplyRequest,
 )
 from app.coach_runtime import (
+    CoachRuntimeAssets,
     CoachSchemaValidationError,
     build_coach_context_prompt,
     build_coach_task_prompt,
     build_local_coach_reply,
     get_coach_assets,
 )
+from app.scan_verdict_runtime import ScanVerdictRuntimeAssets
 from app.scan_verdict_runtime import (
     ScanVerdictSchemaValidationError,
     build_local_scan_verdict,
@@ -53,6 +55,20 @@ class Settings(BaseSettings):
     coach_vertex_temperature: float = 0.5
     coach_vertex_seed: int = 11
     coach_vertex_max_output_tokens: int = 1024
+    firebase_auth_enabled: bool | None = None
+    app_check_enforced: bool | None = None
+
+    @property
+    def auth_enforced(self) -> bool:
+        if self.firebase_auth_enabled is not None:
+            return self.firebase_auth_enabled
+        return self.env in {"staging", "prod"}
+
+    @property
+    def app_check_required(self) -> bool:
+        if self.app_check_enforced is not None:
+            return self.app_check_enforced
+        return self.env in {"staging", "prod"}
 
 
 @lru_cache(maxsize=1)
@@ -63,6 +79,8 @@ def get_settings() -> Settings:
 @dataclass
 class StrategistService:
     settings: Settings
+    scan_assets: ScanVerdictRuntimeAssets | None = None
+    coach_assets: CoachRuntimeAssets | None = None
 
     def reply(self, request: StrategistReplyRequest) -> StrategistReply:
         if self.settings.provider == "vertex":
@@ -70,7 +88,7 @@ class StrategistService:
         return self._local_reply(request)
 
     def verdict(self, request: ScanVerdictRequest) -> ScanVerdict:
-        assets = get_scan_verdict_assets(self.settings.scan_assets_dir)
+        assets = self.scan_assets or get_scan_verdict_assets(self.settings.scan_assets_dir)
         if self.settings.provider == "vertex":
             try:
                 return self._vertex_verdict(request, assets)
@@ -84,7 +102,7 @@ class StrategistService:
         return build_local_scan_verdict(request, assets=assets)
 
     def coach_reply(self, request: CoachReplyRequest) -> CoachReply:
-        assets = get_coach_assets(self.settings.coach_assets_dir)
+        assets = self.coach_assets or get_coach_assets(self.settings.coach_assets_dir)
         if self.settings.provider == "vertex":
             try:
                 return self._vertex_coach_reply(request, assets)

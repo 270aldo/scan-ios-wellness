@@ -72,6 +72,99 @@ final class WellnessLensTests: XCTestCase {
         }
     }
 
+    private struct DelayedStubCoachAgent: CoachAgentServing {
+        var reply: CoachReply
+        var delayNanoseconds: UInt64 = 80_000_000
+
+        func generateReply(for request: CoachAgentRequest) async -> CoachReply {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+            return reply
+        }
+    }
+
+    private actor StubIdentityProvider: IdentityProviding {
+        let authorization: String?
+        let installIDValue: String
+
+        init(authorization: String? = nil, installIDValue: String = "install-test") {
+            self.authorization = authorization
+            self.installIDValue = installIDValue
+        }
+
+        func prepare() async {}
+
+        func installID() async -> String {
+            installIDValue
+        }
+
+        func authorizationHeader() async -> String? {
+            authorization
+        }
+    }
+
+    private struct StubAppCheckProvider: AppCheckTokenProviding {
+        let tokenValue: String?
+
+        init(tokenValue: String? = nil) {
+            self.tokenValue = tokenValue
+        }
+
+        func token() async -> String? {
+            tokenValue
+        }
+    }
+
+    private final class RequestHandlerBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+        func set(_ handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.handler = handler
+        }
+
+        func get() -> ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+            lock.lock()
+            defer { lock.unlock() }
+            return handler
+        }
+    }
+
+    private final class URLProtocolStub: URLProtocol {
+        private static let requestHandlerBox = RequestHandlerBox()
+
+        static func setRequestHandler(_ handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?) {
+            requestHandlerBox.set(handler)
+        }
+
+        override class func canInit(with request: URLRequest) -> Bool {
+            true
+        }
+
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+            request
+        }
+
+        override func startLoading() {
+            guard let handler = Self.requestHandlerBox.get() else {
+                XCTFail("URLProtocolStub.requestHandler not set")
+                return
+            }
+
+            do {
+                let (response, data) = try handler(request)
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            } catch {
+                client?.urlProtocol(self, didFailWithError: error)
+            }
+        }
+
+        override func stopLoading() {}
+    }
+
     private final class MockBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         enum MockError: Error {
             case structuredUnavailable
@@ -285,7 +378,13 @@ final class WellnessLensTests: XCTestCase {
         message: String = "Respuesta del coach.",
         followUpQuestion: String? = nil,
         tone: CoachTone = .warmDirect,
-        safetyFlags: [CoachSafetyFlag] = []
+        safetyFlags: [CoachSafetyFlag] = [],
+        referencedVerdictSummary: String? = nil,
+        referencedPatterns: [String] = [],
+        suggestedActions: [CoachSuggestedAction] = [],
+        voiceTags: [CoachVoiceTag]? = nil,
+        voiceDirective: String? = nil,
+        spokenVersion: String? = nil
     ) -> CoachReply {
         CoachReply(
             replyId: UUID().uuidString,
@@ -293,16 +392,16 @@ final class WellnessLensTests: XCTestCase {
             message: message,
             tone: tone,
             referencedVerdictId: nil,
-            referencedVerdictSummary: nil,
-            referencedPatterns: [],
-            suggestedActions: [],
+            referencedVerdictSummary: referencedVerdictSummary,
+            referencedPatterns: referencedPatterns,
+            suggestedActions: suggestedActions,
             followUpQuestion: followUpQuestion,
             safetyFlags: safetyFlags,
             evidenceTier: .emerging,
             disclaimer: "Nácar ofrece guía direccional de wellness, no diagnóstico ni tratamiento médico.",
-            voiceTags: nil,
-            voiceDirective: nil,
-            spokenVersion: nil
+            voiceTags: voiceTags,
+            voiceDirective: voiceDirective,
+            spokenVersion: spokenVersion
         )
     }
 
@@ -436,7 +535,9 @@ final class WellnessLensTests: XCTestCase {
     func testRemoteCoachAgentFallsBackOnNetworkFailure() async {
         let agent = RemoteCoachAgent(
             endpoint: URL(string: "http://127.0.0.1:1/v1/coach/reply")!,
-            timeoutSeconds: 0.1
+            timeoutSeconds: 0.1,
+            identityProvider: StubIdentityProvider(),
+            appCheckProvider: StubAppCheckProvider()
         )
 
         let reply = await agent.generateReply(for: makeCoachRequest(userMessage: "Hola"))
@@ -445,12 +546,55 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertTrue(reply.disclaimer.contains("Nácar"))
     }
 
+    func testRemoteCoachAgentSendsAuthAndAppCheckHeaders() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolStub.self]
+        let session = URLSession(configuration: config)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let payload = try encoder.encode(makeCoachReply(message: "Remota"))
+
+        URLProtocolStub.setRequestHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Firebase-AppCheck"), "app-check-token")
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, payload)
+        }
+
+        let agent = RemoteCoachAgent(
+            endpoint: URL(string: "https://example.com/v1/coach/reply")!,
+            session: session,
+            identityProvider: StubIdentityProvider(authorization: "Bearer test-token"),
+            appCheckProvider: StubAppCheckProvider(tokenValue: "app-check-token")
+        )
+
+        let reply = await agent.generateReply(for: makeCoachRequest(userMessage: "Hola"))
+
+        XCTAssertEqual(reply.message, "Remota")
+        URLProtocolStub.setRequestHandler(nil)
+    }
+
     @MainActor
-    func testSendStrategistMessageUsesCoachReplyAndFlattensFollowUpQuestion() async {
+    func testSendStrategistMessageUsesCoachReplyAndPreservesStructuredPayload() async {
         let store = InMemoryStore()
         let coachReply = makeCoachReply(
             message: "Esta es la respuesta principal.",
-            followUpQuestion: "¿Quieres que lo revisemos mañana?"
+            followUpQuestion: "¿Quieres que lo revisemos mañana?",
+            safetyFlags: [.pregnancyGuardrail],
+            referencedVerdictSummary: "Último verdict: úsalo con más contexto.",
+            referencedPatterns: ["Sleep has been noisier this week."],
+            suggestedActions: [
+                CoachSuggestedAction(type: .scan, label: "Scan something real", deepLinkHint: "scan"),
+                CoachSuggestedAction(type: .checkIn, label: "Log a body signal", deepLinkHint: "check_in")
+            ],
+            voiceTags: [.calm, .warm],
+            voiceDirective: "gentle-opening",
+            spokenVersion: "Esta es la versión hablada."
         )
         let model = AppModel(
             services: makeServices(
@@ -471,10 +615,47 @@ final class WellnessLensTests: XCTestCase {
         let recentMessages = Array(thread.messages.suffix(2))
 
         XCTAssertEqual(recentMessages.map(\.speaker), [.user, .strategist])
+        XCTAssertEqual(recentMessages.last?.text, "Esta es la respuesta principal.")
+        XCTAssertEqual(recentMessages.last?.coachPayload?.followUpQuestion, "¿Quieres que lo revisemos mañana?")
+        XCTAssertEqual(recentMessages.last?.coachPayload?.referencedVerdictSummary, "Último verdict: úsalo con más contexto.")
+        XCTAssertEqual(recentMessages.last?.coachPayload?.referencedPatterns, ["Sleep has been noisier this week."])
+        XCTAssertEqual(recentMessages.last?.coachPayload?.suggestedActions.map(\.type), [.scan, .checkIn])
+        XCTAssertEqual(recentMessages.last?.coachPayload?.voiceTags, [.calm, .warm])
+        XCTAssertEqual(recentMessages.last?.coachPayload?.voiceDirective, "gentle-opening")
+        XCTAssertEqual(recentMessages.last?.coachPayload?.spokenVersion, "Esta es la versión hablada.")
         XCTAssertEqual(
-            recentMessages.last?.text,
+            recentMessages.last?.coachHistoryText,
             "Esta es la respuesta principal.\n\n¿Quieres que lo revisemos mañana?"
         )
+    }
+
+    @MainActor
+    func testSendStrategistMessageTracksPendingReplyState() async {
+        let coachReply = makeCoachReply(message: "Respuesta retardada.", followUpQuestion: "¿Seguimos mañana?")
+        let model = AppModel(
+            services: makeServices(
+                coachAgent: DelayedStubCoachAgent(reply: coachReply)
+            )
+        )
+
+        let initialMessages = model.conversationThread(for: .home).messages.count
+        model.sendStrategistMessage("Hola coach", entryPoint: .home)
+
+        let userMessageID = model.conversationThread(for: .home).messages.last?.id
+        XCTAssertNotNil(userMessageID)
+        if let userMessageID {
+            XCTAssertTrue(model.isAwaitingStrategistReply(to: userMessageID))
+        }
+
+        await waitForConversationMessageCount(
+            initialMessages + 2,
+            in: model,
+            entryPoint: .home
+        )
+
+        if let userMessageID {
+            XCTAssertFalse(model.isAwaitingStrategistReply(to: userMessageID))
+        }
     }
 
     @MainActor
@@ -747,11 +928,37 @@ final class WellnessLensTests: XCTestCase {
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(StoredAppState.self, from: data)
 
-        XCTAssertEqual(decoded.schemaVersion, 5)
+        XCTAssertEqual(decoded.schemaVersion, 6)
         XCTAssertEqual(decoded.onboardingDraft?.currentStep, .consent)
         XCTAssertEqual(decoded.onboardingDraft?.formData, .starter)
         XCTAssertEqual(decoded.onboardingDraft?.createdAt, createdAt)
         XCTAssertEqual(decoded.onboardingDraft?.lastUpdatedAt, updatedAt)
+    }
+
+    func testStoredAppStateRoundTripsConversationMessageWithoutCoachPayload() throws {
+        var state = StoredAppState.fresh()
+        let createdAt = Date(timeIntervalSince1970: 321)
+        state.conversationThreads = [
+            ConversationThread(
+                title: "Daily strategist",
+                entryPoint: .home,
+                createdAt: createdAt,
+                updatedAt: createdAt,
+                messages: [
+                    ConversationMessage(
+                        speaker: .strategist,
+                        text: "Legacy message",
+                        createdAt: createdAt
+                    )
+                ]
+            )
+        ]
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(StoredAppState.self, from: data)
+
+        XCTAssertEqual(decoded.schemaVersion, 6)
+        XCTAssertNil(decoded.conversationThreads.first?.messages.first?.coachPayload)
     }
 
     func testLILAVerdictAdapterRoundTripsWithEnvelopeFallback() async throws {

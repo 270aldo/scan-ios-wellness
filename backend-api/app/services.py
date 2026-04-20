@@ -146,10 +146,12 @@ class BackendServices:
 
     def home(self, request: DailyHomeRequest) -> DailyHomeResponse:
         state = self.repository.get_state(request.installID)
+        profile = state.profile or request.profile
+        active_goals = state.active_goals or request.activeGoals
         payload = build_daily_home_payload(
             state=state,
-            profile=request.profile,
-            active_goals=request.activeGoals,
+            profile=profile,
+            active_goals=active_goals,
         )
         payload_v2 = build_daily_home_payload_v2(payload)
         return DailyHomeResponse(payload=payload, payloadV2=payload_v2)

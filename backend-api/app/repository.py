@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+import logging
 from threading import Lock
 from typing import Protocol
 
@@ -24,6 +25,9 @@ try:
     from google.cloud import firestore
 except ImportError:  # pragma: no cover - optional in local bootstrap
     firestore = None
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,6 +53,56 @@ class StateRepository(Protocol):
     def save_favorite(self, install_id: str, favorite: FavoriteItem) -> None: ...
     def upsert_memory_items(self, install_id: str, memory_items: list[MemoryItem]) -> None: ...
     def sync_history(self, request: HistorySyncRequest) -> UserState: ...
+
+
+def _payload_equals(left, right) -> bool:
+    return left.model_dump(by_alias=True, mode="json") == right.model_dump(by_alias=True, mode="json")
+
+
+def _log_history_conflict(entity_name: str, item_id: str, reason: str) -> None:
+    logger.warning("history_sync_conflict entity=%s id=%s reason=%s", entity_name, item_id, reason)
+
+
+def _merge_append_only_map(target: dict, incoming_items: list, *, entity_name: str) -> None:
+    for item in incoming_items:
+        existing = target.get(item.id)
+        if existing is None:
+            target[item.id] = item
+            continue
+        if not _payload_equals(existing, item):
+            _log_history_conflict(entity_name, item.id, "discarded_conflicting_update")
+
+
+def _merge_scan_decisions(target: dict[str, ScanDecision], incoming_items: list[ScanDecision]) -> None:
+    for item in incoming_items:
+        existing = target.get(item.id)
+        if existing is None:
+            target[item.id] = item
+            continue
+        if _payload_equals(existing, item):
+            continue
+
+        existing_resolved = existing.resolvedAt
+        incoming_resolved = item.resolvedAt
+
+        if incoming_resolved is None:
+            _log_history_conflict("scan_decision", item.id, "discarded_non_monotonic_update")
+            continue
+
+        if existing_resolved is None or incoming_resolved > existing_resolved:
+            target[item.id] = item
+            continue
+
+        _log_history_conflict("scan_decision", item.id, "discarded_stale_resolved_at")
+
+
+def _merge_history_into_state(state: UserState, request: HistorySyncRequest) -> UserState:
+    _merge_append_only_map(state.scan_events, request.scans, entity_name="scan_event")
+    _merge_append_only_map(state.checkin_events, request.checkIns, entity_name="checkin_event")
+    _merge_append_only_map(state.favorites, request.favorites, entity_name="favorite")
+    _merge_append_only_map(state.memory_items, request.memoryItems, entity_name="memory_item")
+    _merge_scan_decisions(state.scan_decisions, request.scanDecisions)
+    return state
 
 
 class InMemoryStateRepository:
@@ -95,17 +149,7 @@ class InMemoryStateRepository:
     def sync_history(self, request: HistorySyncRequest) -> UserState:
         with self._lock:
             state = self._states[request.installID]
-            for item in request.scans:
-                state.scan_events[item.id] = item
-            for item in request.checkIns:
-                state.checkin_events[item.id] = item
-            for item in request.favorites:
-                state.favorites[item.id] = item
-            for item in request.memoryItems:
-                state.memory_items[item.id] = item
-            for item in request.scanDecisions:
-                state.scan_decisions[item.id] = item
-            return state
+            return _merge_history_into_state(state, request)
 
 
 class FirestoreStateRepository:
@@ -172,18 +216,19 @@ class FirestoreStateRepository:
             root.document(item.id).set(item.model_dump(by_alias=True, mode="json"))
 
     def sync_history(self, request: HistorySyncRequest) -> UserState:
+        state = _merge_history_into_state(self.get_state(request.installID), request)
         root = self._root(request.installID)
-        for item in request.scans:
+        for item in state.scan_events.values():
             root.collection("scan_events").document(item.id).set(item.model_dump(by_alias=True, mode="json"))
-        for item in request.checkIns:
+        for item in state.checkin_events.values():
             root.collection("checkin_events").document(item.id).set(item.model_dump(by_alias=True, mode="json"))
-        for item in request.favorites:
+        for item in state.favorites.values():
             root.collection("favorites").document(item.id).set(item.model_dump(by_alias=True, mode="json"))
-        for item in request.memoryItems:
+        for item in state.memory_items.values():
             root.collection("memory_items").document(item.id).set(item.model_dump(by_alias=True, mode="json"))
-        for item in request.scanDecisions:
+        for item in state.scan_decisions.values():
             root.collection("scan_decisions").document(item.id).set(item.model_dump(by_alias=True, mode="json"))
-        return self.get_state(request.installID)
+        return state
 
 
 def build_repository(settings: Settings) -> StateRepository:

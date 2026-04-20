@@ -13,17 +13,23 @@ struct RemoteCoachAgent: CoachAgentServing {
     let session: URLSession
     let timeoutSeconds: TimeInterval
     let localFallback: CoachAgentServing
+    let identityProvider: IdentityProviding
+    let appCheckProvider: AppCheckTokenProviding
 
     init(
         endpoint: URL,
         session: URLSession = .shared,
         timeoutSeconds: TimeInterval = 8,
-        localFallback: CoachAgentServing = DeterministicCoachAgent()
+        localFallback: CoachAgentServing = DeterministicCoachAgent(),
+        identityProvider: IdentityProviding,
+        appCheckProvider: AppCheckTokenProviding
     ) {
         self.endpoint = endpoint
         self.session = session
         self.timeoutSeconds = timeoutSeconds
         self.localFallback = localFallback
+        self.identityProvider = identityProvider
+        self.appCheckProvider = appCheckProvider
     }
 
     func generateReply(for request: CoachAgentRequest) async -> CoachReply {
@@ -33,6 +39,12 @@ struct RemoteCoachAgent: CoachAgentServing {
             urlRequest.httpMethod = "POST"
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
             urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+            if let authorizationHeader = await identityProvider.authorizationHeader() {
+                urlRequest.setValue(authorizationHeader, forHTTPHeaderField: "Authorization")
+            }
+            if let appCheckToken = await appCheckProvider.token() {
+                urlRequest.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
+            }
             urlRequest.httpBody = payload
             urlRequest.timeoutInterval = timeoutSeconds
 

@@ -27,6 +27,12 @@ from app.contracts import (
 )
 from app.date_utils import apple_timestamp_now
 from app.repository import StateRepository, build_repository
+from app.security import (
+    SecurityVerificationError,
+    VerifiedRequestContext,
+    verify_firebase_app_check_token,
+    verify_firebase_id_token,
+)
 from app.services import BackendServices
 
 
@@ -63,11 +69,23 @@ async def validate_client_context(
     settings: Settings = Depends(get_settings_dependency),
     authorization: str | None = Header(default=None),
     x_firebase_appcheck: str | None = Header(default=None),
-) -> None:
+) -> VerifiedRequestContext:
+    auth_claims = None
+    app_check_claims = None
+
     if settings.firebase_auth_enabled and not authorization:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header.")
     if settings.app_check_enforced and not x_firebase_appcheck:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-Firebase-AppCheck header.")
+    try:
+        if settings.firebase_auth_enabled and authorization:
+            auth_claims = verify_firebase_id_token(authorization)
+        if settings.app_check_enforced and x_firebase_appcheck:
+            app_check_claims = verify_firebase_app_check_token(x_firebase_appcheck)
+    except SecurityVerificationError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    return VerifiedRequestContext(auth_claims=auth_claims, app_check_claims=app_check_claims)
 
 
 @app.get("/healthz")
