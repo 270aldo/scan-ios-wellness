@@ -132,6 +132,37 @@ class Ingredient(ContractModel):
     name: str
 
 
+class ProductResolutionSource(str, Enum):
+    openFoodFacts = "openFoodFacts"
+    usdaFoodDataCentral = "usdaFoodDataCentral"
+    nihDSLD = "nihDSLD"
+    cosing = "cosing"
+    localCatalog = "localCatalog"
+    agentInferred = "agentInferred"
+    userProvided = "userProvided"
+    userEdited = "userEdited"
+
+
+class NutritionSnapshot(ContractModel):
+    energyKcalPer100g: float | None = Field(default=None, alias="energy_kcal_per_100g")
+    proteinGPer100g: float | None = Field(default=None, alias="protein_g_per_100g")
+    carbsGPer100g: float | None = Field(default=None, alias="carbs_g_per_100g")
+    fatGPer100g: float | None = Field(default=None, alias="fat_g_per_100g")
+    sugarsGPer100g: float | None = Field(default=None, alias="sugars_g_per_100g")
+    fiberGPer100g: float | None = Field(default=None, alias="fiber_g_per_100g")
+    sodiumMgPer100g: float | None = Field(default=None, alias="sodium_mg_per_100g")
+    caffeineMgPer100g: float | None = Field(default=None, alias="caffeine_mg_per_100g")
+    novaGroup: int | None = Field(default=None, alias="nova_group")
+
+
+class ProductResolution(ContractModel):
+    canonicalProductID: str | None = Field(default=None, alias="canonical_product_id")
+    source: ProductResolutionSource
+    confidence: float = Field(ge=0, le=1)
+    nutritionSnapshot: NutritionSnapshot | None = Field(default=None, alias="nutrition_snapshot")
+    isDirectional: bool = Field(default=False, alias="is_directional")
+
+
 class ProductCandidate(ContractModel):
     id: str
     name: str
@@ -145,6 +176,7 @@ class ProductCandidate(ContractModel):
     alternativeIDs: list[str]
     notes: list[str]
     lookupTokens: list[str]
+    resolution: ProductResolution | None = None
 
 
 class LensScore(ContractModel):
@@ -504,6 +536,7 @@ class AnalysisEnvelope(ContractModel):
     timestamp: AppleTimestamp
     inputType: AnalysisInputType = Field(alias="input_type")
     entityType: AnalysisEntityType = Field(alias="entity_type")
+    resolvedProduct: ProductCandidate | None = Field(default=None, alias="resolved_product")
     verdict: AnalysisVerdict
     overallScore: int = Field(alias="overall_score")
     lensScores: StructuredLensScores = Field(alias="lens_scores")
@@ -639,6 +672,10 @@ class ClientConfigResponse(ContractModel):
     minimumSupportedVersion: str
     minimumSupportedBuild: int
     copyVersion: str
+    persistenceMode: str
+    firebaseAuthEnforced: bool
+    appCheckEnforced: bool
+    agentProviderMode: str
     flags: WellnessFeatureFlags
     killSwitches: ClientKillSwitches
     updatedAt: AppleTimestamp

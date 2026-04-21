@@ -106,6 +106,10 @@ struct ClientConfigResponse: Codable {
     let minimumSupportedVersion: String
     let minimumSupportedBuild: Int
     let copyVersion: String
+    let persistenceMode: String
+    let firebaseAuthEnforced: Bool
+    let appCheckEnforced: Bool
+    let agentProviderMode: String
     let flags: WellnessFeatureFlags
     let killSwitches: ClientKillSwitches
     let updatedAt: Date
@@ -194,16 +198,43 @@ protocol WellnessBackendAPI: Sendable {
 enum BackendClientError: LocalizedError {
     case missingBaseURL
     case invalidResponse
-    case httpError(Int)
+    case httpError(statusCode: Int, detail: String?)
+    case transportError(description: String)
+    case decodingError(description: String)
+
+    var diagnosticSummary: String {
+        switch self {
+        case .missingBaseURL:
+            return "missing-base-url"
+        case .invalidResponse:
+            return "invalid-response"
+        case let .httpError(statusCode, detail):
+            guard let detail, !detail.isEmpty else {
+                return "http-\(statusCode)"
+            }
+            return "http-\(statusCode): \(detail)"
+        case let .transportError(description):
+            return "transport: \(description)"
+        case let .decodingError(description):
+            return "decode: \(description)"
+        }
+    }
 
     var errorDescription: String? {
         switch self {
         case .missingBaseURL:
-            "A backend base URL is required for cloud mode."
+            return "A backend base URL is required for cloud mode."
         case .invalidResponse:
-            "The backend returned an unexpected payload."
-        case let .httpError(code):
-            "The backend request failed with status code \(code)."
+            return "The backend returned an unexpected payload."
+        case let .httpError(statusCode, detail):
+            if let detail, !detail.isEmpty {
+                return "The backend request failed with status code \(statusCode): \(detail)"
+            }
+            return "The backend request failed with status code \(statusCode)."
+        case let .transportError(description):
+            return "The backend request could not be completed: \(description)"
+        case let .decodingError(description):
+            return "The backend returned an unreadable payload: \(description)"
         }
     }
 }
@@ -488,14 +519,7 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
     ) async throws -> ResponseBody {
         var request = await makeRequest(path: path, method: method)
         request.httpBody = try encoder.encode(body)
-        let (data, response) = try await urlSession.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw BackendClientError.invalidResponse
-        }
-        guard 200..<300 ~= httpResponse.statusCode else {
-            throw BackendClientError.httpError(httpResponse.statusCode)
-        }
-        return try decoder.decode(ResponseBody.self, from: data)
+        return try await execute(request)
     }
 
     private func send<ResponseBody: Decodable>(
@@ -503,14 +527,7 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         method: String
     ) async throws -> ResponseBody {
         let request = await makeRequest(path: path, method: method)
-        let (data, response) = try await urlSession.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw BackendClientError.invalidResponse
-        }
-        guard 200..<300 ~= httpResponse.statusCode else {
-            throw BackendClientError.httpError(httpResponse.statusCode)
-        }
-        return try decoder.decode(ResponseBody.self, from: data)
+        return try await execute(request)
     }
 
     private func makeRequest(path: String, method: String) async -> URLRequest {
@@ -528,6 +545,53 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
             request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
         }
         return request
+    }
+
+    private func execute<ResponseBody: Decodable>(_ request: URLRequest) async throws -> ResponseBody {
+        let data: Data
+        let response: URLResponse
+
+        do {
+            (data, response) = try await urlSession.data(for: request)
+        } catch {
+            throw BackendClientError.transportError(description: error.localizedDescription)
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw BackendClientError.invalidResponse
+        }
+        guard 200..<300 ~= httpResponse.statusCode else {
+            throw BackendClientError.httpError(
+                statusCode: httpResponse.statusCode,
+                detail: responseDetail(from: data)
+            )
+        }
+
+        do {
+            return try decoder.decode(ResponseBody.self, from: data)
+        } catch {
+            throw BackendClientError.decodingError(description: error.localizedDescription)
+        }
+    }
+
+    private func responseDetail(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+
+        if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let detail = jsonObject["detail"] as? String {
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        guard let raw = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !raw.isEmpty else {
+            return nil
+        }
+        if raw.count <= 160 {
+            return raw
+        }
+        return String(raw.prefix(157)) + "..."
     }
 }
 

@@ -547,6 +547,7 @@ struct WellnessFeatureFlags: Codable, Hashable {
 
 struct AppServices {
     var configuration: RuntimeConfiguration
+    var firebaseBootstrapState: FirebaseBootstrap.State = .disabled
     var featureFlags: WellnessFeatureFlags
     var store: AppDataStore
     var scanService: ScanService
@@ -561,13 +562,14 @@ struct AppServices {
     @MainActor
     static func makePreviewServices() -> AppServices {
         let configuration = RuntimeConfiguration.load()
-        FirebaseBootstrap.configureIfNeeded(using: configuration)
+        let firebaseBootstrapState = FirebaseBootstrap.configureIfNeeded(using: configuration)
+        let firebaseRuntimeReady = firebaseBootstrapState == .configured
 
         let store = LocalAppDataStore()
         let snapshot = store.load()
         let identityProvider: IdentityProviding = {
             #if canImport(FirebaseAuth)
-            if configuration.isFirebaseEnabled {
+            if configuration.isFirebaseEnabled, firebaseRuntimeReady {
                 return FirebaseIdentityProvider()
             }
             #endif
@@ -576,7 +578,7 @@ struct AppServices {
 
         let appCheckProvider: AppCheckTokenProviding = {
             #if canImport(FirebaseAppCheck)
-            if configuration.isFirebaseEnabled {
+            if configuration.isFirebaseEnabled, firebaseRuntimeReady {
                 return FirebaseAppCheckTokenProvider()
             }
             #endif
@@ -605,6 +607,14 @@ struct AppServices {
             subscription = DemoSubscriptionController(status: snapshot.subscriptionStatus)
         }
 
+        let scanVerdictAgent: ScanVerdictServing = configuration.agentServiceBaseURL.map {
+            RemoteScanVerdictAgent(
+                endpoint: $0.appending(path: "v1/scan/verdict"),
+                identityProvider: identityProvider,
+                appCheckProvider: appCheckProvider
+            )
+        } ?? DeterministicScanVerdictAgent()
+
         let coachAgent: any CoachAgentServing = configuration.agentServiceBaseURL.map {
             RemoteCoachAgent(
                 endpoint: $0.appending(path: "v1/coach/reply"),
@@ -615,6 +625,7 @@ struct AppServices {
 
         return AppServices(
             configuration: configuration,
+            firebaseBootstrapState: firebaseBootstrapState,
             featureFlags: WellnessFeatureFlags(),
             store: store,
             scanService: scanService,
@@ -622,7 +633,7 @@ struct AppServices {
             labelOCRService: LabelOCRService(),
             backendAPI: backendAPI,
             identityProvider: identityProvider,
-            scanVerdictAgent: DeterministicScanVerdictAgent(),
+            scanVerdictAgent: scanVerdictAgent,
             coachAgent: coachAgent,
             healthKitService: {
                 #if canImport(HealthKit)

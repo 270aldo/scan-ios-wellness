@@ -36,9 +36,13 @@ module "core" {
     WELLNESSLENS_USE_FIRESTORE         = "true"
     WELLNESSLENS_FIREBASE_AUTH_ENABLED = "true"
     WELLNESSLENS_APP_CHECK_ENFORCED    = "true"
+    WELLNESSLENS_AGENT_PROVIDER_MODE   = "vertex"
   }
 
   agent_service_env = {
-    WELLNESSLENS_AGENT_PROVIDER = "vertex"
+    WELLNESSLENS_AGENT_PROVIDER         = "vertex"
+    WELLNESSLENS_AGENT_VERTEX_PROJECT   = var.project_id
+    WELLNESSLENS_AGENT_VERTEX_LOCATION  = var.region
+    WELLNESSLENS_AGENT_VERTEX_MODEL     = "gemini-2.5-pro"
   }
 }

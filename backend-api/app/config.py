@@ -18,6 +18,18 @@ class Settings(BaseSettings):
     minimum_supported_version: str = "1.0"
     minimum_supported_build: int = 1
     copy_version: str = "soft-launch-v1"
+    agent_provider_mode: str = "local"
+    open_food_facts_base_url: str = "https://world.openfoodfacts.org"
+    open_food_facts_user_agent: str = "WellnessLensBackend/0.1 (dev@wellnesslens.local)"
+    usda_api_key: str | None = None
+    usda_base_url: str = "https://api.nal.usda.gov/fdc/v1"
+    resolver_cache_ttl_seconds: int = 900
+    resolver_cache_max_entries: int = 256
+    resolver_request_timeout_seconds: int = 5
+
+    @property
+    def persistence_mode(self) -> str:
+        return "firestore" if self.use_firestore else "in_memory"
 
 
 @lru_cache(maxsize=1)

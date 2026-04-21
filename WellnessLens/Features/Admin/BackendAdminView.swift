@@ -34,8 +34,15 @@ struct BackendAdminView: View {
                 )
 
                 runtimeRow(label: "Backend base URL", value: model.services.configuration.backendBaseURL?.absoluteString ?? "Not configured")
+                runtimeRow(label: "Agent service URL", value: model.services.configuration.agentServiceBaseURL?.absoluteString ?? "Not configured")
                 runtimeRow(label: "Auth mode", value: model.backendAuthModeTitle)
+                runtimeRow(
+                    label: "Backend debug surface",
+                    value: model.services.configuration.isBackendDebugSurfaceEnabled ? "Enabled" : "Disabled"
+                )
                 runtimeRow(label: "Firebase", value: model.services.configuration.isFirebaseEnabled ? "Enabled" : "Disabled")
+                runtimeRow(label: "Firebase options plist", value: model.services.configuration.firebaseOptionsPlistName ?? "GoogleService-Info")
+                runtimeRow(label: "Firebase bootstrap", value: model.services.firebaseBootstrapState.title)
                 runtimeRow(label: "Demo scans", value: model.services.configuration.useDemoData ? "Enabled" : "Disabled")
                 runtimeRow(label: "StoreKit", value: model.services.configuration.isStoreKitEnabled ? "Enabled" : "Disabled")
                 runtimeRow(
@@ -59,6 +66,10 @@ struct BackendAdminView: View {
                     runtimeRow(label: "Environment", value: config.environment)
                     runtimeRow(label: "Minimum version", value: "\(config.minimumSupportedVersion) (\(config.minimumSupportedBuild))")
                     runtimeRow(label: "Copy version", value: config.copyVersion)
+                    runtimeRow(label: "Persistence", value: config.persistenceMode)
+                    runtimeRow(label: "Firebase auth", value: config.firebaseAuthEnforced ? "Enforced" : "Open")
+                    runtimeRow(label: "App Check", value: config.appCheckEnforced ? "Enforced" : "Open")
+                    runtimeRow(label: "Agent provider", value: config.agentProviderMode)
                     runtimeRow(label: "Updated", value: config.updatedAt.formatted(date: .abbreviated, time: .shortened))
 
                     VStack(alignment: .leading, spacing: WLSpacing.s) {

@@ -27,6 +27,7 @@ from app.contracts import (
 )
 from app.date_utils import apple_timestamp_now
 from app.repository import StateRepository, build_repository
+from app.product_resolver import ProductResolver
 from app.security import (
     SecurityVerificationError,
     VerifiedRequestContext,
@@ -39,7 +40,11 @@ from app.services import BackendServices
 def build_backend_services(settings: Settings | None = None) -> BackendServices:
     resolved_settings = settings or get_settings()
     repository = build_repository(resolved_settings)
-    return BackendServices(repository=repository, settings=resolved_settings)
+    return BackendServices(
+        repository=repository,
+        settings=resolved_settings,
+        resolver=ProductResolver(resolved_settings),
+    )
 
 
 @asynccontextmanager

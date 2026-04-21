@@ -1,4 +1,8 @@
 name: WellnessLens
+configs:
+  Debug: debug
+  Staging: debug
+  Release: release
 options:
   bundleIdPrefix: com.aldoolivas
   minimumXcodeGenVersion: 2.45.0
@@ -32,20 +36,27 @@ targets:
         NSPhotoLibraryUsageDescription: WellnessLens uses your photo library so you can analyze ingredient labels from photos.
         UIApplicationSupportsIndirectInputEvents: true
         UILaunchScreen: {}
-        WLBackendBaseURL: ""
-        WLAgentServiceBaseURL: ""
-        WLFirebaseEnabled: false
-        WLStoreKitEnabled: false
-        WLUseDemoData: true
-        WLUseAppCheckDebugProvider: false
-        WLPlusProductID: com.aldoolivas.wellnesslens.plus
-        WLProProductID: com.aldoolivas.wellnesslens.pro
+        WLBackendBaseURL: $(WL_BACKEND_BASE_URL)
+        WLAgentServiceBaseURL: $(WL_AGENT_SERVICE_BASE_URL)
+        WLFirebaseEnabled: $(WL_FIREBASE_ENABLED)
+        WLFirebaseOptionsPlistName: $(WL_FIREBASE_OPTIONS_PLIST_NAME)
+        WLBackendDebugSurfaceEnabled: $(WL_BACKEND_DEBUG_SURFACE_ENABLED)
+        WLStoreKitEnabled: $(WL_STOREKIT_ENABLED)
+        WLUseDemoData: $(WL_USE_DEMO_DATA)
+        WLUseAppCheckDebugProvider: $(WL_USE_APP_CHECK_DEBUG_PROVIDER)
+        WLPlusProductID: $(WL_PLUS_PRODUCT_ID)
+        WLProProductID: $(WL_PRO_PRODUCT_ID)
+    configFiles:
+      Debug: Config/WellnessLens-Debug.xcconfig
+      Staging: Config/WellnessLens-Staging.xcconfig
+      Release: Config/WellnessLens-Release.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.aldoolivas.WellnessLens
         PRODUCT_NAME: WellnessLens
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: WellnessLens/Support/WellnessLens.entitlements
     dependencies:
       - package: Firebase
         product: FirebaseCore

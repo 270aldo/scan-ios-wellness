@@ -182,7 +182,8 @@ extension AnalysisEnvelope {
         context: LILADomain.UserContext,
         biometrics: BiometricsSnapshot? = nil
     ) -> LILADomain.ScanVerdict {
-        let fallbackProduct = fallbackAnalysis?.resolvedProduct.lilaResolvedProduct()
+        let fallbackProduct = resolvedProduct?.lilaResolvedProduct()
+            ?? fallbackAnalysis?.resolvedProduct.lilaResolvedProduct()
             ?? LILADomain.ResolvedProduct(
                 id: analysisID,
                 name: entityType == .supplement ? "Supplement scan" : "Structured scan",
@@ -455,9 +456,9 @@ private extension ProductCandidate {
             category: productType.lilaProductCategory,
             barcode: barcode,
             ingredients: ingredients.map(\.name),
-            nutrition: inferredNutritionProfile(),
+            nutrition: resolution?.nutritionSnapshot?.lilaNutritionProfile(for: self) ?? inferredNutritionProfile(),
             skincare: inferredSkincareProfile(),
-            resolutionSource: .localCatalog,
+            resolutionSource: resolution?.source.lilaResolutionSource ?? .localCatalog,
             headline: headline,
             imageURL: nil
         )
@@ -549,6 +550,102 @@ private extension ProductCandidate {
             comedogenicRisk: tags.contains(.fragrance) ? .moderate : .low,
             pregnancySafe: !tags.contains(.retinoid)
         )
+    }
+}
+
+private extension ProductResolutionSource {
+    var lilaResolutionSource: LILADomain.ResolutionSource {
+        switch self {
+        case .openFoodFacts:
+            .openFoodFacts
+        case .usdaFoodDataCentral:
+            .usdaFoodDataCentral
+        case .nihDSLD:
+            .nihDSLD
+        case .cosing:
+            .cosing
+        case .localCatalog:
+            .localCatalog
+        case .agentInferred:
+            .agentInferred
+        case .userProvided:
+            .userProvided
+        case .userEdited:
+            .userEdited
+        }
+    }
+}
+
+private extension NutritionSnapshot {
+    func lilaNutritionProfile(for product: ProductCandidate) -> LILADomain.NutritionProfile {
+        var dietaryFlags: Set<LILADomain.DietaryFlag> = []
+        if let proteinGPer100g, proteinGPer100g >= 10 {
+            dietaryFlags.insert(.highProtein)
+        }
+        if let fiberGPer100g, fiberGPer100g >= 5 {
+            dietaryFlags.insert(.highFiber)
+        }
+        if let sugarsGPer100g, sugarsGPer100g <= 3 {
+            dietaryFlags.insert(.sugarFree)
+        }
+
+        return LILADomain.NutritionProfile(
+            macros: .init(
+                energyKcal: energyKcalPer100g ?? 0,
+                proteinG: proteinGPer100g ?? 0,
+                carbsG: carbsGPer100g ?? 0,
+                fatG: fatGPer100g ?? 0
+            ),
+            micros: .empty,
+            caffeineMg: caffeineMgPer100g,
+            alcoholPercent: nil,
+            addedSugarsG: sugarsGPer100g,
+            freeSugarsG: sugarsGPer100g,
+            saturatedFatG: nil,
+            transFatG: nil,
+            sodiumMg: sodiumMgPer100g,
+            fiberG: fiberGPer100g,
+            glycemicIndex: nil,
+            glycemicLoad: nil,
+            nutriScore: nil,
+            novaGroup: novaGroup.flatMap {
+                switch $0 {
+                case 1: .unprocessed
+                case 2: .culinaryIngredient
+                case 3: .processed
+                case 4: .ultraProcessed
+                default: nil
+                }
+            },
+            additives: [],
+            allergens: product.allergensFromIngredients,
+            dietaryFlags: dietaryFlags,
+            servingSize: nil
+        )
+    }
+}
+
+private extension ProductCandidate {
+    var allergensFromIngredients: Set<LILADomain.Allergen> {
+        let text = ingredients.map(\.name).joined(separator: " ").lowercased()
+        var allergens: Set<LILADomain.Allergen> = []
+        if text.contains("milk") || text.contains("dairy") || text.contains("yogurt") || text.contains("whey") {
+            allergens.insert(.dairy)
+        }
+        if text.contains("soy") {
+            allergens.insert(.soy)
+        }
+        if text.contains("peanut") {
+            allergens.insert(.peanuts)
+        }
+        if text.contains("almond") || text.contains("cashew") || text.contains("walnut") {
+            allergens.insert(.treeNuts)
+        }
+        if text.contains("wheat") || text.contains("gluten") {
+            allergens.insert(.wheat)
+            allergens.insert(.gluten)
+        }
+        return allergens
     }
 }
 

@@ -19,6 +19,7 @@ from app.contracts import (
     ScanVerdictContextDirection,
     ScanVerdictContextFactor,
     ScanVerdictDeterministicFactor,
+    ScanVerdictEvidenceSource,
     ScanVerdictEvidenceTier,
     ScanVerdictFit,
     ScanVerdictFollowUpPrompt,
@@ -158,6 +159,40 @@ def get_scan_verdict_assets(asset_dir: str | None = None) -> ScanVerdictRuntimeA
 
 def build_scan_verdict_task_prompt(request: ScanVerdictRequest) -> str:
     structured_summary = request.structuredSummary.strip() if request.structuredSummary else "Sin structuredSummary adicional."
+    resolved_product_lines: list[str] = []
+    if request.resolvedProduct:
+        rp = request.resolvedProduct
+        resolved_product_lines = [
+            "",
+            "RESOLVED PRODUCT FACTS",
+            f"- productId: {rp.productId or 'null'}",
+            f"- canonicalProductID: {rp.canonicalProductID or 'null'}",
+            f"- resolvedName: {rp.name}",
+            f"- brand: {rp.brand or 'null'}",
+            f"- barcode: {rp.barcode or 'null'}",
+            f"- resolutionSource: {rp.source.value if rp.source else 'null'}",
+            f"- resolutionConfidence: {rp.confidence if rp.confidence is not None else 'null'}",
+            f"- isDirectional: {str(rp.isDirectional).lower()}",
+            f"- ingredients: {', '.join(rp.ingredients[:8]) if rp.ingredients else 'none'}",
+        ]
+        if rp.nutritionSnapshot:
+            ns = rp.nutritionSnapshot
+            resolved_product_lines.append(
+                "- nutritionSnapshot: "
+                + ", ".join(
+                    [
+                        f"energy={ns.energyKcalPer100g}" if ns.energyKcalPer100g is not None else "energy=null",
+                        f"protein={ns.proteinGPer100g}" if ns.proteinGPer100g is not None else "protein=null",
+                        f"carbs={ns.carbsGPer100g}" if ns.carbsGPer100g is not None else "carbs=null",
+                        f"fat={ns.fatGPer100g}" if ns.fatGPer100g is not None else "fat=null",
+                        f"sugars={ns.sugarsGPer100g}" if ns.sugarsGPer100g is not None else "sugars=null",
+                        f"fiber={ns.fiberGPer100g}" if ns.fiberGPer100g is not None else "fiber=null",
+                        f"sodiumMg={ns.sodiumMgPer100g}" if ns.sodiumMgPer100g is not None else "sodiumMg=null",
+                        f"caffeineMg={ns.caffeineMgPer100g}" if ns.caffeineMgPer100g is not None else "caffeineMg=null",
+                        f"novaGroup={ns.novaGroup}" if ns.novaGroup is not None else "novaGroup=null",
+                    ]
+                )
+            )
     return "\n".join(
         [
             "Evalúa este scan usando el UserContext inyectado y responde solo con JSON válido.",
@@ -170,6 +205,7 @@ def build_scan_verdict_task_prompt(request: ScanVerdictRequest) -> str:
             f"- source: {request.source}",
             f"- scanId: {request.scanId or 'null'}",
             f"- structuredSummary: {structured_summary}",
+            *resolved_product_lines,
             "",
             "OUTPUT RULES",
             "- Sigue exactamente el response schema provisto por el runtime.",
@@ -188,8 +224,20 @@ def build_local_scan_verdict(
     provider_failure: str | None = None,
 ) -> ScanVerdict:
     product_name = (request.productName or "este producto").strip()
+    resolved_product = request.resolvedProduct
+    nutrition = resolved_product.nutritionSnapshot if resolved_product else None
     combined_text = " ".join(
-        part for part in [product_name, request.source, request.userContextSummary, request.structuredSummary or ""] if part
+        part
+        for part in [
+            product_name,
+            resolved_product.name if resolved_product else "",
+            resolved_product.brand if resolved_product else "",
+            " ".join(resolved_product.ingredients) if resolved_product else "",
+            request.source,
+            request.userContextSummary,
+            request.structuredSummary or "",
+        ]
+        if part
     ).lower()
 
     scores = {lens: 68 for lens in SCAN_VERDICT_LENS_ORDER}
@@ -208,6 +256,17 @@ def build_local_scan_verdict(
     track_prompt: ScanVerdictFollowUpPrompt | None = None
     evidence_tier = ScanVerdictEvidenceTier.emerging
     confidence = ScanVerdictConfidence.high if request.structuredSummary else ScanVerdictConfidence.medium
+
+    resolution_confidence = resolved_product.confidence if resolved_product and resolved_product.confidence is not None else None
+    if resolution_confidence is not None:
+        if resolution_confidence >= 0.84:
+            confidence = ScanVerdictConfidence.high
+        elif resolution_confidence >= 0.58:
+            confidence = _downgrade_confidence(confidence, ScanVerdictConfidence.medium)
+        elif resolution_confidence >= 0.34:
+            confidence = _downgrade_confidence(confidence, ScanVerdictConfidence.low)
+        else:
+            confidence = _downgrade_confidence(confidence, ScanVerdictConfidence.insufficient)
 
     pregnancy = _contains_any(combined_text, ["embaraz", "pregnan", "obstetra", "primer trimestre"])
     diabetes = _contains_any(combined_text, ["diabetes", "glucosa", "insulina"])
@@ -229,6 +288,14 @@ def build_local_scan_verdict(
     high_protein = _contains_any(combined_text, ["proteína", "proteina", "protein", "30g", "15g"])
     tuna = _contains_any(combined_text, ["atún", "atun", "tuna"])
     alcohol = _contains_any(combined_text, ["alcohol", "vino", "wine", "beer", "cerveza", "cocktail"])
+
+    if nutrition:
+        if nutrition.sugarsGPer100g is not None and nutrition.sugarsGPer100g >= 12:
+            high_sugar = True
+        if nutrition.caffeineMgPer100g is not None and nutrition.caffeineMgPer100g >= 45:
+            high_caffeine = True
+        if nutrition.proteinGPer100g is not None and nutrition.proteinGPer100g >= 10:
+            high_protein = True
 
     def apply_delta(
         lens: ScanVerdictLens,
@@ -270,6 +337,17 @@ def build_local_scan_verdict(
                 personalRelevance=relevance,
             )
         )
+
+    if resolved_product and resolved_product.isDirectional:
+        confidence = _downgrade_confidence(confidence, ScanVerdictConfidence.low)
+        add_watchout(
+            "Producto no resuelto del todo",
+            "Todavía no hay una identidad de producto suficientemente fuerte. Léelo como guía direccional, no como verdad final de catálogo.",
+            ScanVerdictWatchoutSeverity.moderate,
+            ScanVerdictPersonalRelevance.general,
+        )
+        if primary_reason is None:
+            primary_reason = "Todavía no hay una resolución de producto lo bastante fuerte para una lectura totalmente específica."
 
     if request.source in {"meal_photo", "menu_photo"}:
         confidence = _downgrade_confidence(confidence, ScanVerdictConfidence.low)
@@ -542,6 +620,15 @@ def build_local_scan_verdict(
         )
     else:
         insight_lines.append("Se aplicó el runtime local validado contra el schema real de ScanVerdict.")
+    if resolved_product and resolved_product.source:
+        if resolved_product.isDirectional:
+            insight_lines.append(
+                f"La identidad del producto sigue direccional desde {resolved_product.source.value}; no se forzó un match exacto."
+            )
+        else:
+            insight_lines.append(
+                f"La identidad del producto llegó desde {resolved_product.source.value} con confidence {resolved_product.confidence or 0:.2f}."
+            )
     if high_caffeine and high_sugar:
         insight_lines.append("La combinación de azúcar alta y cafeína pesó más que cualquier upside puntual.")
     elif high_protein and fit in {ScanVerdictFit.goodFit, ScanVerdictFit.greatFit}:
@@ -577,7 +664,7 @@ def build_local_scan_verdict(
             + len(user_history_factors),
         ),
         disclaimer="\n".join(disclaimer_lines + [BASE_DISCLAIMER]) if disclaimer_lines else BASE_DISCLAIMER,
-        sources=[],
+        sources=_sources_from_request(request),
     )
     return assets.validate_verdict(verdict)
 
@@ -585,6 +672,34 @@ def build_local_scan_verdict(
 def _extract_declared_version(markdown: str) -> str | None:
     match = re.search(r"\*\*Versión:\*\*\s*([^\n]+)", markdown)
     return match.group(1).strip() if match else None
+
+
+def _sources_from_request(request: ScanVerdictRequest) -> list[ScanVerdictEvidenceSource]:
+    sources: list[ScanVerdictEvidenceSource] = []
+    if request.resolvedProduct and request.resolvedProduct.source:
+        organization = {
+            "openFoodFacts": "Open Food Facts",
+            "usdaFoodDataCentral": "USDA FoodData Central",
+            "localCatalog": "WellnessLens local catalog",
+            "agentInferred": "WellnessLens directional resolver",
+            "userProvided": "User-provided label text",
+            "userEdited": "User-corrected product facts",
+            "nihDSLD": "NIH DSLD",
+            "cosing": "CosIng",
+        }.get(request.resolvedProduct.source.value, request.resolvedProduct.source.value)
+        tier = (
+            ScanVerdictEvidenceTier.high
+            if request.resolvedProduct.confidence is not None and request.resolvedProduct.confidence >= 0.84
+            else ScanVerdictEvidenceTier.emerging
+        )
+        sources.append(
+            ScanVerdictEvidenceSource(
+                title=request.resolvedProduct.name,
+                organization=organization,
+                tier=tier,
+            )
+        )
+    return sources
 
 
 def _extract_runtime_system_prompt(markdown: str) -> str:

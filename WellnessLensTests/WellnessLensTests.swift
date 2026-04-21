@@ -187,6 +187,10 @@ final class WellnessLensTests: XCTestCase {
                 minimumSupportedVersion: "1.0",
                 minimumSupportedBuild: 1,
                 copyVersion: "test-copy",
+                persistenceMode: "firestore",
+                firebaseAuthEnforced: true,
+                appCheckEnforced: true,
+                agentProviderMode: "vertex",
                 flags: WellnessFeatureFlags(),
                 killSwitches: ClientKillSwitches(scanDisabled: false, strategistDisabled: false, homeDisabled: false),
                 updatedAt: .now
@@ -419,6 +423,126 @@ final class WellnessLensTests: XCTestCase {
         )
     }
 
+    private func makeRemoteReadyAnalysis(source: ScanSource = .manualBarcode) -> ScanAnalysis {
+        var analysis = makeAnalysis(barcode: "850000001", source: source)
+        analysis.resolvedProduct.name = "Balanced Protein Yogurt"
+        analysis.resolvedProduct.brand = "Good Farm"
+        analysis.resolvedProduct.barcode = "7501031311309"
+        analysis.resolvedProduct.resolution = ProductResolution(
+            canonicalProductID: "off:7501031311309",
+            source: .openFoodFacts,
+            confidence: 0.91,
+            nutritionSnapshot: NutritionSnapshot(
+                energyKcalPer100g: 96,
+                proteinGPer100g: 11,
+                carbsGPer100g: 4,
+                fatGPer100g: 3,
+                sugarsGPer100g: 4,
+                fiberGPer100g: 0,
+                sodiumMgPer100g: 80,
+                caffeineMgPer100g: nil,
+                novaGroup: 3
+            ),
+            isDirectional: false
+        )
+        return analysis
+    }
+
+    private func makeRemoteScanVerdictRequest(source: ScanSource = .manualBarcode) -> ScanVerdictRequest {
+        let analysis = makeRemoteReadyAnalysis(source: source)
+        let input = ScanInput(
+            sourceType: source,
+            barcode: source == .labelPhoto ? nil : analysis.resolvedProduct.barcode,
+            capturedImageRef: nil,
+            rawText: source == .labelPhoto ? "milk, cultures" : nil,
+            productTypeHint: .food,
+            locale: "en_US"
+        )
+        return ScanVerdictRequest(
+            input: input,
+            legacyAnalysis: analysis,
+            structuredAnalysis: nil,
+            profile: .starter,
+            recentScans: [],
+            recentCheckIns: [],
+            biometrics: nil
+        )
+    }
+
+    private func makeRemoteScanVerdictPayload() -> Data {
+        Data(
+            #"""
+            {
+              "verdict": {
+                "fit": "goodFit",
+                "confidence": "high",
+                "headline": "Remote verdict headline.",
+                "primaryReason": "Remote primary reason.",
+                "lensScores": [
+                  { "lens": "glowAndSkin", "score": 72, "trend": "neutral", "summary": "Glow stable.", "contextApplied": [] },
+                  { "lens": "hormoneBalance", "score": 70, "trend": "neutral", "summary": "Hormones steady.", "contextApplied": [] },
+                  { "lens": "gutComfort", "score": 78, "trend": "rising", "summary": "Gut looks supported.", "contextApplied": [] },
+                  { "lens": "energyAndMood", "score": 82, "trend": "rising", "summary": "Energy reads supportive.", "contextApplied": [] },
+                  { "lens": "bodyCompositionAndStrength", "score": 76, "trend": "neutral", "summary": "Protein helps here.", "contextApplied": [] }
+                ],
+                "watchouts": [],
+                "betterSwap": null,
+                "trackPrompt": {
+                  "triggerAfterHours": 3,
+                  "questionText": "Check in later?",
+                  "targetLens": "energyAndMood",
+                  "expectedResponseType": "openText"
+                },
+                "evidenceTier": "high",
+                "reasoningBreakdown": {
+                  "deterministicFactors": [
+                    { "rule": "Remote rule", "delta": 6, "affectedLens": "energyAndMood" }
+                  ],
+                  "agentInsights": [
+                    { "insight": "Remote insight", "modelUsed": "agent-service/test", "confidenceScore": 0.91 }
+                  ],
+                  "userHistoryFactors": [],
+                  "totalAdjustments": 1
+                },
+                "disclaimer": "Remote disclaimer",
+                "sources": [
+                  { "title": "Balanced Protein Yogurt", "organization": "Open Food Facts", "tier": "high" }
+                ]
+              }
+            }
+            """#.utf8
+        )
+    }
+
+    private func requestBodyData(from request: URLRequest) -> Data? {
+        if let body = request.httpBody {
+            return body
+        }
+        guard let stream = request.httpBodyStream else {
+            return nil
+        }
+
+        stream.open()
+        defer { stream.close() }
+
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        var data = Data()
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read < 0 {
+                return nil
+            }
+            if read == 0 {
+                break
+            }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
+
     func testLILAGreatFitHeadlineUsesSpanishFallbackCopy() {
         var analysis = makeAnalysis(barcode: "850000001")
         analysis.resolvedProduct.name = "Yogurt griego"
@@ -579,6 +703,96 @@ final class WellnessLensTests: XCTestCase {
         URLProtocolStub.setRequestHandler(nil)
     }
 
+    func testRemoteScanVerdictAgentFallsBackOnNetworkFailure() async {
+        let agent = RemoteScanVerdictAgent(
+            endpoint: URL(string: "http://127.0.0.1:1/v1/scan/verdict")!,
+            timeoutSeconds: 0.1,
+            identityProvider: StubIdentityProvider(),
+            appCheckProvider: StubAppCheckProvider()
+        )
+
+        let verdict = await agent.generateVerdict(for: makeRemoteScanVerdictRequest())
+
+        XCTAssertFalse(verdict.headline.isEmpty)
+        XCTAssertTrue(verdict.reasoningBreakdown.agentInsights.first?.modelUsed.hasPrefix("ios-remote-fallback/") == true)
+    }
+
+    func testRemoteScanVerdictAgentSendsAuthAndResolvedProductMetadata() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolStub.self]
+        let session = URLSession(configuration: config)
+        let payload = makeRemoteScanVerdictPayload()
+
+        URLProtocolStub.setRequestHandler { [self] request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-Firebase-AppCheck"), "app-check-token")
+
+            let body = try XCTUnwrap(self.requestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["productName"] as? String, "Balanced Protein Yogurt")
+            XCTAssertEqual(json["source"] as? String, "barcode")
+
+            let resolvedProduct = try XCTUnwrap(json["resolved_product"] as? [String: Any])
+            XCTAssertEqual(resolvedProduct["source"] as? String, "openFoodFacts")
+            XCTAssertEqual(resolvedProduct["barcode"] as? String, "7501031311309")
+            XCTAssertEqual(resolvedProduct["is_directional"] as? Bool, false)
+
+            let nutritionSnapshot = try XCTUnwrap(resolvedProduct["nutrition_snapshot"] as? [String: Any])
+            XCTAssertEqual(nutritionSnapshot["protein_g_per_100g"] as? Double, 11)
+
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, payload)
+        }
+
+        let agent = RemoteScanVerdictAgent(
+            endpoint: URL(string: "https://example.com/v1/scan/verdict")!,
+            session: session,
+            identityProvider: StubIdentityProvider(authorization: "Bearer test-token"),
+            appCheckProvider: StubAppCheckProvider(tokenValue: "app-check-token")
+        )
+
+        let verdict = await agent.generateVerdict(for: makeRemoteScanVerdictRequest())
+
+        XCTAssertEqual(verdict.headline, "Remote verdict headline.")
+        XCTAssertEqual(verdict.reasoningBreakdown.agentInsights.first?.modelUsed, "agent-service/test")
+        XCTAssertEqual(verdict.resolvedProduct.resolutionSource, .openFoodFacts)
+        URLProtocolStub.setRequestHandler(nil)
+    }
+
+    func testRemoteScanVerdictAgentCapturesHTTPFallbackReason() async {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolStub.self]
+        let session = URLSession(configuration: config)
+
+        URLProtocolStub.setRequestHandler { request in
+            let response = HTTPURLResponse(
+                url: try XCTUnwrap(request.url),
+                statusCode: 401,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let payload = Data(#"{"detail":"Missing Authorization header."}"#.utf8)
+            return (response, payload)
+        }
+
+        let agent = RemoteScanVerdictAgent(
+            endpoint: URL(string: "https://example.com/v1/scan/verdict")!,
+            session: session,
+            identityProvider: StubIdentityProvider(),
+            appCheckProvider: StubAppCheckProvider()
+        )
+
+        let verdict = await agent.generateVerdict(for: makeRemoteScanVerdictRequest())
+
+        XCTAssertTrue(verdict.reasoningBreakdown.agentInsights.first?.modelUsed.contains("http-401") == true)
+        URLProtocolStub.setRequestHandler(nil)
+    }
+
     @MainActor
     func testSendStrategistMessageUsesCoachReplyAndPreservesStructuredPayload() async {
         let store = InMemoryStore()
@@ -676,6 +890,7 @@ final class WellnessLensTests: XCTestCase {
                 backendBaseURL: nil,
                 agentServiceBaseURL: nil,
                 isFirebaseEnabled: false,
+                firebaseOptionsPlistName: nil,
                 isStoreKitEnabled: false,
                 useDemoData: true,
                 useAppCheckDebugProvider: false,
@@ -1618,6 +1833,20 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(content.watchouts.count, 2)
         XCTAssertEqual(content.betterSwapTitle, "Softer swap")
         XCTAssertEqual(content.followUpPrompt, "Did this feel steadier a few hours later?")
+    }
+
+    func testScanVerdictSurfaceContentMarksDirectionalLabelRead() {
+        var verdict = makeVerdict(fit: .unclear, source: .labelPhoto, watchoutCount: 1)
+        verdict.resolvedProduct.name = "Directional label read"
+        verdict.resolvedProduct.resolutionSource = .agentInferred
+
+        let content = ScanVerdictSurfaceContent.build(verdict: verdict)
+
+        XCTAssertEqual(content.sourceTitle, "Label photo")
+        XCTAssertEqual(content.readStateTitle, "Directional label read")
+        XCTAssertEqual(content.provenanceTitle, "Directional inference")
+        XCTAssertTrue(content.metadataSummary.contains("Directional label read"))
+        XCTAssertNotNil(content.guidanceNote)
     }
 
     @MainActor

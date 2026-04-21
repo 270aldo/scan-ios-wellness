@@ -47,6 +47,22 @@ resource "google_service_account" "ci_deployer" {
   project      = var.project_id
 }
 
+resource "google_project_iam_member" "backend_firestore_user" {
+  project = var.project_id
+  role    = "roles/datastore.user"
+  member  = "serviceAccount:${google_service_account.backend_api.email}"
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_project_iam_member" "agent_vertex_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.agent_service.email}"
+
+  depends_on = [google_project_service.required]
+}
+
 resource "google_artifact_registry_repository" "containers" {
   project       = var.project_id
   location      = var.region

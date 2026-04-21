@@ -93,7 +93,9 @@ The iOS app reads these keys from `Info.plist`, which is generated from [`projec
 
 - `WLUseDemoData`
 - `WLBackendBaseURL`
+- `WLAgentServiceBaseURL`
 - `WLFirebaseEnabled`
+- `WLFirebaseOptionsPlistName`
 - `WLStoreKitEnabled`
 - `WLUseAppCheckDebugProvider`
 - `WLPlusProductID`
@@ -101,12 +103,23 @@ The iOS app reads these keys from `Info.plist`, which is generated from [`projec
 
 Default behavior stays in demo mode so the app remains usable without backend services.
 
+Tracked environment defaults now live in:
+
+- [Config/WellnessLens-Debug.xcconfig](/Users/aldoolivas/IOS_ngx-silver/Config/WellnessLens-Debug.xcconfig)
+- [Config/WellnessLens-Staging.xcconfig](/Users/aldoolivas/IOS_ngx-silver/Config/WellnessLens-Staging.xcconfig)
+- [Config/WellnessLens-Release.xcconfig](/Users/aldoolivas/IOS_ngx-silver/Config/WellnessLens-Release.xcconfig)
+
+Local staging or production URLs should be supplied via untracked overrides such as `Config/WellnessLens-Staging.local.xcconfig`.
+
 ## Firebase setup
 
-1. Copy `WellnessLens/Support/GoogleService-Info.plist.example` to `WellnessLens/Support/GoogleService-Info.plist`.
-2. Replace the placeholder values with your Firebase project values.
-3. Set `WLFirebaseEnabled = YES` and `WLUseDemoData = NO`.
-4. Set `WLBackendBaseURL` to the API root for your Functions or API gateway.
+1. For local demo Firebase wiring, copy `WellnessLens/Support/GoogleService-Info.plist.example` to `WellnessLens/Support/GoogleService-Info.plist`.
+2. For staging or production, copy:
+   - `WellnessLens/Support/GoogleService-Info-Staging.plist.example` to `WellnessLens/Support/GoogleService-Info-Staging.plist`
+   - `WellnessLens/Support/GoogleService-Info-Prod.plist.example` to `WellnessLens/Support/GoogleService-Info-Prod.plist`
+3. Replace the placeholder values with your Firebase project values.
+4. Add backend URLs in `Config/WellnessLens-Staging.local.xcconfig` or `Config/WellnessLens-Release.local.xcconfig`.
+5. Use `xcodebuild -configuration Staging ...` for staging smoke tests or select the `Staging` configuration in Xcode.
 
 The project is already configured for:
 
@@ -116,6 +129,7 @@ The project is already configured for:
 - `FirebaseFunctions`
 - `FirebaseStorage`
 - `FirebaseAppCheck`
+- App Attest entitlement wiring in `WellnessLens/Support/WellnessLens.entitlements`
 
 ## Architecture notes
 

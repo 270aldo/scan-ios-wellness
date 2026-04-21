@@ -66,6 +66,73 @@ def test_scan_verdict_contract():
     assets.validate_payload(payload)
 
 
+def test_scan_verdict_contract_accepts_resolved_product_metadata():
+    response = client.post(
+        "/v1/scan/verdict",
+        json={
+            "scanId": "scan-resolved-product",
+            "productName": "Balanced Protein Yogurt",
+            "source": "barcode",
+            "userContextSummary": "User wants steadier energy and calmer digestion this week.",
+            "structuredSummary": "Strong packaged-food match with high protein and low sugar.",
+            "resolved_product": {
+                "product_id": "off:7501031311309",
+                "canonical_product_id": "off:7501031311309",
+                "name": "Balanced Protein Yogurt",
+                "brand": "Good Farm",
+                "barcode": "7501031311309",
+                "source": "openFoodFacts",
+                "confidence": 0.91,
+                "ingredients": ["milk", "cultures"],
+                "nutrition_snapshot": {
+                    "energy_kcal_per_100g": 96,
+                    "protein_g_per_100g": 11,
+                    "carbs_g_per_100g": 4,
+                    "fat_g_per_100g": 3,
+                    "sugars_g_per_100g": 4,
+                    "fiber_g_per_100g": 0,
+                },
+                "is_directional": False,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["verdict"]
+    assert payload["confidence"] == "high"
+    assert payload["sources"][0]["organization"] == "Open Food Facts"
+    assert payload["sources"][0]["title"] == "Balanced Protein Yogurt"
+    assert payload["reasoningBreakdown"]["agentInsights"][0]["insight"]
+
+
+def test_scan_verdict_directional_resolution_downgrades_confidence_and_adds_watchout():
+    response = client.post(
+        "/v1/scan/verdict",
+        json={
+            "scanId": "scan-directional-label",
+            "productName": "Directional label read",
+            "source": "label_photo",
+            "userContextSummary": "User is trying to protect steadier energy and reduce bloating.",
+            "structuredSummary": "OCR extracted an incomplete label and no exact packaged-food match was confirmed.",
+            "resolved_product": {
+                "product_id": "directional:abc123",
+                "name": "Directional label read",
+                "brand": "Directional read",
+                "source": "agentInferred",
+                "confidence": 0.42,
+                "ingredients": ["oats", "sweetener"],
+                "is_directional": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["verdict"]
+    assert payload["confidence"] in {"low", "insufficient"}
+    assert payload["sources"][0]["organization"] == "WellnessLens directional resolver"
+    assert any(item["title"] == "Producto no resuelto del todo" for item in payload["watchouts"])
+
+
 def test_scan_verdict_assets_load_and_validate_golden_examples():
     assets = get_scan_verdict_assets()
     assert assets.version

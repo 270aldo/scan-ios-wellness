@@ -576,6 +576,10 @@ private struct HomeLatestVerdictCard: View {
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
 
+                Text(content.metadataSummary)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+
                 if let betterSwapTitle = content.betterSwapTitle,
                    let betterSwapReason = content.betterSwapReason {
                     VStack(alignment: .leading, spacing: WLSpacing.xs) {

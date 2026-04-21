@@ -215,22 +215,33 @@ struct ScanVerdictSurfaceContent: Equatable {
     let primaryReason: String
     let confidence: LILADomain.Confidence
     let confidenceTitle: String
+    let metadataSummary: String
     let sourceTitle: String
+    let readStateTitle: String
+    let provenanceTitle: String
+    let guidanceNote: String?
     let watchouts: [WatchoutItem]
     let betterSwapTitle: String?
     let betterSwapReason: String?
     let followUpPrompt: String?
 
     static func build(verdict: LILADomain.ScanVerdict) -> ScanVerdictSurfaceContent {
-        ScanVerdictSurfaceContent(
+        let readStateTitle = verdict.scanSource.readStateTitle(for: verdict.resolvedProduct.resolutionSource)
+        let provenanceTitle = verdict.resolvedProduct.resolutionSource.surfaceTitle
+        let confidenceTitle = verdict.confidence.surfaceTitle
+        return ScanVerdictSurfaceContent(
             productName: verdict.resolvedProduct.name,
             fit: verdict.fit,
             fitTitle: verdict.fit.surfaceTitle,
             headline: verdict.headline,
             primaryReason: verdict.primaryReason,
             confidence: verdict.confidence,
-            confidenceTitle: verdict.confidence.surfaceTitle,
+            confidenceTitle: confidenceTitle,
+            metadataSummary: [readStateTitle, provenanceTitle, confidenceTitle].joined(separator: " | "),
             sourceTitle: verdict.scanSource.surfaceTitle,
+            readStateTitle: readStateTitle,
+            provenanceTitle: provenanceTitle,
+            guidanceNote: verdict.scanSource.directionalGuidanceNote(for: verdict.resolvedProduct.resolutionSource),
             watchouts: Array(verdict.watchouts.prefix(2)).map {
                 WatchoutItem(
                     id: $0.id,
@@ -332,6 +343,69 @@ private extension LILADomain.ScanSource {
         case .voiceLog:
             "Voice log"
         }
+    }
+
+    func readStateTitle(for resolutionSource: LILADomain.ResolutionSource) -> String {
+        guard resolutionSource.isDirectionalInference else {
+            return "Resolved product"
+        }
+        switch self {
+        case .labelPhoto, .manualLabel:
+            return "Directional label read"
+        case .mealPhoto:
+            return "Directional meal read"
+        case .menuPhoto:
+            return "Directional menu read"
+        case .liveBarcode, .manualBarcode:
+            return "Unresolved barcode read"
+        case .voiceLog:
+            return "Directional voice read"
+        }
+    }
+
+    func directionalGuidanceNote(for resolutionSource: LILADomain.ResolutionSource) -> String? {
+        guard resolutionSource.isDirectionalInference else {
+            return nil
+        }
+        switch self {
+        case .labelPhoto, .manualLabel:
+            return "This is a directional label read, not an exact packaged-food match yet. Rescan with a barcode or a cleaner label when you can."
+        case .mealPhoto:
+            return "This meal read stays directional in this phase. Use it for guidance, not exact product identity."
+        case .menuPhoto:
+            return "This menu read stays directional in this phase. Treat it as a pre-order steer, not a resolved product."
+        case .liveBarcode, .manualBarcode:
+            return "The barcode did not resolve to a stable packaged-food match yet. Try another scan or add clearer label details."
+        case .voiceLog:
+            return "This voice-led read is directional and should be confirmed with a stronger packaged-food input."
+        }
+    }
+}
+
+private extension LILADomain.ResolutionSource {
+    var surfaceTitle: String {
+        switch self {
+        case .openFoodFacts:
+            "Open Food Facts"
+        case .usdaFoodDataCentral:
+            "USDA nutrients"
+        case .nihDSLD:
+            "NIH DSLD"
+        case .cosing:
+            "COSING"
+        case .localCatalog:
+            "Local catalog"
+        case .agentInferred:
+            "Directional inference"
+        case .userProvided:
+            "User provided"
+        case .userEdited:
+            "User edited"
+        }
+    }
+
+    var isDirectionalInference: Bool {
+        self == .agentInferred
     }
 }
 
@@ -638,7 +712,8 @@ private struct AnalysisHero: View {
                 ) {
                     detailPill(title: "Fit", value: verdictSurface.fitTitle)
                     detailPill(title: "Confidence", value: verdictSurface.confidenceTitle)
-                    detailPill(title: "Source", value: verdictSurface.sourceTitle)
+                    detailPill(title: "Read", value: verdictSurface.readStateTitle)
+                    detailPill(title: "Provenance", value: verdictSurface.provenanceTitle)
                 }
             }
         }
@@ -713,6 +788,21 @@ private struct AnalysisImpactCard: View {
                 Text(content.primaryReason)
                     .font(WLTypography.bodyEmphasis)
                     .foregroundStyle(WLPalette.inkSoft)
+
+                if let guidanceNote = content.guidanceNote {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text(content.readStateTitle)
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(guidanceNote)
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                    .padding(WLSpacing.l)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .wlCardSurface(style: .quiet)
+                }
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 156), spacing: WLSpacing.s)], spacing: WLSpacing.s) {
                     ForEach(lensScores) { score in

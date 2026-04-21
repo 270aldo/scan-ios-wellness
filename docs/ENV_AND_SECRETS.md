@@ -2,7 +2,9 @@
 
 ## Existing Runtime Keys
 - `WLBackendBaseURL`
+- `WLAgentServiceBaseURL`
 - `WLFirebaseEnabled`
+- `WLFirebaseOptionsPlistName`
 - `WLStoreKitEnabled`
 - `WLUseDemoData`
 - `WLUseAppCheckDebugProvider`
@@ -11,6 +13,10 @@
 
 ## Local Files
 - `WellnessLens/Support/GoogleService-Info.plist`
+- `WellnessLens/Support/GoogleService-Info-Staging.plist`
+- `WellnessLens/Support/GoogleService-Info-Prod.plist`
+- `Config/WellnessLens-Staging.local.xcconfig`
+- `Config/WellnessLens-Release.local.xcconfig`
 
 ## Phase 1 Assumptions
 - Demo/local mode remains supported by default.

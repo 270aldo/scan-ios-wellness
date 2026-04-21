@@ -217,12 +217,49 @@ class ScanVerdict(ContractModel):
     sources: list[ScanVerdictEvidenceSource] = Field(default_factory=list)
 
 
+class ScanVerdictResolutionSource(str, Enum):
+    openFoodFacts = "openFoodFacts"
+    usdaFoodDataCentral = "usdaFoodDataCentral"
+    nihDSLD = "nihDSLD"
+    cosing = "cosing"
+    localCatalog = "localCatalog"
+    agentInferred = "agentInferred"
+    userProvided = "userProvided"
+    userEdited = "userEdited"
+
+
+class ScanVerdictNutritionSnapshot(ContractModel):
+    energyKcalPer100g: float | None = Field(default=None, alias="energy_kcal_per_100g")
+    proteinGPer100g: float | None = Field(default=None, alias="protein_g_per_100g")
+    carbsGPer100g: float | None = Field(default=None, alias="carbs_g_per_100g")
+    fatGPer100g: float | None = Field(default=None, alias="fat_g_per_100g")
+    sugarsGPer100g: float | None = Field(default=None, alias="sugars_g_per_100g")
+    fiberGPer100g: float | None = Field(default=None, alias="fiber_g_per_100g")
+    sodiumMgPer100g: float | None = Field(default=None, alias="sodium_mg_per_100g")
+    caffeineMgPer100g: float | None = Field(default=None, alias="caffeine_mg_per_100g")
+    novaGroup: int | None = Field(default=None, alias="nova_group")
+
+
+class ScanVerdictResolvedProduct(ContractModel):
+    productId: str | None = Field(default=None, alias="product_id")
+    canonicalProductID: str | None = Field(default=None, alias="canonical_product_id")
+    name: str
+    brand: str | None = None
+    barcode: str | None = None
+    source: ScanVerdictResolutionSource | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    ingredients: list[str] = Field(default_factory=list)
+    nutritionSnapshot: ScanVerdictNutritionSnapshot | None = Field(default=None, alias="nutrition_snapshot")
+    isDirectional: bool = Field(default=False, alias="is_directional")
+
+
 class ScanVerdictRequest(ContractModel):
     scanId: str | None = None
     productName: str
     source: str
     userContextSummary: str
     structuredSummary: str | None = None
+    resolvedProduct: ScanVerdictResolvedProduct | None = Field(default=None, alias="resolved_product")
 
 
 class ScanVerdictResponse(ContractModel):

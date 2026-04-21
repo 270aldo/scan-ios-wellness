@@ -384,7 +384,7 @@ private struct ScanHeaderCard: View {
                     .font(WLTypography.title)
                     .foregroundStyle(WLPalette.ink)
 
-                Text("Product label, meal snapshot, or menu read. WellnessLens keeps the recommendation explainable even when the capture is thin.")
+                Text("Barcode and label reads are the strongest paths in this phase. Start with packaged foods first, then use meal or menu modes as directional guidance when there is no package to resolve.")
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
             }
@@ -401,7 +401,7 @@ private struct ScanPrimaryActionCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: WLProductCopy.Scan.primaryTitle,
-                    subtitle: "Use live barcode first when it works. A label photo is the fastest fallback.",
+                    subtitle: "Use live barcode for the strongest packaged-food match. A label photo is the next-best fallback when the package is in hand.",
                     systemImage: "camera.viewfinder"
                 )
 
@@ -431,7 +431,7 @@ private struct ScanModeActionsCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "More scan modes",
-                    subtitle: "Choose the mode that matches the decision instead of forcing everything into a product label flow.",
+                    subtitle: "Meal and menu modes stay available here, but they remain directional in this phase instead of exact packaged-food resolution.",
                     systemImage: "square.grid.2x2"
                 )
 
@@ -530,7 +530,7 @@ private struct ScanOtherWaysCard: View {
                     HStack(spacing: WLSpacing.s) {
                         WLSectionHeader(
                             title: WLProductCopy.Scan.otherWaysTitle,
-                            subtitle: "Fallbacks stay deterministic and keep the decision moving without duplicating the main CTA.",
+                            subtitle: "Manual barcode and label text still feed the same packaged-food resolver when camera capture is blocked.",
                             systemImage: "ellipsis.circle"
                         )
 

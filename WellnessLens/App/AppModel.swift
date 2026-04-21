@@ -201,7 +201,10 @@ final class AppModel {
         pantryItems = phaseTwoArtifacts.pantryItems
         entitlementSnapshot = AccessPolicy().snapshot(subscriptionStatus: snapshot.subscriptionStatus, billingMode: billingMode)
         activePaywall = nil
-        backendStatuses = initialBackendStatuses(hasBackend: resolvedServices.backendAPI != nil)
+        backendStatuses = initialBackendStatuses(
+            hasBackend: resolvedServices.backendAPI != nil,
+            hasAgentService: resolvedServices.configuration.hasAgentService
+        )
         latestVerdict = scanVerdicts.first?.verdict
         reconcileScanVerdictsIfNeeded()
     }
@@ -227,11 +230,20 @@ final class AppModel {
     }
 
     var hasBackendDebugSurface: Bool {
-        services.configuration.hasBackend || remoteClientConfig != nil || services.configuration.isFirebaseEnabled
+        services.configuration.isBackendDebugSurfaceEnabled
+            || services.configuration.hasBackend
+            || services.configuration.hasAgentService
+            || remoteClientConfig != nil
+            || services.configuration.isFirebaseEnabled
     }
 
     var backendAuthModeTitle: String {
-        services.configuration.isFirebaseEnabled ? "Firebase anonymous auth" : "Local install ID"
+        if services.configuration.isFirebaseEnabled {
+            return services.firebaseBootstrapState == .configured
+                ? "Firebase anonymous auth"
+                : "Firebase requested, bootstrap not ready"
+        }
+        return "Local install ID"
     }
 
     var weeklyInsights: [WeeklyInsight] {
@@ -1298,6 +1310,11 @@ final class AppModel {
                 latencyMs: Int(Date().timeIntervalSince(startedAt) * 1000)
             )
             scanEvents.insert(event, at: 0)
+            if services.configuration.hasAgentService {
+                updateBackendStatus(.scanVerdict, state: .syncPending, detail: "Requesting remote scan verdict.", incrementAttempt: true)
+            } else {
+                updateBackendStatus(.scanVerdict, state: .unavailable, detail: "No agent service configured. Using deterministic local verdicts.")
+            }
             let verdict = await services.scanVerdictAgent.generateVerdict(
                 for: ScanVerdictRequest(
                     input: input,
@@ -1309,6 +1326,22 @@ final class AppModel {
                     biometrics: biometrics
                 )
             )
+            if services.configuration.hasAgentService {
+                let usedIOSFallback = verdict.reasoningBreakdown.agentInsights.contains {
+                    $0.modelUsed.hasPrefix("ios-remote-fallback/")
+                }
+                if usedIOSFallback {
+                    updateBackendStatus(
+                        .scanVerdict,
+                        state: .fallback,
+                        detail: scanVerdictFallbackDetail(verdict),
+                        incrementFallback: true
+                    )
+                } else {
+                    let modelUsed = verdict.reasoningBreakdown.agentInsights.first?.modelUsed ?? "agent-service"
+                    updateBackendStatus(.scanVerdict, state: .live, detail: "Remote scan verdict applied (\(modelUsed)).")
+                }
+            }
             latestVerdict = verdict
             scanVerdicts.removeAll(where: { $0.scanEventID == event.id })
             scanVerdicts.insert(
@@ -1420,7 +1453,7 @@ final class AppModel {
             updateBackendStatus(
                 .clientConfig,
                 state: .live,
-                detail: "\(config.environment) • minimum build \(config.minimumSupportedBuild) • copy \(config.copyVersion)"
+                detail: "\(config.environment) • \(config.persistenceMode) • auth \(config.firebaseAuthEnforced ? "on" : "off") • app check \(config.appCheckEnforced ? "on" : "off") • agent \(config.agentProviderMode)"
             )
         } catch {
             remoteClientConfig = nil
@@ -1652,7 +1685,11 @@ final class AppModel {
         incrementAttempt: Bool = false,
         incrementFallback: Bool = false
     ) {
-        var status = backendStatuses[kind] ?? BackendSurfaceStatus.initial(kind: kind, hasBackend: services.backendAPI != nil)
+        var status = backendStatuses[kind] ?? BackendSurfaceStatus.initial(
+            kind: kind,
+            hasBackend: services.backendAPI != nil,
+            hasAgentService: services.configuration.hasAgentService
+        )
         if incrementAttempt {
             status.attempts += 1
         }
@@ -1666,9 +1703,29 @@ final class AppModel {
     }
 
     private func backendErrorDetail(prefix: String, error: Error) -> String {
+        if let backendError = error as? BackendClientError {
+            return "\(prefix) \(backendError.diagnosticSummary)"
+        }
         let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return prefix }
         return "\(prefix) \(message)"
+    }
+
+    private func scanVerdictFallbackDetail(_ verdict: LILADomain.ScanVerdict) -> String {
+        let prefix = "Remote scan verdict fell back to deterministic on-device generation."
+        guard let fallbackInsight = verdict.reasoningBreakdown.agentInsights.first(where: {
+            $0.modelUsed.hasPrefix("ios-remote-fallback/")
+        }) else {
+            return prefix
+        }
+
+        let rawReason = fallbackInsight.modelUsed
+            .replacingOccurrences(of: "ios-remote-fallback/", with: "")
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !rawReason.isEmpty else { return prefix }
+        return "\(prefix) \(rawReason)."
     }
 
     private func applyHistorySync(_ response: HistorySyncResponse) {

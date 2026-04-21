@@ -4,6 +4,7 @@ enum BackendSurfaceKind: String, CaseIterable, Codable, Hashable, Identifiable {
     case clientConfig
     case historySync
     case structuredScan
+    case scanVerdict
     case home
     case insights
     case profileSync
@@ -22,6 +23,8 @@ enum BackendSurfaceKind: String, CaseIterable, Codable, Hashable, Identifiable {
             "History sync"
         case .structuredScan:
             "Structured scan"
+        case .scanVerdict:
+            "Scan verdict"
         case .home:
             "Home"
         case .insights:
@@ -76,11 +79,17 @@ struct BackendSurfaceStatus: Codable, Hashable, Identifiable {
 
     var id: String { kind.rawValue }
 
-    static func initial(kind: BackendSurfaceKind, hasBackend: Bool) -> BackendSurfaceStatus {
-        BackendSurfaceStatus(
+    static func initial(kind: BackendSurfaceKind, hasBackend: Bool, hasAgentService: Bool) -> BackendSurfaceStatus {
+        let isAvailable: Bool = switch kind {
+        case .scanVerdict:
+            hasAgentService
+        case .clientConfig, .historySync, .structuredScan, .home, .insights, .profileSync, .checkInSync, .memorySync, .decisionSync, .favoriteSync:
+            hasBackend
+        }
+        return BackendSurfaceStatus(
             kind: kind,
-            state: hasBackend ? .idle : .unavailable,
-            detail: hasBackend ? "Ready to sync." : "No backend configured in runtime settings.",
+            state: isAvailable ? .idle : .unavailable,
+            detail: isAvailable ? "Ready to sync." : "No backend configured in runtime settings.",
             updatedAt: nil,
             attempts: 0,
             fallbackCount: 0
@@ -88,10 +97,10 @@ struct BackendSurfaceStatus: Codable, Hashable, Identifiable {
     }
 }
 
-func initialBackendStatuses(hasBackend: Bool) -> [BackendSurfaceKind: BackendSurfaceStatus] {
+func initialBackendStatuses(hasBackend: Bool, hasAgentService: Bool) -> [BackendSurfaceKind: BackendSurfaceStatus] {
     Dictionary(
         uniqueKeysWithValues: BackendSurfaceKind.allCases.map {
-            ($0, BackendSurfaceStatus.initial(kind: $0, hasBackend: hasBackend))
+            ($0, BackendSurfaceStatus.initial(kind: $0, hasBackend: hasBackend, hasAgentService: hasAgentService))
         }
     )
 }

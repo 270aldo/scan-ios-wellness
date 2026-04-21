@@ -33,7 +33,8 @@ module "core" {
   manage_firestore_database = false
 
   backend_service_env = {
-    WELLNESSLENS_USE_FIRESTORE = "true"
+    WELLNESSLENS_USE_FIRESTORE      = "true"
+    WELLNESSLENS_AGENT_PROVIDER_MODE = "local"
   }
 
   agent_service_env = {

@@ -237,6 +237,57 @@ struct Ingredient: Codable, Hashable, Identifiable {
     var id: String { name }
 }
 
+enum ProductResolutionSource: String, Codable, CaseIterable {
+    case openFoodFacts
+    case usdaFoodDataCentral
+    case nihDSLD
+    case cosing
+    case localCatalog
+    case agentInferred
+    case userProvided
+    case userEdited
+}
+
+struct NutritionSnapshot: Codable, Hashable {
+    var energyKcalPer100g: Double?
+    var proteinGPer100g: Double?
+    var carbsGPer100g: Double?
+    var fatGPer100g: Double?
+    var sugarsGPer100g: Double?
+    var fiberGPer100g: Double?
+    var sodiumMgPer100g: Double?
+    var caffeineMgPer100g: Double?
+    var novaGroup: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case energyKcalPer100g = "energy_kcal_per_100g"
+        case proteinGPer100g = "protein_g_per_100g"
+        case carbsGPer100g = "carbs_g_per_100g"
+        case fatGPer100g = "fat_g_per_100g"
+        case sugarsGPer100g = "sugars_g_per_100g"
+        case fiberGPer100g = "fiber_g_per_100g"
+        case sodiumMgPer100g = "sodium_mg_per_100g"
+        case caffeineMgPer100g = "caffeine_mg_per_100g"
+        case novaGroup = "nova_group"
+    }
+}
+
+struct ProductResolution: Codable, Hashable {
+    var canonicalProductID: String?
+    var source: ProductResolutionSource
+    var confidence: Double
+    var nutritionSnapshot: NutritionSnapshot?
+    var isDirectional: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case canonicalProductID = "canonical_product_id"
+        case source
+        case confidence
+        case nutritionSnapshot = "nutrition_snapshot"
+        case isDirectional = "is_directional"
+    }
+}
+
 struct ProductCandidate: Codable, Hashable, Identifiable {
     var id: String
     var name: String
@@ -250,6 +301,7 @@ struct ProductCandidate: Codable, Hashable, Identifiable {
     var alternativeIDs: [String]
     var notes: [String]
     var lookupTokens: [String]
+    var resolution: ProductResolution? = nil
 }
 
 struct LensScore: Codable, Hashable, Identifiable {

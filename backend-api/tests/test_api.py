@@ -6,8 +6,19 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.config import get_settings
+from app.config import Settings, get_settings
+from app.contracts import (
+    ConfidenceLevel,
+    Ingredient,
+    ProductCandidate,
+    ProductResolution,
+    ProductResolutionSource,
+    ProductType,
+    ScanInput,
+    ScanSource,
+)
+from app.main import app, build_backend_services
+from app.product_resolver import ProductResolver, ResolverResult
 from app.security import SecurityVerificationError
 from app.services import fixture_models, starter_history_sync_request, starter_home_request
 
@@ -26,13 +37,53 @@ def test_client_config_contract_shape():
     assert response.status_code == 200
     payload = response.json()
     assert payload["environment"] == "dev"
+    assert payload["persistenceMode"] == "in_memory"
+    assert payload["firebaseAuthEnforced"] is False
+    assert payload["appCheckEnforced"] is False
+    assert payload["agentProviderMode"] == "local"
     assert payload["flags"]["structuredAnalysis"] is True
     assert payload["killSwitches"]["scanDisabled"] is False
 
 
-def test_analyze_structured_returns_contract_compatible_payload():
+def test_analyze_structured_returns_contract_compatible_payload(monkeypatch):
     sync_request, _ = starter_history_sync_request()
     profile_request = starter_home_request(sync_request.installID)
+    services = getattr(app.state, "backend_services", None)
+    if services is None:
+        services = build_backend_services(Settings())
+        app.state.backend_services = services
+
+    monkeypatch.setattr(
+        services.resolver,
+        "resolve",
+        lambda input: ResolverResult(
+            product=ProductCandidate(
+                id="off:7501031311309",
+                name="Greek Yogurt",
+                brand="Good Farm",
+                productType=ProductType.food,
+                barcode="7501031311309",
+                headline="Exact barcode match from Open Food Facts.",
+                ingredients=[Ingredient(name="Milk"), Ingredient(name="Cultures")],
+                claims=["High protein"],
+                tags=[],
+                alternativeIDs=[],
+                notes=["Source: Open Food Facts (resolved)."],
+                lookupTokens=["greek", "yogurt"],
+                resolution=ProductResolution(
+                    canonicalProductID="off:7501031311309",
+                    source=ProductResolutionSource.openFoodFacts,
+                    confidence=0.91,
+                    nutritionSnapshot=None,
+                    isDirectional=False,
+                ),
+            ),
+            confidence=ConfidenceLevel.high,
+            resolution_confidence=0.91,
+            is_directional=False,
+        ),
+        raising=False,
+    )
     response = client.post(
         "/v1/scan/analyze",
         json={
@@ -52,6 +103,10 @@ def test_analyze_structured_returns_contract_compatible_payload():
     assert analysis["analysis_id"].startswith("analysis-manualLabel")
     assert analysis["lens_scores"]["body_comp"] >= 0
     assert analysis["medical_safety"]["disclaimer_needed"] is True
+    assert analysis["resolved_product"]["name"] == "Greek Yogurt"
+    assert analysis["resolved_product"]["resolution"]["source"] == "openFoodFacts"
+    assert analysis["resolved_product"]["resolution"]["confidence"] == pytest.approx(0.91)
+    assert analysis["resolved_product"]["resolution"]["is_directional"] is False
 
 
 def test_profile_sync_history_sync_and_home_flow():
@@ -192,3 +247,159 @@ def test_history_sync_is_idempotent_and_preserves_existing_conflicts(caplog):
     assert payload["scanDecisions"][0]["note"] == sync_request.scanDecisions[0].note
     assert payload["favorites"][0]["summary"] == sync_request.favorites[0].summary
     assert "history_sync_conflict" in caplog.text
+
+
+def test_product_resolver_barcode_hit_returns_resolved_product(monkeypatch):
+    resolver = ProductResolver(Settings())
+
+    monkeypatch.setattr(
+        resolver,
+        "_get_json",
+        lambda url: {
+            "status": 1,
+            "product": {
+                "code": "7501031311309",
+                "product_name": "Greek Yogurt",
+                "brands": "Good Farm",
+                "ingredients_text": "Milk, Cultures",
+                "ingredients_tags": ["en:milk"],
+                "categories_tags": ["en:yogurts"],
+                "labels_tags": ["en:high-protein"],
+                "nutrition_data": "on",
+                "nutriments": {
+                    "energy-kcal_100g": 98,
+                    "proteins_100g": 10,
+                    "carbohydrates_100g": 4,
+                    "fat_100g": 2,
+                    "sugars_100g": 4,
+                    "fiber_100g": 0,
+                },
+            },
+        },
+    )
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.liveBarcode,
+            barcode="7501031311309",
+            locale="en_US",
+        )
+    )
+
+    assert result.confidence == ConfidenceLevel.high
+    assert result.is_directional is False
+    assert result.product.name == "Greek Yogurt"
+    assert result.product.brand == "Good Farm"
+    assert result.product.resolution is not None
+    assert result.product.resolution.source == ProductResolutionSource.openFoodFacts
+    assert result.product.resolution.isDirectional is False
+    assert result.product.resolution.canonicalProductID == "off:7501031311309"
+    assert result.product.resolution.nutritionSnapshot.proteinGPer100g == pytest.approx(10)
+
+
+def test_product_resolver_label_search_falls_back_to_directional_without_exact_match(monkeypatch):
+    resolver = ProductResolver(Settings(usda_api_key="demo-usda-key"))
+
+    monkeypatch.setattr(
+        resolver,
+        "_get_json",
+        lambda url: {
+            "products": [
+                {
+                    "code": "111",
+                    "product_name": "Chocolate Wafer",
+                    "brands": "Snack Co",
+                    "ingredients_text": "Sugar, wheat flour",
+                    "ingredients_tags": ["en:sugar"],
+                    "categories_tags": ["en:biscuits"],
+                    "labels_tags": [],
+                    "nutrition_data": "on",
+                    "nutriments": {"energy-kcal_100g": 460},
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        resolver,
+        "_post_json",
+        lambda *args, **kwargs: pytest.fail("USDA enrichment should not run for directional matches."),
+    )
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.labelPhoto,
+            rawText="collagen peptides vanilla creamer",
+            locale="en_US",
+        )
+    )
+
+    assert result.is_directional is True
+    assert result.product.name == "Directional label read"
+    assert result.product.brand == "Directional read"
+    assert result.product.resolution is not None
+    assert result.product.resolution.source == ProductResolutionSource.agentInferred
+    assert result.product.resolution.isDirectional is True
+    assert result.fallback_reason in {"off_search_unranked", "off_search_low_confidence"}
+
+
+def test_product_resolver_enriches_nutrients_with_usda_only_for_strong_match(monkeypatch):
+    resolver = ProductResolver(Settings(usda_api_key="demo-usda-key"))
+
+    monkeypatch.setattr(
+        resolver,
+        "_get_json",
+        lambda url: {
+            "status": 1,
+            "product": {
+                "code": "012345678905",
+                "product_name": "Protein Oats",
+                "brands": "Steady Foods",
+                "ingredients_text": "Oats, milk protein",
+                "ingredients_tags": ["en:oats", "en:milk-protein"],
+                "categories_tags": ["en:breakfast-cereals"],
+                "labels_tags": ["en:high-protein"],
+                "nutrition_data": "on",
+                "nutriments": {
+                    "energy-kcal_100g": 380,
+                    "proteins_100g": 15,
+                },
+            },
+        },
+    )
+    monkeypatch.setattr(
+        resolver,
+        "_post_json",
+        lambda url, payload: {
+            "foods": [
+                {
+                    "gtinUpc": "012345678905",
+                    "description": "Protein Oats",
+                    "brandOwner": "Steady Foods",
+                    "foodNutrients": [
+                        {"nutrientName": "Energy", "value": 380},
+                        {"nutrientName": "Protein", "value": 15},
+                        {"nutrientName": "Carbohydrate, by difference", "value": 42},
+                        {"nutrientName": "Total lipid (fat)", "value": 6},
+                        {"nutrientName": "Total Sugars", "value": 5},
+                        {"nutrientName": "Fiber, total dietary", "value": 8},
+                        {"nutrientName": "Sodium, Na", "value": 210},
+                    ],
+                }
+            ]
+        },
+    )
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.manualBarcode,
+            barcode="012345678905",
+            locale="en_US",
+        )
+    )
+
+    assert result.is_directional is False
+    assert result.product.resolution is not None
+    assert result.product.resolution.source == ProductResolutionSource.openFoodFacts
+    assert result.product.resolution.nutritionSnapshot.carbsGPer100g == pytest.approx(42)
+    assert result.product.resolution.nutritionSnapshot.fiberGPer100g == pytest.approx(8)
+    assert "USDA FoodData Central" in " ".join(result.product.notes)

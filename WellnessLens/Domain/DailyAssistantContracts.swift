@@ -186,6 +186,7 @@ struct AnalysisEnvelope: Codable, Hashable, Identifiable {
     var timestamp: Date
     var inputType: AnalysisInputType
     var entityType: AnalysisEntityType
+    var resolvedProduct: ProductCandidate? = nil
     var verdict: AnalysisVerdict
     var overallScore: Int
     var lensScores: StructuredLensScores
@@ -204,6 +205,7 @@ struct AnalysisEnvelope: Codable, Hashable, Identifiable {
         case timestamp
         case inputType = "input_type"
         case entityType = "entity_type"
+        case resolvedProduct = "resolved_product"
         case verdict
         case overallScore = "overall_score"
         case lensScores = "lens_scores"
