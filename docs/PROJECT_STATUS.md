@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-04-17
+Last updated: 2026-04-21
 
 ## Executive summary
 
@@ -14,6 +14,7 @@ The current state is:
 - PRD 1 is implemented in the iOS app
 - PRD 2 is implemented in `agent-service`
 - PRD 3 coach replies are implemented end-to-end across `agent-service` and iOS
+- PRD 4 is now in progress on the real repo, with product identity foundation and shared resolution semantics already implemented
 - `StrategistChatView` stays visually unchanged while `AppModel.sendStrategistMessage(...)` routes through `coachAgent`
 - fallback behavior remains available when remote provider output is missing or invalid
 
@@ -78,11 +79,30 @@ The repo should be treated as an incremental migration, not a rewrite candidate.
 - deterministic local fallback remains available offline and is also used when remote coach calls fail
 - Gap 1 was closed by translating iOS fallback LILA headlines to es-MX in `LILACompatibility.swift`
 
+### PRD 4: Product Graph / Resolution Layer (partial)
+
+- `WellnessLens/Domain/ProductGraph.swift` now exists in source control with `ProductReference` and `ProductGraphIndex`
+- stable product identity is now carried across favorites, pantry, routines, memory, follow-up, and `Experiment.relatedProductID`
+- `backend-api/app/product_resolver.py` was modularized internally into resolver steps/providers without changing the public app contract
+- backend and iOS now share an explicit `resolution_semantics` layer for:
+  - `canonical`
+  - `provisional`
+  - `directional`
+  - `provider_backed`
+  - `low_confidence`
+- that semantic layer is centralized in:
+  - `backend-api/app/product_resolution_semantics.py`
+  - `WellnessLens/Domain/ProductResolutionSemantics.swift`
+- `ProductCandidate` / `ResolvedProduct` now carry `resolution_semantics` as an additive field
+- compatibility with `ScanAnalysis` and `AnalysisEnvelope` remains intact
+- no new UI was introduced for manual correction or rich confidence display in this slice
+
 ## Verification status
 
-The following commands were run successfully after the PRD 3 implementation:
+The following commands were run successfully after the PRD 4 shared-resolution-semantics slice:
 
 ```bash
+pytest /Users/aldoolivas/IOS_ngx-silver/backend-api/tests/test_api.py
 pytest /Users/aldoolivas/IOS_ngx-silver/agent-service/tests/
 xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' build CODE_SIGNING_ALLOWED=NO
 xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO
@@ -90,6 +110,7 @@ xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -sch
 
 Observed result:
 
+- `backend-api` tests: passed
 - `agent-service` tests: passed
 - iOS build: passed
 - iOS tests: passed
@@ -110,9 +131,11 @@ Observed result:
 
 ## What is still not done
 
-- real product graph and resolution layer
+- PRD 4 is not fully closed yet:
+  - manual correction UX is not implemented
+  - richer confidence / provenance UI is not implemented
+  - provider expansion beyond the current OFF / USDA path is still pending
 - nutrient intelligence engine that replaces demo heuristics
-- remote iOS hookup to live scan verdict provider behavior
 - broader staging validation of the Vertex provider path with real credentials
 
 ## Notes about runtime assets
@@ -139,11 +162,11 @@ One detail worth knowing:
 
 ## Recommended next step
 
-The next safest implementation step is PRD 4:
+The next safest implementation step is to finish the remaining PRD 4 slices before starting PRD 5:
 
-- formalize the real product graph and resolution layer
-- keep `DemoScanService` as a deterministic fallback while live sources come online
-- preserve coach and scan verdict separation as richer product data lands
+- add manual correction UX on top of the explicit `resolution_semantics` contract
+- add richer confidence / provenance presentation without changing `ScanAnalysis` / `AnalysisEnvelope`
+- continue provider expansion while keeping deterministic fallback and coach / scan-verdict separation intact
 
 ## Minimal context packet for Claude Code
 
@@ -156,11 +179,16 @@ If another coding agent needs to continue work, give it this exact reading order
 
 Then point it at:
 
+- `WellnessLens/Domain/ProductGraph.swift`
+- `WellnessLens/Domain/ProductResolutionSemantics.swift`
 - `WellnessLens/Domain/LILA/LILACompatibility.swift`
 - `WellnessLens/Infrastructure/ScanVerdictAgent.swift`
 - `WellnessLens/Infrastructure/CoachAgent.swift`
 - `WellnessLens/Infrastructure/RemoteCoachAgent.swift`
 - `WellnessLens/App/AppModel.swift`
+- `backend-api/app/product_resolution_semantics.py`
+- `backend-api/app/product_resolver.py`
+- `backend-api/app/services.py`
 - `agent-service/app/contracts.py`
 - `agent-service/app/coach_runtime.py`
 - `agent-service/app/service.py`

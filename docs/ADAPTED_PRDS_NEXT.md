@@ -109,13 +109,41 @@ Formalizar el `Coach Agent` como servicio independiente que consuma `ScanVerdict
 
 ## PRD 4. Product Graph / Resolution Layer
 
+### Estado
+En progreso en el repo real.
+
+Ya implementado:
+- `WellnessLens/Domain/ProductGraph.swift` con `ProductReference` y `ProductGraphIndex`
+- identidad estable en favorites, pantry, routines, memory y follow-up
+- `Experiment.relatedProductID`
+- modularizacion interna de `backend-api/app/product_resolver.py`
+- capa compartida de `resolution_semantics` entre backend e iOS
+
+Todavia pendiente:
+- manual correction UX
+- richer confidence / provenance UI
+- expansion adicional de providers
+
 ### Objetivo
 Salir del modo demo de catálogo y resolución heurística.
 
+### Contexto
+- ya existe foundation de identity / product graph
+- `resolved_product.resolution` puede ser `null`, asi que la semantic compartida vive en `ProductCandidate` / `ResolvedProduct`, no solo en `ProductResolution`
+- ya existen semantics wire-safe y backward compatible para:
+  - `canonical`
+  - `provisional`
+  - `directional`
+  - `provider_backed`
+  - `low_confidence`
+- `ScanAnalysis` y `AnalysisEnvelope` deben seguir siendo compatibles
+
 ### Entregables
-- barcode resolution real
-- OCR pipeline real
-- meal/menu confidence explícita
+- barcode resolution real y mas cobertura de fuentes
+- OCR / label resolution mas robusta
+- meal/menu confidence explicita
+- manual correction UX apoyada sobre semantics explicitas
+- richer confidence / provenance UX sin romper contratos legacy
 - arquitectura para fuentes:
   - Open Food Facts
   - USDA FoodData Central
@@ -125,12 +153,15 @@ Salir del modo demo de catálogo y resolución heurística.
 ### Guardrails
 - no destruir `DemoScanService`
 - mantener confidence visible
+- no mezclar esto con PRD 5
 - corrección manual siempre disponible
+- conservar compatibilidad con `ScanAnalysis` / `AnalysisEnvelope`
 
 ### Definition of Done
-- barcode real resuelve productos reales
+- barcode / label / meal-menu tienen reglas explicitas de resolution y confidence
+- manual correction UX puede corregir identidad sin reescribir el pipeline
 - meal/menu mantiene confidence low/medium cuando aplique
-- tests backend del resolver
+- tests backend del resolver y tests iOS del bridge/product graph
 
 ## PRD 5. Nutrient Intelligence Engine
 
@@ -163,5 +194,5 @@ Reemplazar el scoring por tags con un motor más serio basado en nutrientes/cont
 - tests unitarios de scoring
 
 ## Orden recomendado
-1. PRD 4: Product Graph / Resolution Layer
+1. Terminar los slices restantes de PRD 4
 2. PRD 5: Nutrient Intelligence Engine

@@ -1,5 +1,7 @@
 # Claude Handoff Summary
 
+Estado reflejado en este handoff: 2026-04-21
+
 ## Contexto real del repo
 - El repo **no** estaba vacío ni “solo prototipo local”. Ya existían:
   - backend estructurado y contratos en `backend-api/`
@@ -118,11 +120,47 @@ Decisión clave:
   - `StrategistReply`
   - `ScanVerdict`
 
+### 9. PRD 4 ya tiene foundation real y semantics compartidas
+Se agregaron o formalizaron piezas reales del product graph / resolution layer:
+- `WellnessLens/Domain/ProductGraph.swift` con `ProductReference` y `ProductGraphIndex`
+- `WellnessLens/Domain/ProductResolutionSemantics.swift`
+- `backend-api/app/product_resolution_semantics.py`
+
+También se consolidó identidad estable en superficies ya existentes:
+- favorites
+- pantry
+- routines
+- memory
+- follow-up
+- `Experiment.relatedProductID`
+
+En backend:
+- `backend-api/app/product_resolver.py` quedó modularizado internamente en steps/providers sin cambiar el contrato publico
+- `ProductCandidate` ahora puede emitir `resolution_semantics`
+- `backend-api/app/services.py` dejó de depender de varias heuristicas dispersas para checks direccionales
+
+En iOS:
+- `ProductCandidate` y `LILADomain.ResolvedProduct` ahora aceptan `resolution_semantics`
+- `ProductGraph` prefiere semantics explicitas y cae al fallback legacy si faltan
+- `AnalysisView` consume la semantic compartida para los estados direccionales sin cambiar el texto visible
+
+Semantics formalizadas:
+- `canonical`
+- `provisional`
+- `directional`
+- `provider_backed`
+- `low_confidence`
+
+Decisiones clave:
+- la capa nueva es aditiva y backward compatible
+- `ScanAnalysis` y `AnalysisEnvelope` no se rompieron
+- no se abrio UI nueva para manual correction ni confidence UX
+- no se mezclo este slice con PRD 5
+
 ## Lo que NO se hizo todavía
-- No se conectó el prompt completo de `lila-agents.zip` al runtime real.
-- No se conectó el `ScanVerdictSchema.json` al servicio del app/backend.
-- No se cambió el UI principal para que `latestVerdict` sea la card top-of-scan/home.
-- No se construyó product graph real (`Open Food Facts`, `USDA`, `DSLD`, etc.).
+- No se implemento manual correction UX.
+- No se implemento una UI mas rica de confidence / provenance; solo quedo la semantica compartida.
+- No se expandieron todavia fuentes como `DSLD` o capas cosmeticas.
 - No se reemplazó el scoring legacy por un motor nutricional vectorial real.
 - No se tocó la experiencia visual del orb/avatar.
 - No se hizo rename de marca/proyecto.
@@ -139,24 +177,32 @@ Decisión clave:
 - El nombre técnico interno debe seguir siendo `WellnessLens` por ahora.
 
 ## Verificación ejecutada
+- Tests backend-api:
+  - `pytest /Users/aldoolivas/IOS_ngx-silver/backend-api/tests/test_api.py`
 - Build iOS:
-  - `xcodebuild -project WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' build CODE_SIGNING_ALLOWED=NO`
+  - `xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' build CODE_SIGNING_ALLOWED=NO`
 - Tests iOS:
-  - `xcodebuild -project WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO`
+  - `xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO`
 - Tests agent-service:
-  - `pytest agent-service/tests/test_agent_api.py`
+  - `pytest /Users/aldoolivas/IOS_ngx-silver/agent-service/tests/`
 
 Estado verificado:
+- tests `backend-api` verdes: `14 tests`
 - build verde
-- tests iOS verdes: `52 tests`
-- tests `agent-service` verdes
+- tests iOS verdes: `78 tests`
+- tests `agent-service` verdes: `37 tests`
 
 ## Lectura recomendada para continuar
+- `WellnessLens/Domain/ProductGraph.swift`
+- `WellnessLens/Domain/ProductResolutionSemantics.swift`
 - `WellnessLens/Domain/LILA/LILACompatibility.swift`
 - `WellnessLens/Infrastructure/ScanVerdictAgent.swift`
 - `WellnessLens/Infrastructure/HealthKitService.swift`
 - `WellnessLens/Infrastructure/PlatformServices.swift`
 - `WellnessLens/App/AppModel.swift`
+- `backend-api/app/product_resolution_semantics.py`
+- `backend-api/app/product_resolver.py`
+- `backend-api/app/services.py`
 - `agent-service/app/contracts.py`
 - `agent-service/app/service.py`
 - `agent-service/app/main.py`
@@ -167,10 +213,11 @@ La base ya no está en “plan teórico”. Ya existe un primer milestone ejecut
 - veredicto LILA persistido
 - HealthKit scaffold listo
 - separación `scan verdict` vs `coach`
-- backend scaffold separado
+- product graph foundation presente
+- semantics compartidas de resolution/provenance/confidence presentes
 - compatibilidad total con el pipeline actual
 
 La siguiente etapa correcta ya no es “meter más teoría”, sino:
-1. convertir `ScanVerdict` en surface principal de la app
-2. conectar prompt/schema reales
-3. reemplazar resolución/scoring demo por product graph y nutrient intelligence reales
+1. cerrar los slices restantes de PRD 4: manual correction UX, richer confidence/provenance UX, provider expansion
+2. mantener `ScanVerdict` y coach separados mientras cae mas identidad de producto real
+3. despues de eso, entrar a PRD 5: nutrient intelligence
