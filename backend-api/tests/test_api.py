@@ -437,6 +437,207 @@ def test_product_resolver_enriches_nutrients_with_usda_only_for_strong_match(mon
     assert "USDA FoodData Central" in " ".join(result.product.notes)
 
 
+def test_product_resolver_dsld_label_search_returns_provider_backed_supplement(monkeypatch):
+    resolver = ProductResolver(Settings(usda_api_key="demo-usda-key"))
+
+    def fake_get_json(url: str):
+        if "search-filter" in url:
+            return {
+                "hits": [
+                    {
+                        "_id": "33919",
+                        "_source": {
+                            "fullName": "Magnesium Glycinate",
+                            "brandName": "Vinco's",
+                            "allIngredients": [
+                                {"name": "Magnesium Glycinate", "notes": ""},
+                                {"name": "Magnesium", "notes": "Magnesium (Form: from Magnesium Glycinate)"},
+                            ],
+                            "claims": [{"langualCodeDescription": "Structure/Function"}],
+                            "productType": {"langualCodeDescription": "Mineral"},
+                        },
+                    }
+                ]
+            }
+        if url.endswith("/label/33919"):
+            return {
+                "id": "33919",
+                "fullName": "Magnesium Glycinate",
+                "brandName": "Vinco's",
+                "upcSku": "7 39930 19531 8",
+                "ingredientRows": [
+                    {"name": "Magnesium Glycinate", "notes": None},
+                    {"name": "Magnesium", "notes": "Magnesium (Form: from Magnesium Glycinate)"},
+                ],
+                "otheringredients": {"ingredients": [{"name": "Xylitol"}]},
+                "statements": [
+                    {
+                        "type": "Suggested/Recommended/Usage/Directions",
+                        "notes": "Take one teaspoon daily.",
+                    }
+                ],
+                "claims": [{"langualCodeDescription": "Structure/Function"}],
+                "productType": {"langualCodeDescription": "Mineral"},
+            }
+        pytest.fail(f"Unexpected URL: {url}")
+
+    monkeypatch.setattr(resolver, "_get_json", fake_get_json)
+    monkeypatch.setattr(
+        resolver,
+        "_post_json",
+        lambda *args, **kwargs: pytest.fail("USDA enrichment should not run for NIH DSLD matches."),
+    )
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.manualLabel,
+            rawText="magnesium glycinate",
+            productTypeHint=ProductType.supplement,
+            locale="en_US",
+        )
+    )
+
+    assert result.is_directional is False
+    assert result.product.productType == ProductType.supplement
+    assert result.product.name == "Magnesium Glycinate"
+    assert result.product.resolution is not None
+    assert result.product.resolution.source == ProductResolutionSource.nihDSLD
+    assert result.product.resolution.canonicalProductID == "dsld:33919"
+    assert result.product.resolutionSemantics == [
+        ProductResolutionSemantic.canonical,
+        ProductResolutionSemantic.providerBacked,
+    ]
+    assert result.identity_source == ProductResolutionSource.nihDSLD
+    assert result.fact_sources == (ProductResolutionSource.nihDSLD,)
+
+
+def test_product_resolver_barcode_falls_back_to_dsld_after_off_miss(monkeypatch):
+    resolver = ProductResolver(Settings())
+    requested_urls: list[str] = []
+
+    def fake_get_json(url: str):
+        requested_urls.append(url)
+        if "/api/v2/product/" in url:
+            return {"status": 0}
+        if "search-filter" in url:
+            return {
+                "hits": [
+                    {
+                        "_id": "33919",
+                        "_source": {
+                            "fullName": "Magnesium Glycinate",
+                            "brandName": "Vinco's",
+                            "allIngredients": [{"name": "Magnesium Glycinate", "notes": ""}],
+                            "claims": [{"langualCodeDescription": "Structure/Function"}],
+                            "productType": {"langualCodeDescription": "Mineral"},
+                        },
+                    }
+                ]
+            }
+        if url.endswith("/label/33919"):
+            return {
+                "id": "33919",
+                "fullName": "Magnesium Glycinate",
+                "brandName": "Vinco's",
+                "upcSku": "7 39930 19531 8",
+                "ingredientRows": [{"name": "Magnesium Glycinate", "notes": None}],
+                "otheringredients": {"ingredients": []},
+                "statements": [],
+                "claims": [{"langualCodeDescription": "Structure/Function"}],
+                "productType": {"langualCodeDescription": "Mineral"},
+            }
+        pytest.fail(f"Unexpected URL: {url}")
+
+    monkeypatch.setattr(resolver, "_get_json", fake_get_json)
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.manualBarcode,
+            barcode="739930195318",
+            locale="en_US",
+        )
+    )
+
+    assert result.is_directional is False
+    assert result.product.resolution is not None
+    assert result.product.resolution.source == ProductResolutionSource.nihDSLD
+    assert result.identity_source == ProductResolutionSource.nihDSLD
+    assert result.product.resolutionSemantics == [
+        ProductResolutionSemantic.canonical,
+        ProductResolutionSemantic.providerBacked,
+    ]
+    assert any("/api/v2/product/" in url for url in requested_urls)
+    assert any("search-filter" in url for url in requested_urls)
+
+
+def test_product_resolver_dsld_miss_falls_back_to_directional(monkeypatch):
+    resolver = ProductResolver(Settings())
+
+    monkeypatch.setattr(resolver, "_get_json", lambda url: {"hits": []})
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.manualLabel,
+            rawText="mystery herbal powder",
+            productTypeHint=ProductType.supplement,
+            locale="en_US",
+        )
+    )
+
+    assert result.is_directional is True
+    assert result.product.resolution is not None
+    assert result.product.resolution.source == ProductResolutionSource.agentInferred
+    assert result.product.productType == ProductType.supplement
+    assert result.product.resolutionSemantics == [
+        ProductResolutionSemantic.provisional,
+        ProductResolutionSemantic.directional,
+        ProductResolutionSemantic.lowConfidence,
+    ]
+    assert result.identity_source == ProductResolutionSource.agentInferred
+    assert result.fallback_reason == "dsld_search_empty"
+
+
+def test_product_resolver_food_scope_still_uses_off(monkeypatch):
+    resolver = ProductResolver(Settings())
+    requested_urls: list[str] = []
+
+    def fake_get_json(url: str):
+        requested_urls.append(url)
+        if "/api/v2/product/" in url:
+            return {
+                "status": 1,
+                "product": {
+                    "code": "7501031311309",
+                    "product_name": "Greek Yogurt",
+                    "brands": "Good Farm",
+                    "ingredients_text": "Milk, Cultures",
+                    "ingredients_tags": ["en:milk"],
+                    "categories_tags": ["en:yogurts"],
+                    "labels_tags": ["en:high-protein"],
+                    "nutrition_data": "on",
+                    "nutriments": {"energy-kcal_100g": 98, "proteins_100g": 10},
+                },
+            }
+        pytest.fail(f"Unexpected URL: {url}")
+
+    monkeypatch.setattr(resolver, "_get_json", fake_get_json)
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.manualBarcode,
+            barcode="7501031311309",
+            productTypeHint=ProductType.food,
+            locale="en_US",
+        )
+    )
+
+    assert result.is_directional is False
+    assert result.product.resolution is not None
+    assert result.product.resolution.source == ProductResolutionSource.openFoodFacts
+    assert result.identity_source == ProductResolutionSource.openFoodFacts
+    assert not any("api.ods.od.nih.gov" in url for url in requested_urls)
+
+
 def test_build_scan_analysis_marks_low_confidence_on_resolutionless_fallback():
     analysis = build_scan_analysis(
         ScanInput(

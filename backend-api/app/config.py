@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     open_food_facts_user_agent: str = "WellnessLensBackend/0.1 (dev@wellnesslens.local)"
     usda_api_key: str | None = None
     usda_base_url: str = "https://api.nal.usda.gov/fdc/v1"
+    nih_dsld_base_url: str = "https://api.ods.od.nih.gov/dsld/v9"
     resolver_cache_ttl_seconds: int = 900
     resolver_cache_max_entries: int = 256
     resolver_request_timeout_seconds: int = 5

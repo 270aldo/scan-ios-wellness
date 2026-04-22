@@ -114,9 +114,30 @@ class ProductResolver:
         return result
 
     def _resolve_identity(self, input: ScanInput) -> ResolverResult:
-        return _OpenFoodFactsIdentityStep(self._settings, self._get_json).resolve(input)
+        off_step = _OpenFoodFactsIdentityStep(self._settings, self._get_json)
+        dsld_step = _DSLDSupplementIdentityStep(self._settings, self._get_json)
+
+        if input.productTypeHint == ProductType.supplement:
+            return dsld_step.resolve(input)
+
+        off_result = off_step.resolve(input)
+        if input.productTypeHint not in {None, ProductType.food}:
+            return off_result
+
+        if (
+            off_result.is_directional
+            and input.barcode
+            and input.sourceType in {ScanSource.liveBarcode, ScanSource.manualBarcode}
+        ):
+            dsld_result = dsld_step.resolve(input)
+            if not dsld_result.is_directional:
+                return dsld_result
+
+        return off_result
 
     def _maybe_enrich_with_usda(self, result: ResolverResult, input: ScanInput) -> ResolverResult:
+        if result.identity_source == ProductResolutionSource.nihDSLD:
+            return result
         return _USDANutritionEnrichmentStep(self._settings, self._post_json).enrich(result, input)
 
     def _get_json(self, url: str) -> dict[str, Any]:
@@ -145,11 +166,13 @@ class ProductResolver:
             return json.loads(response.read().decode("utf-8"))
 
     def _cache_key(self, input: ScanInput) -> str:
+        product_scope = input.productTypeHint.value if input.productTypeHint else "auto"
+        source_scope = input.sourceType.value
         if input.barcode and input.sourceType in {ScanSource.liveBarcode, ScanSource.manualBarcode}:
-            return f"barcode:{input.barcode.strip()}"
+            return f"{product_scope}:{source_scope}:barcode:{_normalize_barcode(input.barcode) or input.barcode.strip()}"
         raw_text = (input.rawText or "").strip().lower()
         digest = hashlib.sha1(raw_text.encode("utf-8")).hexdigest()[:20]
-        return f"text:{digest}"
+        return f"{product_scope}:{source_scope}:text:{digest}"
 
     def _get_cached(self, key: str) -> ResolverResult | None:
         entry = self._cache.get(key)
@@ -236,6 +259,62 @@ class _ProductCandidateFactory:
                 confidence=round(resolution_confidence, 3),
                 nutritionSnapshot=snapshot,
                 isDirectional=is_directional,
+            ),
+        )
+        return ensure_product_resolution_semantics(candidate)
+
+    def dsld_product_to_candidate(
+        self,
+        label_payload: dict[str, Any],
+        *,
+        resolution_confidence: float,
+        headline: str,
+        search_hit: dict[str, Any] | None = None,
+    ) -> ProductCandidate:
+        label_id = str(label_payload.get("id") or (search_hit or {}).get("_id") or "").strip()
+        source_payload = search_hit.get("_source") if isinstance(search_hit, dict) else None
+        if not isinstance(source_payload, dict):
+            source_payload = {}
+
+        name = _clean_text(label_payload.get("fullName")) or _clean_text(source_payload.get("fullName")) or "Supplement label"
+        brand = _clean_text(label_payload.get("brandName")) or _clean_text(source_payload.get("brandName")) or "NIH DSLD"
+        barcode = _normalize_barcode(label_payload.get("upcSku")) or None
+        ingredient_lines = _dsld_ingredient_lines(label_payload, search_hit=search_hit)
+        statement_text = _dsld_statement_text(label_payload)
+        claims = _dsld_claims(label_payload, search_hit=search_hit)
+        product_type_description = _clean_text((label_payload.get("productType") or {}).get("langualCodeDescription"))
+        lookup_context = " ".join(part for part in [statement_text, product_type_description] if part)
+
+        candidate = ProductCandidate(
+            id=f"dsld:{label_id or hashlib.sha1(name.encode('utf-8')).hexdigest()[:12]}",
+            name=name,
+            brand=brand,
+            productType=ProductType.supplement,
+            barcode=barcode,
+            headline=headline,
+            ingredients=[Ingredient(name=item) for item in ingredient_lines],
+            claims=claims,
+            tags=_infer_tags(
+                name=name,
+                ingredients_text=" ".join(ingredient_lines + claims + ([lookup_context] if lookup_context else [])),
+                ingredient_tags=[],
+                labels_tags=[],
+                snapshot=None,
+            ),
+            alternativeIDs=[],
+            notes=["Source: NIH DSLD (resolved)."],
+            lookupTokens=_lookup_tokens(
+                name,
+                brand,
+                " ".join(ingredient_lines + claims + ([lookup_context] if lookup_context else [])),
+                [product_type_description] if product_type_description else [],
+            ),
+            resolution=ProductResolution(
+                canonicalProductID=f"dsld:{label_id}" if label_id else None,
+                source=ProductResolutionSource.nihDSLD,
+                confidence=round(resolution_confidence, 3),
+                nutritionSnapshot=None,
+                isDirectional=False,
             ),
         )
         return ensure_product_resolution_semantics(candidate)
@@ -480,6 +559,243 @@ class _OpenFoodFactsIdentityStep:
         return min(0.95, coverage * 0.60 + name_overlap * 0.22 + ingredient_overlap * 0.12 + nutrition_bonus + category_bonus)
 
 
+class _DSLDSupplementIdentityStep:
+    def __init__(
+        self,
+        settings: Settings,
+        fetch_json: Callable[[str], dict[str, Any]],
+    ) -> None:
+        self._settings = settings
+        self._fetch_json = fetch_json
+        self._factory = _ProductCandidateFactory()
+
+    def resolve(self, input: ScanInput) -> ResolverResult:
+        if input.sourceType in {ScanSource.mealPhoto, ScanSource.menuPhoto}:
+            return self._directional(
+                input,
+                fallback_reason="dsld_non_packaged_directional_mode",
+                confidence_score=0.34 if input.sourceType == ScanSource.menuPhoto else 0.38,
+            )
+
+        if input.barcode and input.sourceType in {ScanSource.liveBarcode, ScanSource.manualBarcode}:
+            return self._resolve_barcode(input)
+
+        raw_text = (input.rawText or "").strip()
+        if raw_text:
+            return self._resolve_label_text(input, raw_text)
+
+        return self._directional(
+            input,
+            fallback_reason="dsld_empty_input",
+            confidence_score=0.18,
+        )
+
+    def _resolve_barcode(self, input: ScanInput) -> ResolverResult:
+        barcode = _normalize_barcode(input.barcode)
+        if not barcode:
+            return self._directional(
+                input,
+                fallback_reason="dsld_blank_barcode",
+                confidence_score=0.18,
+            )
+
+        try:
+            payload = self._fetch_json(
+                f"{self._settings.nih_dsld_base_url.rstrip('/')}/search-filter"
+                f"?q={quote_plus(barcode)}"
+                f"&size=6&status=1&sort_by=_score&sort_order=desc"
+            )
+        except (HTTPError, URLError, TimeoutError) as exc:
+            return self._directional(
+                input,
+                fallback_reason=f"dsld_barcode_error:{exc.__class__.__name__}",
+                confidence_score=0.24,
+            )
+
+        hits = payload.get("hits") if isinstance(payload, dict) else None
+        if not isinstance(hits, list) or not hits:
+            return self._directional(
+                input,
+                fallback_reason="dsld_barcode_empty",
+                confidence_score=0.28,
+            )
+
+        for hit in hits[:4]:
+            if not isinstance(hit, dict):
+                continue
+            label = self._fetch_label(str(hit.get("_id") or "").strip())
+            if label is None:
+                continue
+            if _normalize_barcode(label.get("upcSku")) != barcode:
+                continue
+
+            product = self._factory.dsld_product_to_candidate(
+                label,
+                resolution_confidence=0.94,
+                headline="Supplement barcode matched in NIH DSLD.",
+                search_hit=hit,
+            )
+            return ResolverResult(
+                product=product,
+                confidence=ConfidenceLevel.high,
+                resolution_confidence=0.94,
+                is_directional=False,
+                identity_source=ProductResolutionSource.nihDSLD,
+                fact_sources=(ProductResolutionSource.nihDSLD,),
+            )
+
+        return self._directional(
+            input,
+            fallback_reason="dsld_barcode_low_confidence",
+            confidence_score=0.32,
+        )
+
+    def _resolve_label_text(self, input: ScanInput, raw_text: str) -> ResolverResult:
+        meaningful_tokens = _meaningful_tokens(raw_text)
+        if len(meaningful_tokens) < 2:
+            return self._directional(
+                input,
+                fallback_reason="dsld_label_text_too_thin",
+                confidence_score=0.34,
+            )
+
+        try:
+            payload = self._fetch_json(
+                f"{self._settings.nih_dsld_base_url.rstrip('/')}/search-filter"
+                f"?q={quote_plus(raw_text[:180])}"
+                f"&size=6&status=1&sort_by=_score&sort_order=desc"
+            )
+        except (HTTPError, URLError, TimeoutError) as exc:
+            return self._directional(
+                input,
+                fallback_reason=f"dsld_search_error:{exc.__class__.__name__}",
+                confidence_score=0.38,
+            )
+
+        hits = payload.get("hits") if isinstance(payload, dict) else None
+        if not isinstance(hits, list) or not hits:
+            return self._directional(
+                input,
+                fallback_reason="dsld_search_empty",
+                confidence_score=0.42,
+            )
+
+        scored = [
+            (self._score_search_hit(hit, meaningful_tokens, raw_text), hit)
+            for hit in hits
+            if isinstance(hit, dict)
+        ]
+        scored = [item for item in scored if item[0] > 0]
+        if not scored:
+            return self._directional(
+                input,
+                fallback_reason="dsld_search_unranked",
+                confidence_score=0.42,
+            )
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        top_score, top_hit = scored[0]
+        next_score = scored[1][0] if len(scored) > 1 else 0.0
+        if top_score < 0.70 or top_score < next_score + 0.08:
+            return self._directional(
+                input,
+                fallback_reason="dsld_search_low_confidence",
+                confidence_score=min(0.56, max(top_score, 0.44)),
+            )
+
+        label = self._fetch_label(str(top_hit.get("_id") or "").strip())
+        if label is None:
+            return self._directional(
+                input,
+                fallback_reason="dsld_label_fetch_failed",
+                confidence_score=0.40,
+            )
+
+        confidence_level = ConfidenceLevel.high if top_score >= 0.84 else ConfidenceLevel.medium
+        product = self._factory.dsld_product_to_candidate(
+            label,
+            resolution_confidence=top_score,
+            headline="Resolved from NIH DSLD supplement labels.",
+            search_hit=top_hit,
+        )
+        return ResolverResult(
+            product=product,
+            confidence=confidence_level,
+            resolution_confidence=top_score,
+            is_directional=False,
+            identity_source=ProductResolutionSource.nihDSLD,
+            fact_sources=(ProductResolutionSource.nihDSLD,),
+        )
+
+    def _fetch_label(self, label_id: str) -> dict[str, Any] | None:
+        if not label_id:
+            return None
+        try:
+            payload = self._fetch_json(
+                f"{self._settings.nih_dsld_base_url.rstrip('/')}/label/{quote_plus(label_id)}"
+            )
+        except (HTTPError, URLError, TimeoutError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _directional(
+        self,
+        input: ScanInput,
+        *,
+        fallback_reason: str,
+        confidence_score: float,
+    ) -> ResolverResult:
+        return self._factory.build_directional_result(
+            input,
+            fallback_reason=fallback_reason,
+            confidence_score=confidence_score,
+            source=ProductResolutionSource.agentInferred,
+        )
+
+    def _score_search_hit(
+        self,
+        hit: dict[str, Any],
+        query_tokens: set[str],
+        raw_query: str,
+    ) -> float:
+        source = hit.get("_source")
+        if not isinstance(source, dict):
+            return 0.0
+
+        name = _clean_text(source.get("fullName")) or ""
+        brand = _clean_text(source.get("brandName")) or ""
+        ingredient_text = " ".join(_dsld_search_hit_ingredient_text(source))
+        claim_text = " ".join(_dsld_search_hit_claim_text(source))
+        type_text = _clean_text((source.get("productType") or {}).get("langualCodeDescription")) or ""
+
+        name_tokens = _meaningful_tokens(name)
+        brand_tokens = _meaningful_tokens(brand)
+        ingredient_tokens = _meaningful_tokens(ingredient_text)
+        claim_tokens = _meaningful_tokens(" ".join(part for part in [claim_text, type_text] if part))
+
+        coverage = _token_overlap(query_tokens, name_tokens | brand_tokens | ingredient_tokens | claim_tokens)
+        name_overlap = _token_overlap(query_tokens, name_tokens)
+        ingredient_overlap = _token_overlap(query_tokens, ingredient_tokens)
+        claim_overlap = _token_overlap(query_tokens, claim_tokens)
+
+        normalized_query = _normalized_query_text(raw_query)
+        normalized_name = _normalized_query_text(name)
+        exact_bonus = 0.08 if normalized_query and normalized_name and (
+            normalized_query in normalized_name or normalized_name in normalized_query
+        ) else 0.0
+        brand_bonus = 0.03 if brand_tokens else 0.0
+
+        return min(
+            0.96,
+            coverage * 0.50
+            + name_overlap * 0.24
+            + ingredient_overlap * 0.16
+            + claim_overlap * 0.07
+            + exact_bonus
+            + brand_bonus,
+        )
+
+
 class _USDANutritionEnrichmentStep:
     def __init__(
         self,
@@ -588,6 +904,10 @@ def _append_fact_source(
     return (*sources, source)
 
 
+def _normalize_barcode(value: Any) -> str:
+    return re.sub(r"\D+", "", str(value or ""))
+
+
 def _clean_text(value: Any) -> str | None:
     if value is None:
         return None
@@ -626,6 +946,107 @@ def _lookup_tokens(name: str, brand: str, ingredients_text: str | None, categori
         [name, brand, ingredients_text or "", " ".join(item.split(":")[-1] for item in categories_tags)]
     )
     return sorted(_meaningful_tokens(combined))[:24]
+
+
+def _dsld_ingredient_lines(label_payload: dict[str, Any], *, search_hit: dict[str, Any] | None = None) -> list[str]:
+    ingredients: list[str] = []
+
+    for row in label_payload.get("ingredientRows") or []:
+        if not isinstance(row, dict):
+            continue
+        name = _clean_text(row.get("name"))
+        notes = _clean_text(row.get("notes"))
+        if name:
+            ingredients.append(name)
+        if notes:
+            ingredients.append(notes)
+
+    other_ingredients = label_payload.get("otheringredients")
+    if isinstance(other_ingredients, dict):
+        for row in other_ingredients.get("ingredients") or []:
+            if not isinstance(row, dict):
+                continue
+            name = _clean_text(row.get("name"))
+            if name:
+                ingredients.append(name)
+
+    if not ingredients and isinstance(search_hit, dict):
+        source = search_hit.get("_source")
+        if isinstance(source, dict):
+            ingredients.extend(_dsld_search_hit_ingredient_text(source))
+
+    deduped = list(dict.fromkeys(item for item in ingredients if item))
+    return deduped[:12]
+
+
+def _dsld_statement_text(label_payload: dict[str, Any]) -> str:
+    notes: list[str] = []
+    for statement in label_payload.get("statements") or []:
+        if not isinstance(statement, dict):
+            continue
+        note = _clean_text(statement.get("notes"))
+        if note:
+            notes.append(note)
+    return " ".join(dict.fromkeys(notes))
+
+
+def _dsld_claims(label_payload: dict[str, Any], *, search_hit: dict[str, Any] | None = None) -> list[str]:
+    claims: list[str] = []
+
+    for claim in label_payload.get("claims") or []:
+        if not isinstance(claim, dict):
+            continue
+        description = _clean_text(claim.get("langualCodeDescription"))
+        if description:
+            claims.append(description)
+
+    for statement in label_payload.get("statements") or []:
+        if not isinstance(statement, dict):
+            continue
+        statement_type = (_clean_text(statement.get("type")) or "").lower()
+        notes = _clean_text(statement.get("notes"))
+        if not notes:
+            continue
+        if any(keyword in statement_type for keyword in ["suggested", "usage", "direction", "claim"]):
+            claims.append(notes)
+        elif "general statements" in statement_type and len(claims) < 4:
+            claims.append(notes)
+
+    if not claims and isinstance(search_hit, dict):
+        source = search_hit.get("_source")
+        if isinstance(source, dict):
+            claims.extend(_dsld_search_hit_claim_text(source))
+
+    return list(dict.fromkeys(claims))[:6]
+
+
+def _dsld_search_hit_ingredient_text(source: dict[str, Any]) -> list[str]:
+    items: list[str] = []
+    for ingredient in source.get("allIngredients") or []:
+        if not isinstance(ingredient, dict):
+            continue
+        name = _clean_text(ingredient.get("name"))
+        notes = _clean_text(ingredient.get("notes"))
+        if name:
+            items.append(name)
+        if notes:
+            items.append(notes)
+    return items
+
+
+def _dsld_search_hit_claim_text(source: dict[str, Any]) -> list[str]:
+    items: list[str] = []
+    for claim in source.get("claims") or []:
+        if not isinstance(claim, dict):
+            continue
+        description = _clean_text(claim.get("langualCodeDescription"))
+        if description:
+            items.append(description)
+    return items
+
+
+def _normalized_query_text(value: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
 
 
 def _directional_name(input: ScanInput, raw_text: str) -> str:
