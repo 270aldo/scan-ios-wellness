@@ -89,7 +89,7 @@ struct HomeView: View {
         case .askStrategist:
             "Open scan"
         default:
-            "Ask strategist"
+            "Strategist"
         }
     }
 

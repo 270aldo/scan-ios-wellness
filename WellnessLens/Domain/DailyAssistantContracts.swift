@@ -291,6 +291,7 @@ struct CheckInEvent: Codable, Hashable, Identifiable {
 struct FavoriteItem: Codable, Hashable, Identifiable {
     var id: String
     var scanEventID: String
+    var relatedProductID: String? = nil
     var createdAt: Date
     var title: String
     var summary: String
@@ -298,6 +299,7 @@ struct FavoriteItem: Codable, Hashable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id = "favorite_id"
         case scanEventID = "scan_event_id"
+        case relatedProductID = "related_product_id"
         case createdAt = "created_at"
         case title
         case summary
@@ -421,10 +423,6 @@ struct PantryItem: Codable, Hashable, Identifiable {
 
     var isArchived: Bool {
         archivedAt != nil
-    }
-
-    var dedupeKey: String {
-        relatedProductID?.lowercased() ?? title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
 

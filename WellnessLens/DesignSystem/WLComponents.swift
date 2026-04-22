@@ -831,7 +831,6 @@ struct WLPrimaryButtonStyle: ButtonStyle {
             .font(WLTypography.bodyEmphasis)
             .foregroundStyle(Color.white)
             .padding(.horizontal, WLSpacing.m)
-            .padding(.vertical, 14)
             .background(
                 Capsule(style: .continuous)
                     .fill(
@@ -861,7 +860,6 @@ struct WLSecondaryButtonStyle: ButtonStyle {
             .font(WLTypography.bodyEmphasis)
             .foregroundStyle(WLPalette.ink)
             .padding(.horizontal, WLSpacing.m)
-            .padding(.vertical, 12)
             .background(
                 Capsule(style: .continuous)
                     .fill(Color.white.opacity(configuration.isPressed ? 0.78 : 0.90))
@@ -881,7 +879,6 @@ struct WLUtilityButtonStyle: ButtonStyle {
             .font(WLTypography.captionStrong)
             .foregroundStyle(WLPalette.ink)
             .padding(.horizontal, WLSpacing.s)
-            .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.white.opacity(configuration.isPressed ? 0.74 : 0.88))
@@ -980,7 +977,7 @@ struct WLSecondaryButton: View {
         case .heroSecondary:
             if #available(iOS 26, *), policy.isEnabled {
                 Button(action: action) {
-                    label(foreground: .white)
+                    label(foreground: WLPalette.ink)
                 }
                 .buttonStyle(GlassButtonStyle())
             } else {
@@ -1031,7 +1028,7 @@ struct WLUtilityButton: View {
             }
             .font(WLTypography.captionStrong)
             .foregroundStyle(WLPalette.ink)
-            .frame(maxWidth: width == .fill ? .infinity : nil, minHeight: 36)
+            .frame(maxWidth: width == .fill ? .infinity : nil, minHeight: 44)
         }
         .buttonStyle(WLUtilityButtonStyle())
     }

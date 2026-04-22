@@ -35,7 +35,7 @@ struct StoredAppState: Codable {
 
     static func fresh() -> StoredAppState {
         StoredAppState(
-            schemaVersion: 6,
+            schemaVersion: 7,
             localProfileID: UUID().uuidString,
             hasCompletedOnboarding: false,
             onboardingDraft: nil,
@@ -250,14 +250,58 @@ struct StoredAppState: Codable {
         }
 
         if favoriteItems.isEmpty {
-            favoriteItems = history.filter(\.isFavorite).map {
-                FavoriteItem(
+            favoriteItems = history.filter(\.isFavorite).map { record in
+                let matchingEvent = scanEvents.first(where: { $0.id == record.id.uuidString })
+                return FavoriteItem(
                     id: UUID().uuidString,
-                    scanEventID: $0.id.uuidString,
-                    createdAt: $0.createdAt,
-                    title: $0.analysis.resolvedProduct.name,
-                    summary: $0.analysis.overallSummary
+                    scanEventID: record.id.uuidString,
+                    relatedProductID: matchingEvent?.preferredRelatedProductID,
+                    createdAt: record.createdAt,
+                    title: record.analysis.resolvedProduct.name,
+                    summary: record.analysis.overallSummary
                 )
+            }
+        }
+
+        if schemaVersion < 7 {
+            let scanEventsByID = Dictionary(uniqueKeysWithValues: scanEvents.map { ($0.id, $0) })
+
+            favoriteItems = favoriteItems.map { favorite in
+                guard let relatedProductID = favorite.relatedProductID?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    relatedProductID.isEmpty == false else {
+                    guard let event = scanEventsByID[favorite.scanEventID] else {
+                        return favorite
+                    }
+                    var updated = favorite
+                    updated.relatedProductID = event.preferredRelatedProductID
+                    return updated
+                }
+
+                var updated = favorite
+                updated.relatedProductID = relatedProductID
+                return updated
+            }
+
+            pantryItems = pantryItems.map { item in
+                guard let sourceScanID = item.sourceScanID,
+                      let event = scanEventsByID[sourceScanID] else {
+                    return item
+                }
+
+                let normalizedRelatedProductID = item.relatedProductID?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let legacyProductID = event.legacyAnalysis.resolvedProduct.id
+
+                guard normalizedRelatedProductID == nil
+                    || normalizedRelatedProductID?.isEmpty == true
+                    || normalizedRelatedProductID == legacyProductID else {
+                    return item
+                }
+
+                var updated = item
+                updated.relatedProductID = event.preferredRelatedProductID
+                return updated
             }
         }
 

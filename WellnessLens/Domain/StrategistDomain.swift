@@ -501,6 +501,7 @@ struct Experiment: Codable, Hashable, Identifiable {
     var title: String
     var hypothesis: String
     var status: ExperimentStatus
+    var relatedProductID: String? = nil
     var relatedGoal: UserGoal?
     var createdAt: Date
     var lastUpdatedAt: Date

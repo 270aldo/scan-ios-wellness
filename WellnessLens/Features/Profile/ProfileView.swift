@@ -52,7 +52,7 @@ struct ProfileView: View {
 
                         Spacer(minLength: WLSpacing.s)
 
-                        WLUtilityButton(title: "Edit", systemImage: "slider.horizontal.3") {
+                        WLSecondaryButton(title: "Edit profile", systemImage: "slider.horizontal.3") {
                             showProfileEditor = true
                         }
                     }
@@ -64,7 +64,7 @@ struct ProfileView: View {
                             systemImage: "person.text.rectangle"
                         )
 
-                        WLUtilityButton(title: "Edit", systemImage: "slider.horizontal.3") {
+                        WLSecondaryButton(title: "Edit profile", systemImage: "slider.horizontal.3") {
                             showProfileEditor = true
                         }
                     }

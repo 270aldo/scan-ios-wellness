@@ -256,6 +256,18 @@ final class AppModel {
             .sorted(by: { $0.lastUpdatedAt > $1.lastUpdatedAt })
     }
 
+    private var productGraphIndex: ProductGraphIndex {
+        ProductGraphIndex(
+            scanEvents: scanEvents,
+            scanVerdicts: scanVerdicts,
+            favoriteItems: favoriteItems,
+            routines: routines,
+            memoryItems: memoryItems,
+            scanDecisions: scanDecisions,
+            pantryItems: pantryItems
+        )
+    }
+
     var pantrySuggestions: [PantrySuggestion] {
         rootOrchestrator.pantrySuggestions(
             pantryItems: visiblePantryItems,
@@ -674,12 +686,14 @@ final class AppModel {
         let analysis = history[index].analysis
         let favoriteID = "favorite-\(recordID.uuidString)"
         let referenceID = favoriteReferenceID(for: analysis, fallbackRecordID: recordID)
+        let productReference = productReference(for: analysis)
         history[index].isFavorite.toggle()
         if history[index].isFavorite {
             upsertFavoriteItem(
                 FavoriteItem(
                     id: favoriteID,
                     scanEventID: referenceID,
+                    relatedProductID: productReference.graphID,
                     createdAt: .now,
                     title: analysis.resolvedProduct.name,
                     summary: analysis.overallSummary
@@ -910,9 +924,11 @@ final class AppModel {
     }
 
     func recordScanDecision(_ kind: ScanDecisionKind, for analysis: ScanAnalysis) {
+        let productReference = productReference(for: analysis)
+        let productGraphKey = productReference.graphID
         let decision = ScanDecision(
             createdAt: .now,
-            productID: analysis.resolvedProduct.id,
+            productID: productGraphKey,
             productName: analysis.resolvedProduct.name,
             kind: kind,
             note: decisionNote(for: kind, analysis: analysis),
@@ -926,19 +942,20 @@ final class AppModel {
         case .saveToRoutine:
             upsertRoutine(
                 RoutineItem(
-                    productID: analysis.resolvedProduct.id,
+                    productID: productGraphKey,
                     productName: analysis.resolvedProduct.name,
                     cadenceSummary: "Keep as a likely repeat choice",
                     note: "Saved after a supportive read.",
                     createdAt: .now
-                )
+                ),
+                matching: productReference
             )
             upsertMemoryItem(
                 MemoryItem(
                     kind: .staple,
                     title: "\(analysis.resolvedProduct.name) became a staple",
                     summary: analysis.overallSummary,
-                    relatedProductID: analysis.resolvedProduct.id,
+                    relatedProductID: productGraphKey,
                     relatedProductName: analysis.resolvedProduct.name,
                     createdAt: .now,
                     lastReferencedAt: .now
@@ -950,7 +967,7 @@ final class AppModel {
                     kind: .avoid,
                     title: "Avoid for now",
                     summary: "\(analysis.resolvedProduct.name) is currently a softer fit for your week.",
-                    relatedProductID: analysis.resolvedProduct.id,
+                    relatedProductID: productGraphKey,
                     relatedProductName: analysis.resolvedProduct.name,
                     createdAt: .now,
                     lastReferencedAt: .now
@@ -982,6 +999,7 @@ final class AppModel {
                     title: "Retest \(analysis.resolvedProduct.name)",
                     hypothesis: "A second read will show whether this is a one-off or a repeat friction point.",
                     status: .active,
+                    relatedProductID: productGraphKey,
                     relatedGoal: userProfile.userContext.goals.first,
                     createdAt: .now,
                     lastUpdatedAt: .now
@@ -1006,6 +1024,7 @@ final class AppModel {
         guard let record = history.first(where: { $0.analysis.id == analysis.id }) else { return }
         let favoriteID = "favorite-\(record.id.uuidString)"
         let referenceID = favoriteReferenceID(for: analysis, fallbackRecordID: record.id)
+        let productReference = productReference(for: analysis)
         if let index = history.firstIndex(where: { $0.id == record.id }) {
             history[index].isFavorite = true
         }
@@ -1013,6 +1032,7 @@ final class AppModel {
             FavoriteItem(
                 id: favoriteID,
                 scanEventID: referenceID,
+                relatedProductID: productReference.graphID,
                 createdAt: .now,
                 title: analysis.resolvedProduct.name,
                 summary: analysis.overallSummary
@@ -1030,11 +1050,12 @@ final class AppModel {
     func saveToPantry(from analysis: ScanAnalysis) {
         let title = analysis.resolvedProduct.name
         let relatedScan = scanEvent(for: analysis)
+        let productReference = relatedScan?.productReference ?? analysis.productReference(scanEventID: relatedScan?.id)
         let pantryItem = PantryItem(
             id: "pantry-manual-\(relatedScan?.id ?? analysis.id.uuidString)",
             title: title,
             summary: relatedScan?.analysis.whyToday.first ?? analysis.overallSummary,
-            relatedProductID: analysis.resolvedProduct.id,
+            relatedProductID: productReference.graphID,
             sourceKind: .manualSave,
             sourceScanID: relatedScan?.id,
             createdAt: .now,
@@ -1051,26 +1072,15 @@ final class AppModel {
     }
 
     func pantryAnalysis(for item: PantryItem) -> ScanAnalysis? {
-        if let sourceScanID = item.sourceScanID {
-            if let event = scanEvents.first(where: { $0.id == sourceScanID }) {
-                return event.legacyAnalysis
-            }
-
-            if let recordID = UUID(uuidString: sourceScanID),
-               let record = history.first(where: { $0.id == recordID }) {
-                return record.analysis
-            }
+        if let analysis = productGraphIndex.analysis(
+            for: item.productReference,
+            fallbackSourceScanID: item.sourceScanID,
+            history: history
+        ) {
+            return analysis
         }
 
-        if let relatedProductID = item.relatedProductID {
-            if let event = scanEvents.first(where: { $0.legacyAnalysis.resolvedProduct.id == relatedProductID }) {
-                return event.legacyAnalysis
-            }
-
-            if let record = history.first(where: { $0.analysis.resolvedProduct.id == relatedProductID }) {
-                return record.analysis
-            }
-        }
+        guard item.productReference == nil else { return nil }
 
         return history.first(where: {
             $0.analysis.resolvedProduct.name.localizedCaseInsensitiveCompare(item.title) == .orderedSame
@@ -1087,10 +1097,21 @@ final class AppModel {
             return true
         }
 
-        if let relatedProductID = item.relatedProductID,
-           routines.contains(where: { $0.productID == relatedProductID }) {
+        if let analysis = productGraphIndex.analysis(
+            for: item.productReference,
+            fallbackSourceScanID: item.sourceScanID,
+            history: history
+        ) {
+            if productGraphIndex.hasRoutine(matching: productReference(for: analysis)) {
+                return true
+            }
+        }
+
+        if productGraphIndex.hasRoutine(matching: item.productReference) {
             return true
         }
+
+        guard item.productReference == nil else { return false }
 
         return routines.contains(where: {
             $0.productName.localizedCaseInsensitiveCompare(item.title) == .orderedSame
@@ -1105,12 +1126,12 @@ final class AppModel {
             return
         }
 
-        guard let relatedProductID = item.relatedProductID else { return }
+        guard let productReference = item.productReference else { return }
 
         scanDecisions.insert(
             ScanDecision(
                 createdAt: .now,
-                productID: relatedProductID,
+                productID: productReference.graphID,
                 productName: item.title,
                 kind: .saveToRoutine,
                 note: "Promoted from Pantry to keep a stronger repeat choice easy.",
@@ -1121,19 +1142,20 @@ final class AppModel {
         )
         upsertRoutine(
             RoutineItem(
-                productID: relatedProductID,
+                productID: productReference.graphID,
                 productName: item.title,
                 cadenceSummary: "Keep as an easy pantry default",
                 note: item.summary,
                 createdAt: .now
-            )
+            ),
+            matching: productReference
         )
         upsertMemoryItem(
             MemoryItem(
                 kind: .staple,
                 title: "\(item.title) became a pantry default",
                 summary: item.summary,
-                relatedProductID: relatedProductID,
+                relatedProductID: productReference.graphID,
                 relatedProductName: item.title,
                 createdAt: .now,
                 lastReferencedAt: .now
@@ -1770,7 +1792,7 @@ final class AppModel {
     private func persist() {
         services.store.save(
             StoredAppState(
-                schemaVersion: 6,
+                schemaVersion: 7,
                 localProfileID: localProfileID,
                 hasCompletedOnboarding: hasCompletedOnboarding,
                 onboardingDraft: onboardingDraft,
@@ -1913,7 +1935,7 @@ final class AppModel {
                     kind: .strategistTakeaway,
                     title: "Strategist takeaway",
                     summary: reply.message,
-                    relatedProductID: linkedAnalysis?.resolvedProduct.id,
+                    relatedProductID: linkedAnalysis.map { productReference(for: $0).graphID },
                     relatedProductName: linkedAnalysis?.resolvedProduct.name,
                     createdAt: reply.createdAt,
                     lastReferencedAt: reply.createdAt
@@ -1968,13 +1990,15 @@ final class AppModel {
         guard linkedEvents.isEmpty == false else { return [] }
 
         let timestamp = checkInEvent.timestamp
-        let linkedProductIDs = Set(linkedEvents.map(\.legacyAnalysis.resolvedProduct.id))
         var resolvedDecisionIDs = [ScanDecision.ID]()
 
         for index in scanDecisions.indices {
             guard scanDecisions[index].resolvedAt == nil else { continue }
             guard scanDecisions[index].kind.keepsLoopOpen else { continue }
-            guard linkedProductIDs.contains(scanDecisions[index].productID) else { continue }
+            guard let decisionReference = scanDecisions[index].productReference else { continue }
+            guard linkedEvents.contains(where: { $0.productReference.overlaps(with: decisionReference) }) else {
+                continue
+            }
 
             scanDecisions[index].resolvedAt = timestamp
             resolvedDecisionIDs.append(scanDecisions[index].id)
@@ -1982,9 +2006,16 @@ final class AppModel {
 
         for index in experiments.indices {
             guard experiments[index].status == .active else { continue }
-            let experimentTitle = experiments[index].title
-            let matchesLinkedProduct = linkedEvents.contains { event in
-                experimentTitle.localizedCaseInsensitiveContains(event.legacyAnalysis.resolvedProduct.name)
+            let matchesLinkedProduct: Bool
+            if let experimentReference = experiments[index].productReference {
+                matchesLinkedProduct = linkedEvents.contains { event in
+                    event.productReference.overlaps(with: experimentReference)
+                }
+            } else {
+                let experimentTitle = experiments[index].title
+                matchesLinkedProduct = linkedEvents.contains { event in
+                    experimentTitle.localizedCaseInsensitiveContains(event.legacyAnalysis.resolvedProduct.name)
+                }
             }
             guard matchesLinkedProduct else { continue }
             experiments[index].status = .learned
@@ -1997,7 +2028,7 @@ final class AppModel {
 
         for linkedEvent in linkedEvents {
             let analysis = linkedEvent.legacyAnalysis
-            let productID = analysis.resolvedProduct.id
+            let productID = linkedEvent.productReference.graphID
             let productName = analysis.resolvedProduct.name
 
             if readHelpful {
@@ -2013,7 +2044,10 @@ final class AppModel {
                     )
                 )
 
-                if let routineIndex = routines.firstIndex(where: { $0.productID == productID }) {
+                if let routineIndex = routines.firstIndex(where: {
+                    guard let routineReference = $0.productReference else { return false }
+                    return linkedEvent.productReference.overlaps(with: routineReference)
+                }) {
                     routines[routineIndex].cadenceSummary = "Confirmed by a recent body-signal check-in"
                     routines[routineIndex].note = "This still looked supportive after a real-world follow-up."
                 }
@@ -2035,6 +2069,7 @@ final class AppModel {
                         title: "Retest \(productName)",
                         hypothesis: "Use one calmer, cleaner repeat before letting \(productName) earn routine space.",
                         status: .active,
+                        relatedProductID: productID,
                         relatedGoal: userProfile.userContext.goals.first,
                         createdAt: timestamp,
                         lastUpdatedAt: timestamp
@@ -2046,8 +2081,19 @@ final class AppModel {
         return resolvedDecisionIDs
     }
 
-    private func upsertRoutine(_ routine: RoutineItem) {
-        if let index = routines.firstIndex(where: { $0.productID == routine.productID }) {
+    private func upsertRoutine(_ routine: RoutineItem, matching reference: ProductReference? = nil) {
+        if let index = routines.firstIndex(where: {
+            guard let existingReference = $0.productReference else {
+                return $0.productID == routine.productID
+            }
+            if let routineReference = routine.productReference, existingReference.graphID == routineReference.graphID {
+                return true
+            }
+            if let reference {
+                return existingReference.overlaps(with: reference)
+            }
+            return false
+        }) {
             routines[index] = routine
         } else {
             routines.insert(routine, at: 0)
@@ -2055,7 +2101,16 @@ final class AppModel {
     }
 
     private func upsertExperiment(_ experiment: Experiment) {
-        if let index = experiments.firstIndex(where: { $0.title == experiment.title }) {
+        let experimentReference = experiment.productReference
+        if let index = experiments.firstIndex(where: {
+            if let experimentReference {
+                if let existingReference = $0.productReference {
+                    return existingReference.overlaps(with: experimentReference)
+                }
+                return $0.title == experiment.title
+            }
+            return $0.title == experiment.title
+        }) {
             experiments[index] = experiment
         } else {
             experiments.insert(experiment, at: 0)
@@ -2102,6 +2157,13 @@ final class AppModel {
 
     private func favoriteReferenceID(for analysis: ScanAnalysis, fallbackRecordID: UUID) -> String {
         scanEvent(for: analysis)?.id ?? fallbackRecordID.uuidString
+    }
+
+    private func productReference(for analysis: ScanAnalysis) -> ProductReference {
+        if let event = scanEvent(for: analysis) {
+            return event.productReference
+        }
+        return analysis.productReference()
     }
 
     private func upsertConsentRecord(_ record: ConsentRecord) {
