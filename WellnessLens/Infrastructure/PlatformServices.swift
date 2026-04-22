@@ -5,6 +5,16 @@ import SwiftUI
 import UIKit
 @preconcurrency import Vision
 
+struct ScanProductCorrection: Codable, Hashable, Identifiable {
+    var id: String { scanEventID }
+    var scanEventID: String
+    var targetScanEventID: String
+    var targetProductID: String
+    var targetProductName: String
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 struct StoredAppState: Codable {
     var schemaVersion: Int
     var localProfileID: String
@@ -15,6 +25,7 @@ struct StoredAppState: Codable {
     var checkIns: [CheckInEntry]
     var scanEvents: [ScanEvent]
     var scanVerdicts: [StoredScanVerdict]
+    var scanProductCorrections: [ScanProductCorrection]
     var checkInEvents: [CheckInEvent]
     var favoriteItems: [FavoriteItem]
     var consentRecords: [ConsentRecord]
@@ -35,7 +46,7 @@ struct StoredAppState: Codable {
 
     static func fresh() -> StoredAppState {
         StoredAppState(
-            schemaVersion: 6,
+            schemaVersion: 7,
             localProfileID: UUID().uuidString,
             hasCompletedOnboarding: false,
             onboardingDraft: nil,
@@ -44,6 +55,7 @@ struct StoredAppState: Codable {
             checkIns: [],
             scanEvents: [],
             scanVerdicts: [],
+            scanProductCorrections: [],
             checkInEvents: [],
             favoriteItems: [],
             consentRecords: [],
@@ -78,6 +90,7 @@ struct StoredAppState: Codable {
         case checkIns
         case scanEvents
         case scanVerdicts
+        case scanProductCorrections
         case checkInEvents
         case favoriteItems
         case consentRecords
@@ -107,6 +120,7 @@ struct StoredAppState: Codable {
         checkIns: [CheckInEntry],
         scanEvents: [ScanEvent],
         scanVerdicts: [StoredScanVerdict],
+        scanProductCorrections: [ScanProductCorrection],
         checkInEvents: [CheckInEvent],
         favoriteItems: [FavoriteItem],
         consentRecords: [ConsentRecord],
@@ -134,6 +148,7 @@ struct StoredAppState: Codable {
         self.checkIns = checkIns
         self.scanEvents = scanEvents
         self.scanVerdicts = scanVerdicts
+        self.scanProductCorrections = scanProductCorrections
         self.checkInEvents = checkInEvents
         self.favoriteItems = favoriteItems
         self.consentRecords = consentRecords
@@ -167,6 +182,7 @@ struct StoredAppState: Codable {
         checkIns = decodedCheckIns
         let decodedScanEvents = try container.decodeIfPresent([ScanEvent].self, forKey: .scanEvents) ?? []
         let decodedScanVerdicts = try container.decodeIfPresent([StoredScanVerdict].self, forKey: .scanVerdicts) ?? []
+        scanProductCorrections = try container.decodeIfPresent([ScanProductCorrection].self, forKey: .scanProductCorrections) ?? []
         let decodedCheckInEvents = try container.decodeIfPresent([CheckInEvent].self, forKey: .checkInEvents) ?? []
         favoriteItems = try container.decodeIfPresent([FavoriteItem].self, forKey: .favoriteItems) ?? []
         consentRecords = try container.decodeIfPresent([ConsentRecord].self, forKey: .consentRecords) ?? []
@@ -288,6 +304,7 @@ struct StoredAppState: Codable {
         try container.encode(checkIns, forKey: .checkIns)
         try container.encode(scanEvents, forKey: .scanEvents)
         try container.encode(scanVerdicts, forKey: .scanVerdicts)
+        try container.encode(scanProductCorrections, forKey: .scanProductCorrections)
         try container.encode(checkInEvents, forKey: .checkInEvents)
         try container.encode(favoriteItems, forKey: .favoriteItems)
         try container.encode(consentRecords, forKey: .consentRecords)

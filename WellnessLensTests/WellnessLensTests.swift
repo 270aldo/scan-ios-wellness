@@ -448,6 +448,45 @@ final class WellnessLensTests: XCTestCase {
         return analysis
     }
 
+    private func makeDirectionalAnalysis(
+        source: ScanSource = .manualLabel,
+        confidence: ConfidenceLevel = .low
+    ) -> ScanAnalysis {
+        var analysis = makeAnalysis(barcode: "850000001", source: source, confidence: confidence)
+        analysis.resolvedProduct.id = "directional:test-scan"
+        analysis.resolvedProduct.name = "Directional label read"
+        analysis.resolvedProduct.brand = "Directional read"
+        analysis.resolvedProduct.barcode = nil
+        analysis.resolvedProduct.notes = [
+            "No exact packaged-food match was found yet.",
+            "Use this read directionally and rescan when a clearer barcode or label is available."
+        ]
+        analysis.resolvedProduct.resolution = ProductResolution(
+            canonicalProductID: nil,
+            source: .agentInferred,
+            confidence: 0.42,
+            nutritionSnapshot: nil,
+            isDirectional: true
+        )
+        analysis.resolvedProduct.resolutionSemantics = [.provisional, .directional, .lowConfidence]
+        return analysis
+    }
+
+    private func makeScanEvent(
+        analysis: ScanAnalysis,
+        input: ScanInput
+    ) -> ScanEvent {
+        RootOrchestrator().composeScanEvent(
+            input: input,
+            legacyAnalysis: analysis,
+            structuredAnalysis: nil,
+            localProfileID: "local-test-user",
+            recentScans: [],
+            recentCheckIns: [],
+            latencyMs: 90
+        )
+    }
+
     private func makeRemoteScanVerdictRequest(source: ScanSource = .manualBarcode) -> ScanVerdictRequest {
         let analysis = makeRemoteReadyAnalysis(source: source)
         let input = ScanInput(
@@ -1789,7 +1828,7 @@ final class WellnessLensTests: XCTestCase {
     }
 
     @MainActor
-    func testFollowUpCheckInClosesExperimentByStableProductIdentity() async throws {
+    func testFollowUpCheckInClosesExperimentByProductNameMatch() async throws {
         let analysis = makeRemoteReadyAnalysis()
         let model = AppModel(
             services: makeServices(
@@ -1801,10 +1840,9 @@ final class WellnessLensTests: XCTestCase {
         let event = try XCTUnwrap(model.scanEvents.first)
         model.experiments = [
             Experiment(
-                title: "Retest legacy title",
+                title: "Retest \(analysis.resolvedProduct.name)",
                 hypothesis: "Confirm the stronger packaged-food identity path.",
                 status: .active,
-                relatedProductID: analysis.resolvedProduct.stableIdentityKey,
                 relatedGoal: .steadyEnergy,
                 createdAt: .now,
                 lastUpdatedAt: .now
@@ -2021,6 +2059,247 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(content.provenanceTitle, "Directional inference")
         XCTAssertTrue(content.metadataSummary.contains("Directional label read"))
         XCTAssertNotNil(content.guidanceNote)
+    }
+
+    func testAnalysisResolutionTrustContentMarksExactProviderBackedMatch() {
+        let analysis = makeRemoteReadyAnalysis()
+        let verdict = analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+
+        let content = AnalysisResolutionTrustContent.build(
+            analysis: analysis,
+            verdict: verdict,
+            correction: nil
+        )
+
+        XCTAssertEqual(content.statusTitle, "Exact provider-backed match")
+        XCTAssertEqual(content.provenanceTitle, "Open Food Facts")
+        XCTAssertTrue(content.semanticTitles.contains("Exact match"))
+        XCTAssertTrue(content.semanticTitles.contains("Provider-backed"))
+    }
+
+    func testAnalysisResolutionTrustContentMarksUSDANutrientEnrichment() {
+        var analysis = makeRemoteReadyAnalysis()
+        analysis.resolvedProduct.notes.append("Nutrient snapshot enriched with USDA FoodData Central.")
+        let verdict = analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+
+        let content = AnalysisResolutionTrustContent.build(
+            analysis: analysis,
+            verdict: verdict,
+            correction: nil
+        )
+
+        XCTAssertEqual(content.statusTitle, "Exact match + nutrients")
+        XCTAssertTrue(content.summary.contains("USDA FoodData Central"))
+    }
+
+    func testAnalysisResolutionTrustContentMarksDirectionalLowConfidenceRead() {
+        let analysis = makeDirectionalAnalysis()
+        let verdict = analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+
+        let content = AnalysisResolutionTrustContent.build(
+            analysis: analysis,
+            verdict: verdict,
+            correction: nil
+        )
+
+        XCTAssertEqual(content.statusTitle, "Directional read")
+        XCTAssertTrue(content.semanticTitles.contains("Directional"))
+        XCTAssertTrue(content.semanticTitles.contains("Thin input"))
+        XCTAssertEqual(content.provenanceTitle, "Directional inference")
+    }
+
+    func testAnalysisResolutionTrustContentMarksUserEditedCorrection() {
+        var analysis = makeRemoteReadyAnalysis()
+        analysis.resolvedProduct.resolution?.source = .userEdited
+        analysis.resolvedProduct.resolutionSemantics = [.canonical, .providerBacked]
+        let verdict = analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+        let correction = ScanProductCorrection(
+            scanEventID: "scan-source",
+            targetScanEventID: "scan-target",
+            targetProductID: analysis.resolvedProduct.id,
+            targetProductName: analysis.resolvedProduct.name,
+            createdAt: .now,
+            updatedAt: .now
+        )
+
+        let content = AnalysisResolutionTrustContent.build(
+            analysis: analysis,
+            verdict: verdict,
+            correction: correction
+        )
+
+        XCTAssertEqual(content.statusTitle, "Corrected identity")
+        XCTAssertEqual(content.provenanceTitle, "User edited")
+        XCTAssertEqual(content.correctionNote, "Local correction is using \(analysis.resolvedProduct.name).")
+    }
+
+    func testStoredAppStatePersistsAndReloadsScanProductCorrections() throws {
+        var state = StoredAppState.fresh()
+        state.scanProductCorrections = [
+            ScanProductCorrection(
+                scanEventID: "scan-source",
+                targetScanEventID: "scan-target",
+                targetProductID: "off:target",
+                targetProductName: "Stable Yogurt",
+                createdAt: .now,
+                updatedAt: .now
+            )
+        ]
+
+        let data = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(StoredAppState.self, from: data)
+
+        XCTAssertEqual(decoded.schemaVersion, 7)
+        XCTAssertEqual(decoded.scanProductCorrections.count, 1)
+        XCTAssertEqual(decoded.scanProductCorrections.first?.targetProductName, "Stable Yogurt")
+    }
+
+    @MainActor
+    func testManualCorrectionTargetsExcludeDirectionalAndLowConfidenceCandidates() {
+        let sourceAnalysis = makeDirectionalAnalysis()
+        let stableAnalysis = makeRemoteReadyAnalysis()
+        let unstableTarget = makeDirectionalAnalysis()
+
+        let sourceEvent = makeScanEvent(
+            analysis: sourceAnalysis,
+            input: ScanInput(
+                sourceType: .manualLabel,
+                barcode: nil,
+                capturedImageRef: nil,
+                rawText: "collagen, vanilla",
+                productTypeHint: .food,
+                locale: "en_US"
+            )
+        )
+        let stableEvent = makeScanEvent(
+            analysis: stableAnalysis,
+            input: ScanInput(
+                sourceType: .manualBarcode,
+                barcode: stableAnalysis.resolvedProduct.barcode,
+                capturedImageRef: nil,
+                rawText: nil,
+                productTypeHint: .food,
+                locale: "en_US"
+            )
+        )
+        let unstableEvent = makeScanEvent(
+            analysis: unstableTarget,
+            input: ScanInput(
+                sourceType: .manualLabel,
+                barcode: nil,
+                capturedImageRef: nil,
+                rawText: "ambiguous label",
+                productTypeHint: .food,
+                locale: "en_US"
+            )
+        )
+
+        let store = InMemoryStore(snapshot: .fresh())
+        store.snapshot.scanEvents = [sourceEvent, stableEvent, unstableEvent]
+        store.snapshot.scanVerdicts = [
+            StoredScanVerdict(scanEventID: sourceEvent.id, verdict: sourceEvent.analysis.lilaVerdict(fallbackAnalysis: sourceAnalysis, context: UserContext.starter.lilaContext()), createdAt: sourceEvent.timestamp),
+            StoredScanVerdict(scanEventID: stableEvent.id, verdict: stableEvent.analysis.lilaVerdict(fallbackAnalysis: stableAnalysis, context: UserContext.starter.lilaContext()), createdAt: stableEvent.timestamp),
+            StoredScanVerdict(scanEventID: unstableEvent.id, verdict: unstableEvent.analysis.lilaVerdict(fallbackAnalysis: unstableTarget, context: UserContext.starter.lilaContext()), createdAt: unstableEvent.timestamp),
+        ]
+
+        let model = AppModel(services: makeServices(store: store))
+        let targets = model.manualCorrectionTargets(for: sourceAnalysis)
+
+        XCTAssertEqual(targets.count, 1)
+        XCTAssertEqual(targets.first?.targetScanEventID, stableEvent.id)
+        XCTAssertEqual(targets.first?.targetProductName, stableAnalysis.resolvedProduct.name)
+    }
+
+    @MainActor
+    func testApplyingManualCorrectionRecomposesAnalysisEnvelopeAndVerdict() {
+        let sourceAnalysis = makeDirectionalAnalysis()
+        let stableAnalysis = makeRemoteReadyAnalysis()
+
+        let sourceEvent = makeScanEvent(
+            analysis: sourceAnalysis,
+            input: ScanInput(
+                sourceType: .manualLabel,
+                barcode: nil,
+                capturedImageRef: nil,
+                rawText: "collagen, vanilla",
+                productTypeHint: .food,
+                locale: "en_US"
+            )
+        )
+        let stableEvent = makeScanEvent(
+            analysis: stableAnalysis,
+            input: ScanInput(
+                sourceType: .manualBarcode,
+                barcode: stableAnalysis.resolvedProduct.barcode,
+                capturedImageRef: nil,
+                rawText: nil,
+                productTypeHint: .food,
+                locale: "en_US"
+            )
+        )
+
+        let store = InMemoryStore(snapshot: .fresh())
+        store.snapshot.scanEvents = [sourceEvent, stableEvent]
+        store.snapshot.scanVerdicts = [
+            StoredScanVerdict(scanEventID: sourceEvent.id, verdict: sourceEvent.analysis.lilaVerdict(fallbackAnalysis: sourceAnalysis, context: UserContext.starter.lilaContext()), createdAt: sourceEvent.timestamp),
+            StoredScanVerdict(scanEventID: stableEvent.id, verdict: stableEvent.analysis.lilaVerdict(fallbackAnalysis: stableAnalysis, context: UserContext.starter.lilaContext()), createdAt: stableEvent.timestamp),
+        ]
+
+        let model = AppModel(services: makeServices(store: store))
+        model.applyManualCorrection(for: sourceAnalysis, targetScanEventID: stableEvent.id)
+        let context = model.presentedAnalysisContext(for: sourceAnalysis)
+
+        XCTAssertEqual(context.analysis.id, sourceAnalysis.id)
+        XCTAssertEqual(context.analysis.resolvedProduct.name, stableAnalysis.resolvedProduct.name)
+        XCTAssertEqual(context.analysis.resolvedProduct.resolution?.source, .userEdited)
+        XCTAssertEqual(context.analysis.resolvedProduct.resolutionSemantics, stableAnalysis.resolvedProduct.resolvedResolutionSemantics)
+        XCTAssertEqual(context.structuredAnalysis?.resolvedProduct?.name, stableAnalysis.resolvedProduct.name)
+        XCTAssertEqual(context.verdict.resolvedProduct.name, stableAnalysis.resolvedProduct.name)
+    }
+
+    @MainActor
+    func testActionsAfterManualCorrectionUseTargetProductID() {
+        let sourceAnalysis = makeDirectionalAnalysis()
+        let stableAnalysis = makeRemoteReadyAnalysis()
+
+        let sourceEvent = makeScanEvent(
+            analysis: sourceAnalysis,
+            input: ScanInput(
+                sourceType: .manualLabel,
+                barcode: nil,
+                capturedImageRef: nil,
+                rawText: "collagen, vanilla",
+                productTypeHint: .food,
+                locale: "en_US"
+            )
+        )
+        let stableEvent = makeScanEvent(
+            analysis: stableAnalysis,
+            input: ScanInput(
+                sourceType: .manualBarcode,
+                barcode: stableAnalysis.resolvedProduct.barcode,
+                capturedImageRef: nil,
+                rawText: nil,
+                productTypeHint: .food,
+                locale: "en_US"
+            )
+        )
+
+        let store = InMemoryStore(snapshot: .fresh())
+        store.snapshot.scanEvents = [sourceEvent, stableEvent]
+        store.snapshot.scanVerdicts = [
+            StoredScanVerdict(scanEventID: sourceEvent.id, verdict: sourceEvent.analysis.lilaVerdict(fallbackAnalysis: sourceAnalysis, context: UserContext.starter.lilaContext()), createdAt: sourceEvent.timestamp),
+            StoredScanVerdict(scanEventID: stableEvent.id, verdict: stableEvent.analysis.lilaVerdict(fallbackAnalysis: stableAnalysis, context: UserContext.starter.lilaContext()), createdAt: stableEvent.timestamp),
+        ]
+
+        let model = AppModel(services: makeServices(store: store))
+        model.applyManualCorrection(for: sourceAnalysis, targetScanEventID: stableEvent.id)
+        let correctedAnalysis = model.presentedAnalysisContext(for: sourceAnalysis).analysis
+
+        model.recordScanDecision(.saveToRoutine, for: correctedAnalysis)
+
+        XCTAssertEqual(model.scanDecisions.first?.productID, stableAnalysis.resolvedProduct.id)
+        XCTAssertEqual(model.routines.first?.productID, stableAnalysis.resolvedProduct.id)
     }
 
     @MainActor

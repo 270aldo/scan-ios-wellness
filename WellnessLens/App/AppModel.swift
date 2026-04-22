@@ -97,6 +97,22 @@ enum ScanFeedback: Equatable {
     }
 }
 
+struct ScanProductCorrectionCandidate: Identifiable, Equatable {
+    var id: String { targetScanEventID }
+    let targetScanEventID: String
+    let targetProductID: String
+    let targetProductName: String
+    let sourceTitle: String
+    let confidence: ConfidenceLevel
+}
+
+struct PresentedScanAnalysisContext {
+    let analysis: ScanAnalysis
+    let structuredAnalysis: AnalysisEnvelope?
+    let verdict: LILADomain.ScanVerdict
+    let correction: ScanProductCorrection?
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -114,6 +130,7 @@ final class AppModel {
     var checkIns: [CheckInEntry]
     var scanEvents: [ScanEvent]
     var scanVerdicts: [StoredScanVerdict]
+    var scanProductCorrections: [ScanProductCorrection]
     var checkInEvents: [CheckInEvent]
     var favoriteItems: [FavoriteItem]
     var consentRecords: [ConsentRecord]
@@ -186,6 +203,7 @@ final class AppModel {
         checkIns = snapshot.checkIns.sorted(by: { $0.createdAt > $1.createdAt })
         scanEvents = snapshot.scanEvents.sorted(by: { $0.timestamp > $1.timestamp })
         scanVerdicts = snapshot.scanVerdicts.sorted(by: { $0.createdAt > $1.createdAt })
+        scanProductCorrections = snapshot.scanProductCorrections.sorted(by: { $0.updatedAt > $1.updatedAt })
         checkInEvents = snapshot.checkInEvents.sorted(by: { $0.timestamp > $1.timestamp })
         favoriteItems = snapshot.favoriteItems.sorted(by: { $0.createdAt > $1.createdAt })
         consentRecords = snapshot.consentRecords.sorted(by: { $0.createdAt > $1.createdAt })
@@ -205,7 +223,7 @@ final class AppModel {
             hasBackend: resolvedServices.backendAPI != nil,
             hasAgentService: resolvedServices.configuration.hasAgentService
         )
-        latestVerdict = scanVerdicts.first?.verdict
+        latestVerdict = nil
         reconcileScanVerdictsIfNeeded()
     }
 
@@ -1063,11 +1081,21 @@ final class AppModel {
         }
 
         if let relatedProductID = item.relatedProductID {
-            if let event = scanEvents.first(where: { $0.legacyAnalysis.resolvedProduct.id == relatedProductID }) {
+            if let event = scanEvents.first(where: {
+                ProductGraphIdentity.hasOverlap(
+                    [relatedProductID],
+                    [$0.legacyAnalysis.resolvedProduct.id, $0.legacyAnalysis.resolvedProduct.stableIdentityKey]
+                )
+            }) {
                 return event.legacyAnalysis
             }
 
-            if let record = history.first(where: { $0.analysis.resolvedProduct.id == relatedProductID }) {
+            if let record = history.first(where: {
+                ProductGraphIdentity.hasOverlap(
+                    [relatedProductID],
+                    [$0.analysis.resolvedProduct.id, $0.analysis.resolvedProduct.stableIdentityKey]
+                )
+            }) {
                 return record.analysis
             }
         }
@@ -1088,7 +1116,19 @@ final class AppModel {
         }
 
         if let relatedProductID = item.relatedProductID,
-           routines.contains(where: { $0.productID == relatedProductID }) {
+           routines.contains(where: {
+               ProductGraphIdentity.hasOverlap([relatedProductID], [$0.productID])
+           }) {
+            return true
+        }
+
+        if let analysis = pantryAnalysis(for: item),
+           routines.contains(where: {
+               ProductGraphIdentity.hasOverlap(
+                   [$0.productID],
+                   [analysis.resolvedProduct.id, analysis.resolvedProduct.stableIdentityKey]
+               )
+           }) {
             return true
         }
 
@@ -1154,12 +1194,108 @@ final class AppModel {
         scanEvents.first(where: { $0.legacyAnalysis.id == analysis.id })
     }
 
-    func scanVerdict(for analysis: ScanAnalysis) -> LILADomain.ScanVerdict? {
-        guard let event = scanEvent(for: analysis) else {
-            return nil
+    func presentedAnalysisContext(for analysis: ScanAnalysis) -> PresentedScanAnalysisContext {
+        guard let sourceEvent = scanEvent(for: analysis) else {
+            return PresentedScanAnalysisContext(
+                analysis: analysis,
+                structuredAnalysis: nil,
+                verdict: analysis.lilaVerdict(context: userProfile.lilaContext()),
+                correction: nil
+            )
         }
 
-        return scanVerdicts.first(where: { $0.scanEventID == event.id })?.verdict
+        guard
+            let correction = scanProductCorrections.first(where: { $0.scanEventID == sourceEvent.id }),
+            let correctedContext = materializedCorrectionContext(
+                for: sourceEvent,
+                correction: correction
+            )
+        else {
+            let structuredAnalysis = sourceEvent.analysis
+            let fallbackVerdict = scanVerdicts.first(where: { $0.scanEventID == sourceEvent.id })?.verdict
+                ?? structuredAnalysis.lilaVerdict(
+                    fallbackAnalysis: analysis,
+                    context: userProfile.lilaContext()
+                )
+            return PresentedScanAnalysisContext(
+                analysis: analysis,
+                structuredAnalysis: structuredAnalysis,
+                verdict: fallbackVerdict,
+                correction: nil
+            )
+        }
+
+        return correctedContext
+    }
+
+    func scanVerdict(for analysis: ScanAnalysis) -> LILADomain.ScanVerdict? {
+        presentedAnalysisContext(for: analysis).verdict
+    }
+
+    func structuredAnalysis(for analysis: ScanAnalysis) -> AnalysisEnvelope? {
+        presentedAnalysisContext(for: analysis).structuredAnalysis
+    }
+
+    func supportsManualCorrection(for analysis: ScanAnalysis) -> Bool {
+        let semantics = analysis.resolvedProduct.resolvedResolutionSemantics
+        return semantics.contains(.provisional)
+            || semantics.contains(.directional)
+            || semantics.contains(.lowConfidence)
+    }
+
+    func manualCorrectionTargets(for analysis: ScanAnalysis) -> [ScanProductCorrectionCandidate] {
+        guard let sourceEvent = scanEvent(for: analysis) else { return [] }
+
+        var seenStableProductIDs = Set<String>()
+        return scanEvents
+            .filter { $0.id != sourceEvent.id }
+            .sorted(by: { $0.timestamp > $1.timestamp })
+            .compactMap { event in
+                let candidateAnalysis = event.legacyAnalysis
+                guard isStableCorrectionTarget(candidateAnalysis) else { return nil }
+
+                let stableProductID = candidateAnalysis.resolvedProduct.stableIdentityKey.lowercased()
+                guard seenStableProductIDs.insert(stableProductID).inserted else { return nil }
+
+                return ScanProductCorrectionCandidate(
+                    targetScanEventID: event.id,
+                    targetProductID: candidateAnalysis.resolvedProduct.stableIdentityKey,
+                    targetProductName: candidateAnalysis.resolvedProduct.name,
+                    sourceTitle: candidateAnalysis.source.title,
+                    confidence: candidateAnalysis.confidence
+                )
+            }
+    }
+
+    func applyManualCorrection(for analysis: ScanAnalysis, targetScanEventID: String) {
+        guard
+            let sourceEvent = scanEvent(for: analysis),
+            let targetEvent = scanEvents.first(where: { $0.id == targetScanEventID }),
+            isStableCorrectionTarget(targetEvent.legacyAnalysis)
+        else {
+            return
+        }
+
+        let targetAnalysis = targetEvent.legacyAnalysis
+        let now = Date()
+        let correction = ScanProductCorrection(
+            scanEventID: sourceEvent.id,
+            targetScanEventID: targetEvent.id,
+            targetProductID: targetAnalysis.resolvedProduct.stableIdentityKey,
+            targetProductName: targetAnalysis.resolvedProduct.name,
+            createdAt: scanProductCorrections.first(where: { $0.scanEventID == sourceEvent.id })?.createdAt ?? now,
+            updatedAt: now
+        )
+        upsertScanProductCorrection(correction)
+        refreshLatestVerdict()
+        persist()
+    }
+
+    func clearManualCorrection(for analysis: ScanAnalysis) {
+        guard let sourceEvent = scanEvent(for: analysis) else { return }
+        scanProductCorrections.removeAll(where: { $0.scanEventID == sourceEvent.id })
+        refreshLatestVerdict()
+        persist()
     }
 
     func leadingPatternInsight(for analysis: ScanAnalysis) -> PatternInsight? {
@@ -1754,6 +1890,144 @@ final class AppModel {
         .sorted(by: { $0.createdAt > $1.createdAt })
     }
 
+    private func materializedCorrectionContext(
+        for sourceEvent: ScanEvent,
+        correction: ScanProductCorrection
+    ) -> PresentedScanAnalysisContext? {
+        guard
+            let targetEvent = scanEvents.first(where: { $0.id == correction.targetScanEventID }),
+            isStableCorrectionTarget(targetEvent.legacyAnalysis)
+        else {
+            return nil
+        }
+
+        let sourceAnalysis = sourceEvent.legacyAnalysis
+        let targetAnalysis = targetEvent.legacyAnalysis
+        let correctedProduct = correctedProduct(
+            from: targetAnalysis.resolvedProduct,
+            targetConfidence: targetAnalysis.confidence
+        )
+
+        var correctedAnalysis = AnalysisEngine().analyze(
+            product: correctedProduct,
+            userContext: userContext,
+            source: sourceAnalysis.source,
+            confidence: targetAnalysis.confidence,
+            catalog: SampleCatalog.products
+        )
+        correctedAnalysis.id = sourceAnalysis.id
+        correctedAnalysis.createdAt = sourceAnalysis.createdAt
+
+        var correctedEnvelope = correctedAnalysis.makeEnvelope(
+            input: correctionScanInput(
+                sourceEvent: sourceEvent,
+                sourceAnalysis: sourceAnalysis,
+                correctedProduct: correctedProduct
+            ),
+            recentScans: scanEvents.filter { $0.id != sourceEvent.id },
+            recentCheckIns: checkInEvents
+        )
+        correctedEnvelope.analysisID = sourceEvent.analysis.analysisID
+        correctedEnvelope.timestamp = sourceEvent.analysis.timestamp
+        correctedEnvelope.resolvedProduct = correctedProduct
+
+        let correctedVerdict = correctedEnvelope.lilaVerdict(
+            fallbackAnalysis: correctedAnalysis,
+            context: userProfile.lilaContext()
+        )
+
+        return PresentedScanAnalysisContext(
+            analysis: correctedAnalysis,
+            structuredAnalysis: correctedEnvelope,
+            verdict: correctedVerdict,
+            correction: correction
+        )
+    }
+
+    private func correctedProduct(
+        from targetProduct: ProductCandidate,
+        targetConfidence: ConfidenceLevel
+    ) -> ProductCandidate {
+        var correctedProduct = targetProduct
+        let explicitSemantics = targetProduct.resolvedResolutionSemantics
+        let targetResolution = targetProduct.resolution ?? ProductResolution(
+            canonicalProductID: targetProduct.stableIdentityKey,
+            source: .userEdited,
+            confidence: targetConfidence.numericValue,
+            nutritionSnapshot: nil,
+            isDirectional: false
+        )
+
+        correctedProduct.resolution = ProductResolution(
+            canonicalProductID: targetResolution.canonicalProductID ?? targetProduct.stableIdentityKey,
+            source: .userEdited,
+            confidence: targetResolution.confidence,
+            nutritionSnapshot: targetResolution.nutritionSnapshot,
+            isDirectional: false
+        )
+        correctedProduct.resolutionSemantics = explicitSemantics
+        correctedProduct.notes = (targetProduct.notes + ["Locally corrected to a recent stable product identity."])
+            .reduce(into: [String]()) { partialResult, note in
+                guard partialResult.contains(note) == false else { return }
+                partialResult.append(note)
+            }
+        return correctedProduct
+    }
+
+    private func correctionScanInput(
+        sourceEvent: ScanEvent,
+        sourceAnalysis: ScanAnalysis,
+        correctedProduct: ProductCandidate
+    ) -> ScanInput {
+        let fallbackRawText = sourceEvent.normalizedPayload.extractedText
+            ?? sourceAnalysis.resolvedProduct.ingredients.map(\.name).joined(separator: ", ")
+        return ScanInput(
+            sourceType: sourceAnalysis.source,
+            barcode: sourceAnalysis.resolvedProduct.barcode ?? correctedProduct.barcode,
+            capturedImageRef: nil,
+            rawText: fallbackRawText.isEmpty ? nil : fallbackRawText,
+            productTypeHint: correctedProduct.productType,
+            locale: Locale.current.identifier
+        )
+    }
+
+    private func isStableCorrectionTarget(_ analysis: ScanAnalysis) -> Bool {
+        let semantics = analysis.resolvedProduct.resolvedResolutionSemantics
+        return !semantics.contains(.provisional)
+            && !semantics.contains(.directional)
+            && !semantics.contains(.lowConfidence)
+    }
+
+    private func upsertScanProductCorrection(_ correction: ScanProductCorrection) {
+        if let index = scanProductCorrections.firstIndex(where: { $0.scanEventID == correction.scanEventID }) {
+            scanProductCorrections[index] = correction
+        } else {
+            scanProductCorrections.insert(correction, at: 0)
+        }
+        scanProductCorrections.sort(by: { $0.updatedAt > $1.updatedAt })
+    }
+
+    private func refreshLatestVerdict() {
+        guard let latestEvent = scanEvents.first else {
+            latestVerdict = nil
+            return
+        }
+
+        if
+            let correction = scanProductCorrections.first(where: { $0.scanEventID == latestEvent.id }),
+            let correctedContext = materializedCorrectionContext(for: latestEvent, correction: correction)
+        {
+            latestVerdict = correctedContext.verdict
+            return
+        }
+
+        latestVerdict = scanVerdicts.first(where: { $0.scanEventID == latestEvent.id })?.verdict
+            ?? latestEvent.analysis.lilaVerdict(
+                fallbackAnalysis: latestEvent.legacyAnalysis,
+                context: userProfile.lilaContext()
+            )
+    }
+
     private func mergeItems<Item, Identifier: Hashable>(
         _ local: [Item],
         with remote: [Item],
@@ -1770,7 +2044,7 @@ final class AppModel {
     private func persist() {
         services.store.save(
             StoredAppState(
-                schemaVersion: 6,
+                schemaVersion: 7,
                 localProfileID: localProfileID,
                 hasCompletedOnboarding: hasCompletedOnboarding,
                 onboardingDraft: onboardingDraft,
@@ -1779,6 +2053,7 @@ final class AppModel {
                 checkIns: checkIns,
                 scanEvents: scanEvents,
                 scanVerdicts: scanVerdicts,
+                scanProductCorrections: scanProductCorrections,
                 checkInEvents: checkInEvents,
                 favoriteItems: favoriteItems,
                 consentRecords: consentRecords,
@@ -1824,7 +2099,7 @@ final class AppModel {
         if scanVerdicts.count > 120 {
             scanVerdicts = Array(scanVerdicts.prefix(120))
         }
-        latestVerdict = scanVerdicts.first?.verdict
+        refreshLatestVerdict()
     }
 
     private func ensureConversationThread(for _: StrategistEntryPoint) -> Int {

@@ -83,11 +83,11 @@ struct ProductReference: Hashable, Sendable {
 extension FavoriteItem {
     var productReference: ProductReference? {
         ProductReference(
-            graphID: relatedProductID ?? "scan:\(scanEventID)",
-            aliases: [relatedProductID, scanEventID],
+            graphID: "scan:\(scanEventID)",
+            aliases: [scanEventID],
             displayName: title,
             sourceScanID: scanEventID,
-            isProvisional: ProductGraphIdentity.normalized(relatedProductID)?.hasPrefix("scan:") ?? true
+            isProvisional: true
         )
     }
 
@@ -105,14 +105,6 @@ extension PantryItem {
             sourceScanID: sourceScanID,
             isProvisional: (ProductGraphIdentity.normalized(relatedProductID)?.hasPrefix("scan:") ?? false)
                 || sourceScanID != nil
-        )
-    }
-
-    var dedupeKey: String {
-        ProductGraphIdentity.dedupeKey(
-            relatedProductID: relatedProductID,
-            sourceScanID: sourceScanID,
-            fallbackTitle: title
         )
     }
 
@@ -165,11 +157,7 @@ extension MemoryItem {
 
 extension Experiment {
     var productReference: ProductReference? {
-        ProductReference(
-            graphID: relatedProductID,
-            displayName: title,
-            isProvisional: ProductGraphIdentity.normalized(relatedProductID)?.hasPrefix("scan:") ?? false
-        )
+        nil
     }
 
     var productGraphAliases: [String] {

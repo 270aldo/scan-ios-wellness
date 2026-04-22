@@ -529,6 +529,7 @@ struct AnalysisView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var showStrategist = false
+    @State private var showManualCorrectionPicker = false
 
     private var structuredEvent: ScanEvent? {
         model.scanEvent(for: analysis)
@@ -714,16 +715,14 @@ struct AnalysisView: View {
         .sheet(isPresented: $showStrategist) {
             StrategistChatView(entryPoint: .scan, linkedAnalysis: displayedAnalysis)
         }
-    }
-
-    private var confidenceExplanation: String {
-        switch analysis.confidence {
-        case .high:
-            "This match is strong enough that the read should feel stable, not noisy."
-        case .medium:
-            "This is useful as directional guidance, but keep the decision flexible if real-life feedback disagrees."
-        case .low:
-            "The input was thinner than ideal. Treat the read as a prompt to verify, not a final answer."
+        .sheet(isPresented: $showManualCorrectionPicker) {
+            AnalysisManualCorrectionPicker(
+                candidates: manualCorrectionTargets,
+                applyCorrection: { candidate in
+                    model.applyManualCorrection(for: analysis, targetScanEventID: candidate.targetScanEventID)
+                    showManualCorrectionPicker = false
+                }
+            )
         }
     }
 
@@ -746,22 +745,34 @@ struct AnalysisView: View {
         case .saveToPantry:
             let preview = [
                 "Pantry keeps your strongest repeat choices visible.",
-                analysis.overallSummary
+                resolvedAnalysis.overallSummary
             ]
             guard model.requireAccess(
                 to: .pantryMVP,
                 surface: .pantry,
                 previewLines: preview
             ) else { return }
-            model.saveToPantry(from: analysis)
+            model.saveToPantry(from: resolvedAnalysis)
         }
     }
 
-    private func commitDecision(_ kind: ScanDecisionKind, dismissAfter: Bool = true) {
+    private func commitDecision(_ kind: ScanDecisionKind, analysis: ScanAnalysis, dismissAfter: Bool = true) {
         model.recordScanDecision(kind, for: analysis)
         if dismissAfter {
             dismiss()
         }
+    }
+
+    private func rescanBarcode() {
+        model.presentScanFeedback(.unresolved)
+        model.selectedTab = .scan
+        dismiss()
+    }
+
+    private func useClearerLabel() {
+        model.presentScanFeedback(.ocrFailed)
+        model.selectedTab = .scan
+        dismiss()
     }
 }
 
