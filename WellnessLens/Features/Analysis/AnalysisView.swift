@@ -258,6 +258,72 @@ struct ScanVerdictSurfaceContent: Equatable {
     }
 }
 
+struct AnalysisResolutionTrustContent: Equatable {
+    let statusTitle: String
+    let summary: String
+    let nextStep: String
+    let confidenceTitle: String
+    let readStateTitle: String
+    let provenanceTitle: String
+    let semanticTitles: [String]
+    let correctionNote: String?
+
+    static func build(
+        analysis: ScanAnalysis,
+        verdict: LILADomain.ScanVerdict,
+        correction: ScanProductCorrection?
+    ) -> AnalysisResolutionTrustContent {
+        let semantics = analysis.resolvedProduct.resolvedResolutionSemantics
+        let hasUSDAEnrichment = analysis.resolvedProduct.notes.contains {
+            $0.localizedCaseInsensitiveContains("USDA FoodData Central")
+        }
+        let confidenceTitle = analysis.confidence.title
+        let readStateTitle = verdict.scanSource.readStateTitle(for: verdict.resolvedProduct)
+        let provenanceTitle = verdict.resolvedProduct.resolutionSource.surfaceTitle
+
+        let statusTitle: String
+        let summary: String
+        let nextStep: String
+
+        if verdict.resolvedProduct.resolutionSource == .userEdited || correction != nil {
+            statusTitle = "Corrected identity"
+            summary = "You corrected this scan to use a recent stable product identity instead of the original directional read."
+            nextStep = "Use this corrected identity for saves, pantry actions, and follow-up decisions on this device."
+        } else if semantics.contains(.canonical), semantics.contains(.providerBacked), hasUSDAEnrichment {
+            statusTitle = "Exact match + nutrients"
+            summary = "This packaged-food identity is provider-backed, and the nutrient snapshot was enriched with USDA FoodData Central."
+            nextStep = "This is stable enough to save or compare without treating the identity as provisional."
+        } else if semantics.contains(.canonical), semantics.contains(.providerBacked) {
+            statusTitle = "Exact provider-backed match"
+            summary = "This scan resolved to a stable packaged-food identity backed by catalog/provider data."
+            nextStep = "Treat this as a reliable identity read for routine and pantry decisions."
+        } else if semantics.contains(.directional), semantics.contains(.provisional) {
+            statusTitle = "Directional read"
+            summary = "This scan is still directional, so it should guide the decision without locking product identity yet."
+            nextStep = "Rescan, use clearer label detail, or choose a recent stable product before saving it as a repeat."
+        } else if semantics.contains(.lowConfidence) {
+            statusTitle = "Thin input"
+            summary = "The input stayed too thin for a confident identity, even though the read can still offer directional guidance."
+            nextStep = "Verify with a cleaner barcode or label before treating this as a stable product memory."
+        } else {
+            statusTitle = "Usable read"
+            summary = "This scan has enough signal to act on, but the underlying identity should still be treated with normal caution."
+            nextStep = "Keep the decision flexible if real-life feedback disagrees with the scan."
+        }
+
+        return AnalysisResolutionTrustContent(
+            statusTitle: statusTitle,
+            summary: summary,
+            nextStep: nextStep,
+            confidenceTitle: confidenceTitle,
+            readStateTitle: readStateTitle,
+            provenanceTitle: provenanceTitle,
+            semanticTitles: semantics.map(\.surfaceTitle),
+            correctionNote: correction.map { "Local correction is using \($0.targetProductName)." }
+        )
+    }
+}
+
 extension LILADomain.FitLevel {
     var surfaceTitle: String {
         switch self {
@@ -440,6 +506,23 @@ private extension LILADomain.PersonalRelevance {
     }
 }
 
+private extension ProductResolutionSemantic {
+    var surfaceTitle: String {
+        switch self {
+        case .canonical:
+            "Exact match"
+        case .provisional:
+            "Provisional"
+        case .directional:
+            "Directional"
+        case .providerBacked:
+            "Provider-backed"
+        case .lowConfidence:
+            "Thin input"
+        }
+    }
+}
+
 struct AnalysisView: View {
     let analysis: ScanAnalysis
 
@@ -451,39 +534,55 @@ struct AnalysisView: View {
         model.scanEvent(for: analysis)
     }
 
+    private var presentedContext: PresentedScanAnalysisContext {
+        model.presentedAnalysisContext(for: analysis)
+    }
+
+    private var displayedAnalysis: ScanAnalysis {
+        presentedContext.analysis
+    }
+
+    private var displayedStructuredAnalysis: AnalysisEnvelope? {
+        presentedContext.structuredAnalysis
+    }
+
     private var patternInsight: PatternInsight? {
-        model.leadingPatternInsight(for: analysis)
+        model.leadingPatternInsight(for: displayedAnalysis)
     }
 
     private var sortedLensScores: [LensScore] {
-        analysis.lensScores.sorted(by: { $0.score > $1.score })
+        displayedAnalysis.lensScores.sorted(by: { $0.score > $1.score })
     }
 
     private var presentation: AnalysisPresentationPlan {
         AnalysisPresentationPlan.build(
-            analysis: analysis,
-            structured: structuredEvent?.analysis
+            analysis: displayedAnalysis,
+            structured: displayedStructuredAnalysis
         )
     }
 
     private var scanVerdict: LILADomain.ScanVerdict {
-        if let storedVerdict = model.scanVerdict(for: analysis) {
-            return storedVerdict
-        }
-
-        let context = model.userProfile.lilaContext()
-        if let structuredAnalysis = structuredEvent?.analysis {
-            return structuredAnalysis.lilaVerdict(
-                fallbackAnalysis: analysis,
-                context: context
-            )
-        }
-
-        return analysis.lilaVerdict(context: context)
+        presentedContext.verdict
     }
 
     private var verdictSurface: ScanVerdictSurfaceContent {
         ScanVerdictSurfaceContent.build(verdict: scanVerdict)
+    }
+
+    private var resolutionTrustContent: AnalysisResolutionTrustContent {
+        AnalysisResolutionTrustContent.build(
+            analysis: displayedAnalysis,
+            verdict: scanVerdict,
+            correction: presentedContext.correction
+        )
+    }
+
+    private var manualCorrectionTargets: [ScanProductCorrectionCandidate] {
+        model.manualCorrectionTargets(for: analysis)
+    }
+
+    private var supportsManualCorrection: Bool {
+        model.supportsManualCorrection(for: analysis)
     }
 
     private var hiddenSupportActions: Set<AnalysisActionKind> {
@@ -530,7 +629,7 @@ struct AnalysisView: View {
                     )
                 }
 
-                if !analysis.alternatives.isEmpty {
+                if !displayedAnalysis.alternatives.isEmpty {
                     VStack(alignment: .leading, spacing: WLSpacing.m) {
                         WLSectionHeader(
                             title: "Softer swaps",
@@ -538,13 +637,13 @@ struct AnalysisView: View {
                             systemImage: "arrow.triangle.2.circlepath"
                         )
 
-                        ForEach(analysis.alternatives) { suggestion in
+                        ForEach(displayedAnalysis.alternatives) { suggestion in
                             AnalysisSuggestionCard(suggestion: suggestion)
                         }
                     }
                 }
 
-                if !analysis.topReasons.isEmpty || !analysis.warnings.isEmpty {
+                if !displayedAnalysis.topReasons.isEmpty || !displayedAnalysis.warnings.isEmpty {
                     VStack(alignment: .leading, spacing: WLSpacing.m) {
                         WLSectionHeader(
                             title: "Why it landed here",
@@ -552,20 +651,32 @@ struct AnalysisView: View {
                             systemImage: "slider.horizontal.3"
                         )
 
-                        ForEach(Array(analysis.topReasons.prefix(3))) { reason in
+                        ForEach(Array(displayedAnalysis.topReasons.prefix(3))) { reason in
                             AnalysisReasonCard(reason: reason)
                         }
 
-                        ForEach(Array(analysis.warnings.prefix(2)), id: \.self) { warning in
+                        ForEach(Array(displayedAnalysis.warnings.prefix(2)), id: \.self) { warning in
                             AnalysisWarningCard(warning: warning)
                         }
                     }
                 }
 
-                AnalysisConfidenceCard(
-                    explanation: confidenceExplanation,
-                    confidence: analysis.confidence
-                )
+                AnalysisResolutionTrustCard(content: resolutionTrustContent)
+
+                if supportsManualCorrection {
+                    AnalysisManualCorrectionCard(
+                        correction: presentedContext.correction,
+                        targetCount: manualCorrectionTargets.count,
+                        chooseStableProduct: {
+                            showManualCorrectionPicker = true
+                        },
+                        rescanBarcode: rescanBarcode,
+                        useClearerLabel: useClearerLabel,
+                        keepDirectional: presentedContext.correction == nil ? nil : {
+                            model.clearManualCorrection(for: analysis)
+                        }
+                    )
+                }
 
                 AnalysisSupportingActionsCard(
                     pantryUnlocked: model.hasAccess(to: .pantryMVP),
@@ -586,7 +697,7 @@ struct AnalysisView: View {
                     }
                 )
 
-                Text(analysis.disclaimer)
+                Text(displayedAnalysis.disclaimer)
                     .font(WLTypography.caption)
                     .foregroundStyle(WLPalette.inkSoft)
                     .padding(.top, WLSpacing.xs)
@@ -601,7 +712,7 @@ struct AnalysisView: View {
             }
         }
         .sheet(isPresented: $showStrategist) {
-            StrategistChatView(entryPoint: .scan, linkedAnalysis: analysis)
+            StrategistChatView(entryPoint: .scan, linkedAnalysis: displayedAnalysis)
         }
     }
 
@@ -617,20 +728,21 @@ struct AnalysisView: View {
     }
 
     private func handleAction(_ action: AnalysisActionKind) {
+        let resolvedAnalysis = displayedAnalysis
         switch action {
         case .saveToRoutine:
-            commitDecision(.saveToRoutine)
+            commitDecision(.saveToRoutine, analysis: resolvedAnalysis)
         case .avoidForNow:
-            commitDecision(.avoidForNow)
+            commitDecision(.avoidForNow, analysis: resolvedAnalysis)
         case .swapInstead:
-            commitDecision(.swapInstead)
+            commitDecision(.swapInstead, analysis: resolvedAnalysis)
         case .askStrategist:
-            commitDecision(.askStrategist, dismissAfter: false)
+            commitDecision(.askStrategist, analysis: resolvedAnalysis, dismissAfter: false)
             showStrategist = true
         case .trackAgain:
-            commitDecision(.trackAgain)
+            commitDecision(.trackAgain, analysis: resolvedAnalysis)
         case .saveFavorite:
-            model.saveFavorite(from: analysis)
+            model.saveFavorite(from: resolvedAnalysis)
         case .saveToPantry:
             let preview = [
                 "Pantry keeps your strongest repeat choices visible.",
@@ -1069,66 +1181,181 @@ private struct AnalysisOutcomeCard: View {
     }
 }
 
-private struct AnalysisConfidenceCard: View {
-    let explanation: String
-    let confidence: ConfidenceLevel
-
-    private var tone: WLStatusBadge.Tone {
-        switch confidence {
-        case .high:
-            return .success
-        case .medium:
-            return .accent
-        case .low:
-            return .caution
-        }
-    }
-
-    private var framing: String {
-        switch confidence {
-        case .high:
-            return "Stable signal"
-        case .medium:
-            return "Directional"
-        case .low:
-            return "Thin input"
-        }
-    }
+private struct AnalysisResolutionTrustCard: View {
+    let content: AnalysisResolutionTrustContent
 
     var body: some View {
         WLQuietCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: WLSpacing.s) {
-                        WLStatusBadge(
-                            title: "Confidence: \(confidence.title)",
-                            systemImage: "scope",
-                            tone: tone
+                        WLSectionHeader(
+                            title: "Resolution & trust",
+                            subtitle: "How stable the identity is, where it came from, and what to do next.",
+                            systemImage: "checkmark.shield"
                         )
 
                         Spacer(minLength: WLSpacing.s)
 
-                        WLPill(title: framing, tone: .soft)
+                        WLStatusBadge(
+                            title: content.statusTitle,
+                            systemImage: "scope",
+                            tone: badgeTone
+                        )
                     }
 
                     VStack(alignment: .leading, spacing: WLSpacing.s) {
-                        WLStatusBadge(
-                            title: "Confidence: \(confidence.title)",
-                            systemImage: "scope",
-                            tone: tone
+                        WLSectionHeader(
+                            title: "Resolution & trust",
+                            subtitle: "How stable the identity is, where it came from, and what to do next.",
+                            systemImage: "checkmark.shield"
                         )
 
-                        WLPill(title: framing, tone: .soft)
+                        WLStatusBadge(
+                            title: content.statusTitle,
+                            systemImage: "scope",
+                            tone: badgeTone
+                        )
                     }
                 }
 
-                Text(explanation)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 136), spacing: WLSpacing.s)], spacing: WLSpacing.s) {
+                    WLPill(title: "Confidence: \(content.confidenceTitle)", tone: .soft)
+                    WLPill(title: content.readStateTitle, tone: .soft)
+                    WLPill(title: content.provenanceTitle, tone: .soft)
+
+                    ForEach(content.semanticTitles, id: \.self) { title in
+                        WLPill(title: title, tone: .soft)
+                    }
+                }
+
+                Text(content.summary)
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
+
+                if let correctionNote = content.correctionNote {
+                    Text(correctionNote)
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.rose)
+                }
+
+                Text(content.nextStep)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
 
                 Text("This is consumer wellness guidance, not medical advice.")
                     .font(WLTypography.captionStrong)
                     .foregroundStyle(WLPalette.ink)
+            }
+        }
+    }
+
+    private var badgeTone: WLStatusBadge.Tone {
+        switch content.statusTitle {
+        case "Exact match + nutrients", "Exact provider-backed match", "Corrected identity":
+            .success
+        case "Directional read":
+            .accent
+        default:
+            .caution
+        }
+    }
+}
+
+private struct AnalysisManualCorrectionCard: View {
+    let correction: ScanProductCorrection?
+    let targetCount: Int
+    let chooseStableProduct: () -> Void
+    let rescanBarcode: () -> Void
+    let useClearerLabel: () -> Void
+    let keepDirectional: (() -> Void)?
+
+    var body: some View {
+        WLQuietCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Manual correction",
+                    subtitle: "Keep the directional read, rescan, or locally relabel this scan with a recent stable product.",
+                    systemImage: "slider.horizontal.3"
+                )
+
+                if let correction {
+                    Text("This scan is currently using \(correction.targetProductName) as a local corrected identity.")
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.inkSoft)
+                } else {
+                    Text("Choose a recent stable product only when this read stayed provisional, directional, or too thin to trust as final identity.")
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                if targetCount == 0 {
+                    Text("No recent stable products are available yet for local relabeling.")
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                VStack(alignment: .leading, spacing: WLSpacing.s) {
+                    WLSecondaryButton(
+                        title: "Choose from recent stable products",
+                        systemImage: "checklist"
+                    ) {
+                        chooseStableProduct()
+                    }
+                    .disabled(targetCount == 0)
+
+                    WLUtilityButton(title: "Rescan barcode", systemImage: "barcode.viewfinder") {
+                        rescanBarcode()
+                    }
+
+                    WLUtilityButton(title: "Use clearer label", systemImage: "doc.text.viewfinder") {
+                        useClearerLabel()
+                    }
+
+                    if let keepDirectional {
+                        WLUtilityButton(title: "Keep directional", systemImage: "arrow.uturn.backward") {
+                            keepDirectional()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct AnalysisManualCorrectionPicker: View {
+    let candidates: [ScanProductCorrectionCandidate]
+    let applyCorrection: (ScanProductCorrectionCandidate) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(candidates) { candidate in
+                Button {
+                    applyCorrection(candidate)
+                    dismiss()
+                } label: {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text(candidate.targetProductName)
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text("\(candidate.sourceTitle) • \(candidate.confidence.title) confidence")
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle("Choose stable product")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done", action: dismiss.callAsFunction)
+                        .font(WLTypography.captionStrong)
+                }
             }
         }
     }
