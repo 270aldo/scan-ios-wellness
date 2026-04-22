@@ -226,7 +226,7 @@ struct ScanVerdictSurfaceContent: Equatable {
     let followUpPrompt: String?
 
     static func build(verdict: LILADomain.ScanVerdict) -> ScanVerdictSurfaceContent {
-        let readStateTitle = verdict.scanSource.readStateTitle(for: verdict.resolvedProduct.resolutionSource)
+        let readStateTitle = verdict.scanSource.readStateTitle(for: verdict.resolvedProduct)
         let provenanceTitle = verdict.resolvedProduct.resolutionSource.surfaceTitle
         let confidenceTitle = verdict.confidence.surfaceTitle
         return ScanVerdictSurfaceContent(
@@ -241,7 +241,7 @@ struct ScanVerdictSurfaceContent: Equatable {
             sourceTitle: verdict.scanSource.surfaceTitle,
             readStateTitle: readStateTitle,
             provenanceTitle: provenanceTitle,
-            guidanceNote: verdict.scanSource.directionalGuidanceNote(for: verdict.resolvedProduct.resolutionSource),
+            guidanceNote: verdict.scanSource.directionalGuidanceNote(for: verdict.resolvedProduct),
             watchouts: Array(verdict.watchouts.prefix(2)).map {
                 WatchoutItem(
                     id: $0.id,
@@ -345,8 +345,8 @@ private extension LILADomain.ScanSource {
         }
     }
 
-    func readStateTitle(for resolutionSource: LILADomain.ResolutionSource) -> String {
-        guard resolutionSource.isDirectionalInference else {
+    func readStateTitle(for resolvedProduct: LILADomain.ResolvedProduct) -> String {
+        guard resolvedProduct.hasResolutionSemantic(.directional) else {
             return "Resolved product"
         }
         switch self {
@@ -363,8 +363,8 @@ private extension LILADomain.ScanSource {
         }
     }
 
-    func directionalGuidanceNote(for resolutionSource: LILADomain.ResolutionSource) -> String? {
-        guard resolutionSource.isDirectionalInference else {
+    func directionalGuidanceNote(for resolvedProduct: LILADomain.ResolvedProduct) -> String? {
+        guard resolvedProduct.hasResolutionSemantic(.directional) else {
             return nil
         }
         switch self {
@@ -402,10 +402,6 @@ private extension LILADomain.ResolutionSource {
         case .userEdited:
             "User edited"
         }
-    }
-
-    var isDirectionalInference: Bool {
-        self == .agentInferred
     }
 }
 

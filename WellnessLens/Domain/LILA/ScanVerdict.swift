@@ -294,6 +294,8 @@ extension LILADomain {
 
     struct ResolvedProduct: Codable, Hashable, Identifiable, Sendable {
         var id: String
+        var canonicalProductID: String? = nil
+        var resolutionSemantics: [ProductResolutionSemantic]? = nil
         var name: String
         var brand: String?
         var category: ProductCategory
@@ -304,6 +306,14 @@ extension LILADomain {
         var resolutionSource: ResolutionSource
         var headline: String?
         var imageURL: URL?
+
+        var stableIdentityKey: String {
+            let canonical = canonicalProductID?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let canonical, !canonical.isEmpty {
+                return canonical
+            }
+            return id
+        }
     }
 
     enum ResolutionSource: String, Codable, Sendable {

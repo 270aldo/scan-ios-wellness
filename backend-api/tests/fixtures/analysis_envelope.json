@@ -67,6 +67,9 @@
     ],
     "productType": "food",
     "resolution": null,
+    "resolution_semantics": [
+      "low_confidence"
+    ],
     "tags": []
   },
   "swap_suggestions": [],

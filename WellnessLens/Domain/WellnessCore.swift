@@ -302,6 +302,43 @@ struct ProductCandidate: Codable, Hashable, Identifiable {
     var notes: [String]
     var lookupTokens: [String]
     var resolution: ProductResolution? = nil
+    var resolutionSemantics: [ProductResolutionSemantic]? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case brand
+        case productType
+        case barcode
+        case headline
+        case ingredients
+        case claims
+        case tags
+        case alternativeIDs
+        case notes
+        case lookupTokens
+        case resolution
+        case resolutionSemantics = "resolution_semantics"
+    }
+}
+
+extension ProductCandidate {
+    var stableIdentityKey: String {
+        let canonical = resolution?.canonicalProductID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let canonical, !canonical.isEmpty {
+            return canonical
+        }
+        return id
+    }
+
+    var isDirectionallyResolved: Bool {
+        hasResolutionSemantic(.directional)
+    }
+
+    var isProvisionallyResolved: Bool {
+        hasResolutionSemantic(.provisional)
+    }
 }
 
 struct LensScore: Codable, Hashable, Identifiable {

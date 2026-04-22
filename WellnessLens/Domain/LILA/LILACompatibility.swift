@@ -186,6 +186,7 @@ extension AnalysisEnvelope {
             ?? fallbackAnalysis?.resolvedProduct.lilaResolvedProduct()
             ?? LILADomain.ResolvedProduct(
                 id: analysisID,
+                canonicalProductID: nil,
                 name: entityType == .supplement ? "Supplement scan" : "Structured scan",
                 brand: nil,
                 category: entityType.lilaProductCategory,
@@ -451,6 +452,8 @@ private extension ProductCandidate {
     func lilaResolvedProduct() -> LILADomain.ResolvedProduct {
         LILADomain.ResolvedProduct(
             id: id,
+            canonicalProductID: resolution?.canonicalProductID,
+            resolutionSemantics: resolvedResolutionSemantics,
             name: name,
             brand: brand,
             category: productType.lilaProductCategory,

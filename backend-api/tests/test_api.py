@@ -12,6 +12,7 @@ from app.contracts import (
     Ingredient,
     ProductCandidate,
     ProductResolution,
+    ProductResolutionSemantic,
     ProductResolutionSource,
     ProductType,
     ScanInput,
@@ -20,7 +21,12 @@ from app.contracts import (
 from app.main import app, build_backend_services
 from app.product_resolver import ProductResolver, ResolverResult
 from app.security import SecurityVerificationError
-from app.services import fixture_models, starter_history_sync_request, starter_home_request
+from app.services import (
+    build_scan_analysis,
+    fixture_models,
+    starter_history_sync_request,
+    starter_home_request,
+)
 
 
 client = TestClient(app)
@@ -81,6 +87,8 @@ def test_analyze_structured_returns_contract_compatible_payload(monkeypatch):
             confidence=ConfidenceLevel.high,
             resolution_confidence=0.91,
             is_directional=False,
+            identity_source=ProductResolutionSource.openFoodFacts,
+            fact_sources=(ProductResolutionSource.openFoodFacts,),
         ),
         raising=False,
     )
@@ -104,6 +112,7 @@ def test_analyze_structured_returns_contract_compatible_payload(monkeypatch):
     assert analysis["lens_scores"]["body_comp"] >= 0
     assert analysis["medical_safety"]["disclaimer_needed"] is True
     assert analysis["resolved_product"]["name"] == "Greek Yogurt"
+    assert analysis["resolved_product"]["resolution_semantics"] == ["canonical", "provider_backed"]
     assert analysis["resolved_product"]["resolution"]["source"] == "openFoodFacts"
     assert analysis["resolved_product"]["resolution"]["confidence"] == pytest.approx(0.91)
     assert analysis["resolved_product"]["resolution"]["is_directional"] is False
@@ -120,6 +129,7 @@ def test_profile_sync_history_sync_and_home_flow():
     history_response = client.post("/v1/history/sync", json=sync_request.model_dump(by_alias=True, mode="json"))
     assert history_response.status_code == 200
     assert len(history_response.json()["scans"]) == 1
+    assert history_response.json()["favorites"][0]["related_product_id"] == sync_request.favorites[0].relatedProductID
 
     home_response = client.post("/v1/home", json=home_request.model_dump(mode="json"))
     assert home_response.status_code == 200
@@ -295,6 +305,12 @@ def test_product_resolver_barcode_hit_returns_resolved_product(monkeypatch):
     assert result.product.resolution.isDirectional is False
     assert result.product.resolution.canonicalProductID == "off:7501031311309"
     assert result.product.resolution.nutritionSnapshot.proteinGPer100g == pytest.approx(10)
+    assert result.product.resolutionSemantics == [
+        ProductResolutionSemantic.canonical,
+        ProductResolutionSemantic.providerBacked,
+    ]
+    assert result.identity_source == ProductResolutionSource.openFoodFacts
+    assert result.fact_sources == (ProductResolutionSource.openFoodFacts,)
 
 
 def test_product_resolver_label_search_falls_back_to_directional_without_exact_match(monkeypatch):
@@ -339,6 +355,13 @@ def test_product_resolver_label_search_falls_back_to_directional_without_exact_m
     assert result.product.resolution is not None
     assert result.product.resolution.source == ProductResolutionSource.agentInferred
     assert result.product.resolution.isDirectional is True
+    assert result.product.resolutionSemantics == [
+        ProductResolutionSemantic.provisional,
+        ProductResolutionSemantic.directional,
+        ProductResolutionSemantic.lowConfidence,
+    ]
+    assert result.identity_source == ProductResolutionSource.agentInferred
+    assert result.fact_sources == (ProductResolutionSource.agentInferred,)
     assert result.fallback_reason in {"off_search_unranked", "off_search_low_confidence"}
 
 
@@ -402,4 +425,27 @@ def test_product_resolver_enriches_nutrients_with_usda_only_for_strong_match(mon
     assert result.product.resolution.source == ProductResolutionSource.openFoodFacts
     assert result.product.resolution.nutritionSnapshot.carbsGPer100g == pytest.approx(42)
     assert result.product.resolution.nutritionSnapshot.fiberGPer100g == pytest.approx(8)
+    assert result.product.resolutionSemantics == [
+        ProductResolutionSemantic.canonical,
+        ProductResolutionSemantic.providerBacked,
+    ]
+    assert result.identity_source == ProductResolutionSource.openFoodFacts
+    assert result.fact_sources == (
+        ProductResolutionSource.openFoodFacts,
+        ProductResolutionSource.usdaFoodDataCentral,
+    )
     assert "USDA FoodData Central" in " ".join(result.product.notes)
+
+
+def test_build_scan_analysis_marks_low_confidence_on_resolutionless_fallback():
+    analysis = build_scan_analysis(
+        ScanInput(
+            sourceType=ScanSource.manualLabel,
+            rawText="protein, fiber, chia, blueberries",
+            locale="en_US",
+        ),
+        starter_home_request("install-semantic-test").profile.userContext,
+    )
+
+    assert analysis.resolvedProduct.resolution is None
+    assert analysis.resolvedProduct.resolutionSemantics == [ProductResolutionSemantic.lowConfidence]

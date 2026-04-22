@@ -498,6 +498,8 @@ private extension ProductCandidate {
     var remoteLILAResolvedProduct: LILADomain.ResolvedProduct {
         LILADomain.ResolvedProduct(
             id: id,
+            canonicalProductID: resolution?.canonicalProductID,
+            resolutionSemantics: resolvedResolutionSemantics,
             name: name,
             brand: brand,
             category: productType.remoteLILAProductCategory,

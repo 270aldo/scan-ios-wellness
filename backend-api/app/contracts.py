@@ -143,6 +143,14 @@ class ProductResolutionSource(str, Enum):
     userEdited = "userEdited"
 
 
+class ProductResolutionSemantic(str, Enum):
+    canonical = "canonical"
+    provisional = "provisional"
+    directional = "directional"
+    providerBacked = "provider_backed"
+    lowConfidence = "low_confidence"
+
+
 class NutritionSnapshot(ContractModel):
     energyKcalPer100g: float | None = Field(default=None, alias="energy_kcal_per_100g")
     proteinGPer100g: float | None = Field(default=None, alias="protein_g_per_100g")
@@ -177,6 +185,7 @@ class ProductCandidate(ContractModel):
     notes: list[str]
     lookupTokens: list[str]
     resolution: ProductResolution | None = None
+    resolutionSemantics: list[ProductResolutionSemantic] | None = Field(default=None, alias="resolution_semantics")
 
 
 class LensScore(ContractModel):
@@ -593,6 +602,7 @@ class CheckInEvent(ContractModel):
 class FavoriteItem(ContractModel):
     id: str = Field(alias="favorite_id")
     scanEventID: str = Field(alias="scan_event_id")
+    relatedProductID: str | None = Field(default=None, alias="related_product_id")
     createdAt: AppleTimestamp = Field(alias="created_at")
     title: str
     summary: str

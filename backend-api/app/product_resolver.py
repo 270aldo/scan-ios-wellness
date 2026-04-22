@@ -7,7 +7,7 @@ import logging
 from math import isfinite
 import re
 from time import monotonic
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote_plus
 from urllib.request import Request, urlopen
@@ -25,6 +25,7 @@ from app.contracts import (
     ScanInput,
     ScanSource,
 )
+from app.product_resolution_semantics import ensure_product_resolution_semantics
 
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,8 @@ class ResolverResult:
     confidence: ConfidenceLevel
     resolution_confidence: float
     is_directional: bool
+    identity_source: ProductResolutionSource
+    fact_sources: tuple[ProductResolutionSource, ...] = ()
     fallback_reason: str | None = None
 
 
@@ -104,350 +107,17 @@ class ProductResolver:
             self._log_result(input, cached, started_at, cached=True)
             return cached
 
-        if input.productTypeHint not in {None, ProductType.food}:
-            result = self._build_directional_result(
-                input,
-                fallback_reason="food_first_scope",
-                confidence_score=0.32,
-                source=ProductResolutionSource.agentInferred,
-            )
-        elif input.barcode and input.sourceType in {ScanSource.liveBarcode, ScanSource.manualBarcode}:
-            result = self._resolve_barcode(input)
-        elif input.sourceType in {ScanSource.mealPhoto, ScanSource.menuPhoto}:
-            result = self._build_directional_result(
-                input,
-                fallback_reason="non_packaged_directional_mode",
-                confidence_score=0.34 if input.sourceType == ScanSource.menuPhoto else 0.38,
-                source=ProductResolutionSource.agentInferred,
-            )
-        elif input.rawText:
-            result = self._resolve_label_text(input)
-        else:
-            result = self._build_directional_result(
-                input,
-                fallback_reason="empty_input",
-                confidence_score=0.18,
-                source=ProductResolutionSource.agentInferred,
-            )
-
+        result = self._resolve_identity(input)
         result = self._maybe_enrich_with_usda(result, input)
         self._set_cached(cache_key, result)
         self._log_result(input, result, started_at, cached=False)
         return result
 
-    def _resolve_barcode(self, input: ScanInput) -> ResolverResult:
-        barcode = (input.barcode or "").strip()
-        if not barcode:
-            return self._build_directional_result(
-                input,
-                fallback_reason="blank_barcode",
-                confidence_score=0.18,
-                source=ProductResolutionSource.agentInferred,
-            )
-
-        try:
-            payload = self._get_json(
-                f"{self._settings.open_food_facts_base_url}/api/v2/product/{quote_plus(barcode)}.json"
-                f"?fields={OFF_PRODUCT_FIELDS}"
-            )
-        except (HTTPError, URLError, TimeoutError) as exc:
-            return self._build_directional_result(
-                input,
-                fallback_reason=f"off_barcode_error:{exc.__class__.__name__}",
-                confidence_score=0.24,
-                source=ProductResolutionSource.agentInferred,
-            )
-
-        product_payload = payload.get("product") if isinstance(payload, dict) else None
-        status = payload.get("status") if isinstance(payload, dict) else None
-        if status != 1 or not isinstance(product_payload, dict):
-            return self._build_directional_result(
-                input,
-                fallback_reason="off_barcode_miss",
-                confidence_score=0.28,
-                source=ProductResolutionSource.agentInferred,
-            )
-
-        resolution_confidence = 0.93 if product_payload.get("nutrition_data") == "on" else 0.86
-        product = self._off_product_to_candidate(
-            product_payload,
-            resolution_confidence=resolution_confidence,
-            is_directional=False,
-            headline="Exact barcode match from Open Food Facts.",
-        )
-        return ResolverResult(
-            product=product,
-            confidence=ConfidenceLevel.high,
-            resolution_confidence=resolution_confidence,
-            is_directional=False,
-        )
-
-    def _resolve_label_text(self, input: ScanInput) -> ResolverResult:
-        raw_text = (input.rawText or "").strip()
-        meaningful_tokens = _meaningful_tokens(raw_text)
-        if len(meaningful_tokens) < 2:
-            return self._build_directional_result(
-                input,
-                fallback_reason="label_text_too_thin",
-                confidence_score=0.34,
-                source=ProductResolutionSource.agentInferred,
-            )
-
-        try:
-            payload = self._get_json(
-                f"{self._settings.open_food_facts_base_url}/api/v2/search"
-                f"?search_terms={quote_plus(raw_text[:180])}"
-                f"&fields={OFF_SEARCH_FIELDS}"
-                f"&page_size=6"
-            )
-        except (HTTPError, URLError, TimeoutError) as exc:
-            return self._build_directional_result(
-                input,
-                fallback_reason=f"off_search_error:{exc.__class__.__name__}",
-                confidence_score=0.38,
-                source=ProductResolutionSource.agentInferred,
-            )
-
-        products = payload.get("products") if isinstance(payload, dict) else None
-        if not isinstance(products, list) or not products:
-            return self._build_directional_result(
-                input,
-                fallback_reason="off_search_empty",
-                confidence_score=0.42,
-                source=ProductResolutionSource.agentInferred,
-            )
-
-        scored = [
-            (self._score_search_hit(product, meaningful_tokens), product)
-            for product in products
-            if isinstance(product, dict)
-        ]
-        scored = [item for item in scored if item[0] > 0]
-        if not scored:
-            return self._build_directional_result(
-                input,
-                fallback_reason="off_search_unranked",
-                confidence_score=0.42,
-                source=ProductResolutionSource.agentInferred,
-            )
-
-        scored.sort(key=lambda item: item[0], reverse=True)
-        top_score, top_product = scored[0]
-        next_score = scored[1][0] if len(scored) > 1 else 0.0
-        if top_score < 0.68 or top_score < next_score + 0.08:
-            return self._build_directional_result(
-                input,
-                fallback_reason="off_search_low_confidence",
-                confidence_score=min(0.56, max(top_score, 0.44)),
-                source=ProductResolutionSource.agentInferred,
-            )
-
-        confidence_level = ConfidenceLevel.high if top_score >= 0.83 else ConfidenceLevel.medium
-        product = self._off_product_to_candidate(
-            top_product,
-            resolution_confidence=top_score,
-            is_directional=False,
-            headline="Resolved from label text against Open Food Facts.",
-        )
-        return ResolverResult(
-            product=product,
-            confidence=confidence_level,
-            resolution_confidence=top_score,
-            is_directional=False,
-        )
+    def _resolve_identity(self, input: ScanInput) -> ResolverResult:
+        return _OpenFoodFactsIdentityStep(self._settings, self._get_json).resolve(input)
 
     def _maybe_enrich_with_usda(self, result: ResolverResult, input: ScanInput) -> ResolverResult:
-        if result.is_directional or not self._settings.usda_api_key:
-            return result
-        resolution = result.product.resolution
-        if resolution is None:
-            return result
-        if _nutrition_is_complete_enough(resolution.nutritionSnapshot):
-            return result
-
-        usda_food = self._search_usda_food(result.product, input)
-        if usda_food is None:
-            return result
-
-        snapshot = _usda_food_to_snapshot(usda_food)
-        if snapshot is None or not _snapshot_adds_signal(snapshot, resolution.nutritionSnapshot):
-            return result
-
-        updated_product = result.product.model_copy(
-            update={
-                "notes": list(result.product.notes)
-                + ["Nutrient snapshot enriched with USDA FoodData Central."],
-                "resolution": resolution.model_copy(update={"nutritionSnapshot": snapshot}),
-            }
-        )
-        return ResolverResult(
-            product=updated_product,
-            confidence=result.confidence,
-            resolution_confidence=result.resolution_confidence,
-            is_directional=False,
-            fallback_reason=result.fallback_reason,
-        )
-
-    def _search_usda_food(self, product: ProductCandidate, input: ScanInput) -> dict[str, Any] | None:
-        try:
-            payload = self._post_json(
-                f"{self._settings.usda_base_url}/foods/search?api_key={quote_plus(self._settings.usda_api_key or '')}",
-                {
-                    "query": " ".join(part for part in [product.brand, product.name] if part).strip() or product.name,
-                    "dataType": ["Branded"],
-                    "pageSize": 5,
-                },
-            )
-        except (HTTPError, URLError, TimeoutError):
-            return None
-
-        foods = payload.get("foods") if isinstance(payload, dict) else None
-        if not isinstance(foods, list):
-            return None
-
-        barcode = (input.barcode or product.barcode or "").strip()
-        if barcode:
-            for food in foods:
-                if isinstance(food, dict) and str(food.get("gtinUpc") or "").strip() == barcode:
-                    return food
-
-        query_tokens = _meaningful_tokens(f"{product.brand} {product.name}")
-        ranked: list[tuple[float, dict[str, Any]]] = []
-        for food in foods:
-            if not isinstance(food, dict):
-                continue
-            haystack = " ".join(
-                part
-                for part in [
-                    str(food.get("description") or ""),
-                    str(food.get("brandOwner") or ""),
-                    str(food.get("brandName") or ""),
-                    str(food.get("ingredients") or ""),
-                ]
-                if part
-            )
-            overlap = _token_overlap(query_tokens, _meaningful_tokens(haystack))
-            if overlap <= 0:
-                continue
-            ranked.append((overlap, food))
-
-        if not ranked:
-            return None
-        ranked.sort(key=lambda item: item[0], reverse=True)
-        return ranked[0][1] if ranked[0][0] >= 0.72 else None
-
-    def _off_product_to_candidate(
-        self,
-        product: dict[str, Any],
-        *,
-        resolution_confidence: float,
-        is_directional: bool,
-        headline: str,
-    ) -> ProductCandidate:
-        code = str(product.get("code") or "").strip()
-        name = _clean_text(product.get("product_name"))
-        if not name:
-            name = f"Product {code[-4:]}" if code else "Resolved product"
-        brand = _primary_brand(product.get("brands"))
-        ingredients_text = _clean_text(product.get("ingredients_text"))
-        ingredients_tags = _string_list(product.get("ingredients_tags"))
-        categories_tags = _string_list(product.get("categories_tags"))
-        labels_tags = _string_list(product.get("labels_tags"))
-        snapshot = _off_nutrition_to_snapshot(product.get("nutriments"))
-        tags = _infer_tags(
-            name=name,
-            ingredients_text=ingredients_text,
-            ingredient_tags=ingredients_tags,
-            labels_tags=labels_tags,
-            snapshot=snapshot,
-        )
-        return ProductCandidate(
-            id=f"off:{code or hashlib.sha1(name.encode('utf-8')).hexdigest()[:12]}",
-            name=name,
-            brand=brand,
-            productType=ProductType.food,
-            barcode=code or None,
-            headline=headline,
-            ingredients=[Ingredient(name=item) for item in _ingredient_lines(ingredients_text, ingredients_tags)],
-            claims=_claims_from_labels(labels_tags),
-            tags=tags,
-            alternativeIDs=[],
-            notes=[f"Source: Open Food Facts ({'directional' if is_directional else 'resolved'})."],
-            lookupTokens=_lookup_tokens(name, brand, ingredients_text, categories_tags),
-            resolution=ProductResolution(
-                canonicalProductID=f"off:{code}" if code else None,
-                source=ProductResolutionSource.openFoodFacts,
-                confidence=round(resolution_confidence, 3),
-                nutritionSnapshot=snapshot,
-                isDirectional=is_directional,
-            ),
-        )
-
-    def _build_directional_result(
-        self,
-        input: ScanInput,
-        *,
-        fallback_reason: str,
-        confidence_score: float,
-        source: ProductResolutionSource,
-    ) -> ResolverResult:
-        raw_text = (input.rawText or "").strip()
-        product_type = input.productTypeHint or ProductType.food
-        product_name = _directional_name(input, raw_text)
-        tag_text = raw_text or product_name
-        tags = _infer_tags(
-            name=product_name,
-            ingredients_text=raw_text,
-            ingredient_tags=[],
-            labels_tags=[],
-            snapshot=None,
-        )
-        resolution = ProductResolution(
-            canonicalProductID=None,
-            source=source,
-            confidence=round(confidence_score, 3),
-            nutritionSnapshot=None,
-            isDirectional=True,
-        )
-        product = ProductCandidate(
-            id=f"directional:{hashlib.sha1((input.barcode or raw_text or product_name).encode('utf-8')).hexdigest()[:12]}",
-            name=product_name,
-            brand="Directional read",
-            productType=product_type,
-            barcode=(input.barcode or "").strip() or None,
-            headline="No exact packaged-food match yet. This read is directional.",
-            ingredients=[Ingredient(name=item) for item in _ingredient_lines(raw_text, [])],
-            claims=[],
-            tags=tags,
-            alternativeIDs=[],
-            notes=[
-                "No exact packaged-food match was found yet.",
-                "Use this read directionally and rescan when a clearer barcode or label is available.",
-            ],
-            lookupTokens=_lookup_tokens(product_name, "Directional read", tag_text, []),
-            resolution=resolution,
-        )
-        confidence = ConfidenceLevel.low if confidence_score < 0.6 else ConfidenceLevel.medium
-        return ResolverResult(
-            product=product,
-            confidence=confidence,
-            resolution_confidence=confidence_score,
-            is_directional=True,
-            fallback_reason=fallback_reason,
-        )
-
-    def _score_search_hit(self, product: dict[str, Any], query_tokens: set[str]) -> float:
-        name_tokens = _meaningful_tokens(_clean_text(product.get("product_name")) or "")
-        brand_tokens = _meaningful_tokens(_clean_text(product.get("brands")) or "")
-        ingredient_tokens = _meaningful_tokens(_clean_text(product.get("ingredients_text")) or "")
-        category_tokens = _meaningful_tokens(" ".join(_string_list(product.get("categories_tags"))))
-
-        coverage = _token_overlap(query_tokens, name_tokens | brand_tokens | ingredient_tokens)
-        name_overlap = _token_overlap(query_tokens, name_tokens)
-        ingredient_overlap = _token_overlap(query_tokens, ingredient_tokens)
-        nutrition_bonus = 0.08 if product.get("nutrition_data") == "on" else 0.0
-        category_bonus = 0.04 if category_tokens else 0.0
-        return min(0.95, coverage * 0.60 + name_overlap * 0.22 + ingredient_overlap * 0.12 + nutrition_bonus + category_bonus)
+        return _USDANutritionEnrichmentStep(self._settings, self._post_json).enrich(result, input)
 
     def _get_json(self, url: str) -> dict[str, Any]:
         request = Request(
@@ -506,9 +176,11 @@ class ProductResolver:
     def _log_result(self, input: ScanInput, result: ResolverResult, started_at: float, *, cached: bool) -> None:
         latency_ms = int((monotonic() - started_at) * 1000)
         resolution = result.product.resolution
+        fact_sources = ",".join(source.value for source in result.fact_sources) or "none"
         logger.info(
-            "product_resolver source=%s scan_source=%s cached=%s confidence=%.3f directional=%s latency_ms=%d fallback_reason=%s product_id=%s",
-            resolution.source.value if resolution else "unknown",
+            "product_resolver identity_source=%s fact_sources=%s scan_source=%s cached=%s confidence=%.3f directional=%s latency_ms=%d fallback_reason=%s product_id=%s",
+            result.identity_source.value,
+            fact_sources,
             input.sourceType.value,
             cached,
             resolution.confidence if resolution else result.resolution_confidence,
@@ -517,6 +189,403 @@ class ProductResolver:
             result.fallback_reason or "none",
             result.product.id,
         )
+
+
+class _ProductCandidateFactory:
+    def off_product_to_candidate(
+        self,
+        product: dict[str, Any],
+        *,
+        resolution_confidence: float,
+        is_directional: bool,
+        headline: str,
+    ) -> ProductCandidate:
+        code = str(product.get("code") or "").strip()
+        name = _clean_text(product.get("product_name"))
+        if not name:
+            name = f"Product {code[-4:]}" if code else "Resolved product"
+        brand = _primary_brand(product.get("brands"))
+        ingredients_text = _clean_text(product.get("ingredients_text"))
+        ingredients_tags = _string_list(product.get("ingredients_tags"))
+        categories_tags = _string_list(product.get("categories_tags"))
+        labels_tags = _string_list(product.get("labels_tags"))
+        snapshot = _off_nutrition_to_snapshot(product.get("nutriments"))
+        tags = _infer_tags(
+            name=name,
+            ingredients_text=ingredients_text,
+            ingredient_tags=ingredients_tags,
+            labels_tags=labels_tags,
+            snapshot=snapshot,
+        )
+        candidate = ProductCandidate(
+            id=f"off:{code or hashlib.sha1(name.encode('utf-8')).hexdigest()[:12]}",
+            name=name,
+            brand=brand,
+            productType=ProductType.food,
+            barcode=code or None,
+            headline=headline,
+            ingredients=[Ingredient(name=item) for item in _ingredient_lines(ingredients_text, ingredients_tags)],
+            claims=_claims_from_labels(labels_tags),
+            tags=tags,
+            alternativeIDs=[],
+            notes=[f"Source: Open Food Facts ({'directional' if is_directional else 'resolved'})."],
+            lookupTokens=_lookup_tokens(name, brand, ingredients_text, categories_tags),
+            resolution=ProductResolution(
+                canonicalProductID=f"off:{code}" if code else None,
+                source=ProductResolutionSource.openFoodFacts,
+                confidence=round(resolution_confidence, 3),
+                nutritionSnapshot=snapshot,
+                isDirectional=is_directional,
+            ),
+        )
+        return ensure_product_resolution_semantics(candidate)
+
+    def build_directional_result(
+        self,
+        input: ScanInput,
+        *,
+        fallback_reason: str,
+        confidence_score: float,
+        source: ProductResolutionSource,
+    ) -> ResolverResult:
+        raw_text = (input.rawText or "").strip()
+        product_type = input.productTypeHint or ProductType.food
+        product_name = _directional_name(input, raw_text)
+        tag_text = raw_text or product_name
+        tags = _infer_tags(
+            name=product_name,
+            ingredients_text=raw_text,
+            ingredient_tags=[],
+            labels_tags=[],
+            snapshot=None,
+        )
+        resolution = ProductResolution(
+            canonicalProductID=None,
+            source=source,
+            confidence=round(confidence_score, 3),
+            nutritionSnapshot=None,
+            isDirectional=True,
+        )
+        product = ProductCandidate(
+            id=f"directional:{hashlib.sha1((input.barcode or raw_text or product_name).encode('utf-8')).hexdigest()[:12]}",
+            name=product_name,
+            brand="Directional read",
+            productType=product_type,
+            barcode=(input.barcode or "").strip() or None,
+            headline="No exact packaged-food match yet. This read is directional.",
+            ingredients=[Ingredient(name=item) for item in _ingredient_lines(raw_text, [])],
+            claims=[],
+            tags=tags,
+            alternativeIDs=[],
+            notes=[
+                "No exact packaged-food match was found yet.",
+                "Use this read directionally and rescan when a clearer barcode or label is available.",
+            ],
+            lookupTokens=_lookup_tokens(product_name, "Directional read", tag_text, []),
+            resolution=resolution,
+        )
+        confidence = ConfidenceLevel.low if confidence_score < 0.6 else ConfidenceLevel.medium
+        product = ensure_product_resolution_semantics(
+            product,
+            confidence=confidence,
+            identity_source=source,
+            fact_sources=(source,),
+        )
+        return ResolverResult(
+            product=product,
+            confidence=confidence,
+            resolution_confidence=confidence_score,
+            is_directional=True,
+            identity_source=source,
+            fact_sources=(source,),
+            fallback_reason=fallback_reason,
+        )
+
+
+class _OpenFoodFactsIdentityStep:
+    def __init__(
+        self,
+        settings: Settings,
+        fetch_json: Callable[[str], dict[str, Any]],
+    ) -> None:
+        self._settings = settings
+        self._fetch_json = fetch_json
+        self._factory = _ProductCandidateFactory()
+
+    def resolve(self, input: ScanInput) -> ResolverResult:
+        if input.productTypeHint not in {None, ProductType.food}:
+            return self._directional(
+                input,
+                fallback_reason="food_first_scope",
+                confidence_score=0.32,
+            )
+        if input.barcode and input.sourceType in {ScanSource.liveBarcode, ScanSource.manualBarcode}:
+            return self._resolve_barcode(input)
+        if input.sourceType in {ScanSource.mealPhoto, ScanSource.menuPhoto}:
+            return self._directional(
+                input,
+                fallback_reason="non_packaged_directional_mode",
+                confidence_score=0.34 if input.sourceType == ScanSource.menuPhoto else 0.38,
+            )
+        if input.rawText:
+            return self._resolve_label_text(input)
+        return self._directional(
+            input,
+            fallback_reason="empty_input",
+            confidence_score=0.18,
+        )
+
+    def _resolve_barcode(self, input: ScanInput) -> ResolverResult:
+        barcode = (input.barcode or "").strip()
+        if not barcode:
+            return self._directional(
+                input,
+                fallback_reason="blank_barcode",
+                confidence_score=0.18,
+            )
+
+        try:
+            payload = self._fetch_json(
+                f"{self._settings.open_food_facts_base_url}/api/v2/product/{quote_plus(barcode)}.json"
+                f"?fields={OFF_PRODUCT_FIELDS}"
+            )
+        except (HTTPError, URLError, TimeoutError) as exc:
+            return self._directional(
+                input,
+                fallback_reason=f"off_barcode_error:{exc.__class__.__name__}",
+                confidence_score=0.24,
+            )
+
+        product_payload = payload.get("product") if isinstance(payload, dict) else None
+        status = payload.get("status") if isinstance(payload, dict) else None
+        if status != 1 or not isinstance(product_payload, dict):
+            return self._directional(
+                input,
+                fallback_reason="off_barcode_miss",
+                confidence_score=0.28,
+            )
+
+        resolution_confidence = 0.93 if product_payload.get("nutrition_data") == "on" else 0.86
+        product = self._factory.off_product_to_candidate(
+            product_payload,
+            resolution_confidence=resolution_confidence,
+            is_directional=False,
+            headline="Exact barcode match from Open Food Facts.",
+        )
+        return ResolverResult(
+            product=product,
+            confidence=ConfidenceLevel.high,
+            resolution_confidence=resolution_confidence,
+            is_directional=False,
+            identity_source=ProductResolutionSource.openFoodFacts,
+            fact_sources=(ProductResolutionSource.openFoodFacts,),
+        )
+
+    def _resolve_label_text(self, input: ScanInput) -> ResolverResult:
+        raw_text = (input.rawText or "").strip()
+        meaningful_tokens = _meaningful_tokens(raw_text)
+        if len(meaningful_tokens) < 2:
+            return self._directional(
+                input,
+                fallback_reason="label_text_too_thin",
+                confidence_score=0.34,
+            )
+
+        try:
+            payload = self._fetch_json(
+                f"{self._settings.open_food_facts_base_url}/api/v2/search"
+                f"?search_terms={quote_plus(raw_text[:180])}"
+                f"&fields={OFF_SEARCH_FIELDS}"
+                f"&page_size=6"
+            )
+        except (HTTPError, URLError, TimeoutError) as exc:
+            return self._directional(
+                input,
+                fallback_reason=f"off_search_error:{exc.__class__.__name__}",
+                confidence_score=0.38,
+            )
+
+        products = payload.get("products") if isinstance(payload, dict) else None
+        if not isinstance(products, list) or not products:
+            return self._directional(
+                input,
+                fallback_reason="off_search_empty",
+                confidence_score=0.42,
+            )
+
+        scored = [
+            (self._score_search_hit(product, meaningful_tokens), product)
+            for product in products
+            if isinstance(product, dict)
+        ]
+        scored = [item for item in scored if item[0] > 0]
+        if not scored:
+            return self._directional(
+                input,
+                fallback_reason="off_search_unranked",
+                confidence_score=0.42,
+            )
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        top_score, top_product = scored[0]
+        next_score = scored[1][0] if len(scored) > 1 else 0.0
+        if top_score < 0.68 or top_score < next_score + 0.08:
+            return self._directional(
+                input,
+                fallback_reason="off_search_low_confidence",
+                confidence_score=min(0.56, max(top_score, 0.44)),
+            )
+
+        confidence_level = ConfidenceLevel.high if top_score >= 0.83 else ConfidenceLevel.medium
+        product = self._factory.off_product_to_candidate(
+            top_product,
+            resolution_confidence=top_score,
+            is_directional=False,
+            headline="Resolved from label text against Open Food Facts.",
+        )
+        return ResolverResult(
+            product=product,
+            confidence=confidence_level,
+            resolution_confidence=top_score,
+            is_directional=False,
+            identity_source=ProductResolutionSource.openFoodFacts,
+            fact_sources=(ProductResolutionSource.openFoodFacts,),
+        )
+
+    def _directional(
+        self,
+        input: ScanInput,
+        *,
+        fallback_reason: str,
+        confidence_score: float,
+    ) -> ResolverResult:
+        return self._factory.build_directional_result(
+            input,
+            fallback_reason=fallback_reason,
+            confidence_score=confidence_score,
+            source=ProductResolutionSource.agentInferred,
+        )
+
+    def _score_search_hit(self, product: dict[str, Any], query_tokens: set[str]) -> float:
+        name_tokens = _meaningful_tokens(_clean_text(product.get("product_name")) or "")
+        brand_tokens = _meaningful_tokens(_clean_text(product.get("brands")) or "")
+        ingredient_tokens = _meaningful_tokens(_clean_text(product.get("ingredients_text")) or "")
+        category_tokens = _meaningful_tokens(" ".join(_string_list(product.get("categories_tags"))))
+
+        coverage = _token_overlap(query_tokens, name_tokens | brand_tokens | ingredient_tokens)
+        name_overlap = _token_overlap(query_tokens, name_tokens)
+        ingredient_overlap = _token_overlap(query_tokens, ingredient_tokens)
+        nutrition_bonus = 0.08 if product.get("nutrition_data") == "on" else 0.0
+        category_bonus = 0.04 if category_tokens else 0.0
+        return min(0.95, coverage * 0.60 + name_overlap * 0.22 + ingredient_overlap * 0.12 + nutrition_bonus + category_bonus)
+
+
+class _USDANutritionEnrichmentStep:
+    def __init__(
+        self,
+        settings: Settings,
+        post_json: Callable[[str, dict[str, Any]], dict[str, Any]],
+    ) -> None:
+        self._settings = settings
+        self._post_json = post_json
+
+    def enrich(self, result: ResolverResult, input: ScanInput) -> ResolverResult:
+        if result.is_directional or not self._settings.usda_api_key:
+            return result
+        resolution = result.product.resolution
+        if resolution is None:
+            return result
+        if _nutrition_is_complete_enough(resolution.nutritionSnapshot):
+            return result
+
+        usda_food = self._search_food(result.product, input)
+        if usda_food is None:
+            return result
+
+        snapshot = _usda_food_to_snapshot(usda_food)
+        if snapshot is None or not _snapshot_adds_signal(snapshot, resolution.nutritionSnapshot):
+            return result
+
+        updated_product = result.product.model_copy(
+            update={
+                "notes": list(result.product.notes)
+                + ["Nutrient snapshot enriched with USDA FoodData Central."],
+                "resolution": resolution.model_copy(update={"nutritionSnapshot": snapshot}),
+            }
+        )
+        fact_sources = _append_fact_source(result.fact_sources, ProductResolutionSource.usdaFoodDataCentral)
+        updated_product = ensure_product_resolution_semantics(
+            updated_product,
+            confidence=result.confidence,
+            identity_source=result.identity_source,
+            fact_sources=fact_sources,
+        )
+        return ResolverResult(
+            product=updated_product,
+            confidence=result.confidence,
+            resolution_confidence=result.resolution_confidence,
+            is_directional=False,
+            identity_source=result.identity_source,
+            fact_sources=fact_sources,
+            fallback_reason=result.fallback_reason,
+        )
+
+    def _search_food(self, product: ProductCandidate, input: ScanInput) -> dict[str, Any] | None:
+        try:
+            payload = self._post_json(
+                f"{self._settings.usda_base_url}/foods/search?api_key={quote_plus(self._settings.usda_api_key or '')}",
+                {
+                    "query": " ".join(part for part in [product.brand, product.name] if part).strip() or product.name,
+                    "dataType": ["Branded"],
+                    "pageSize": 5,
+                },
+            )
+        except (HTTPError, URLError, TimeoutError):
+            return None
+
+        foods = payload.get("foods") if isinstance(payload, dict) else None
+        if not isinstance(foods, list):
+            return None
+
+        barcode = (input.barcode or product.barcode or "").strip()
+        if barcode:
+            for food in foods:
+                if isinstance(food, dict) and str(food.get("gtinUpc") or "").strip() == barcode:
+                    return food
+
+        query_tokens = _meaningful_tokens(f"{product.brand} {product.name}")
+        ranked: list[tuple[float, dict[str, Any]]] = []
+        for food in foods:
+            if not isinstance(food, dict):
+                continue
+            haystack = " ".join(
+                part
+                for part in [
+                    str(food.get("description") or ""),
+                    str(food.get("brandOwner") or ""),
+                    str(food.get("brandName") or ""),
+                    str(food.get("ingredients") or ""),
+                ]
+                if part
+            )
+            overlap = _token_overlap(query_tokens, _meaningful_tokens(haystack))
+            if overlap <= 0:
+                continue
+            ranked.append((overlap, food))
+
+        if not ranked:
+            return None
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return ranked[0][1] if ranked[0][0] >= 0.72 else None
+
+
+def _append_fact_source(
+    sources: tuple[ProductResolutionSource, ...],
+    source: ProductResolutionSource,
+) -> tuple[ProductResolutionSource, ...]:
+    if source in sources:
+        return sources
+    return (*sources, source)
 
 
 def _clean_text(value: Any) -> str | None:

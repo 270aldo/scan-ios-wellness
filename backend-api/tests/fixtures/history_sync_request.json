@@ -29,6 +29,7 @@
     {
       "created_at": 777777957.0,
       "favorite_id": "bf45c73b-480b-59e7-9721-c8177b703f17",
+      "related_product_id": "product-manual",
       "scan_event_id": "1d11cd35-662e-5873-bec0-2b6adf07f06a",
       "summary": "Strong fit for calmer energy and digestion support.",
       "title": "Balanced Protein Yogurt"
@@ -130,6 +131,9 @@
           ],
           "productType": "food",
           "resolution": null,
+          "resolution_semantics": [
+            "low_confidence"
+          ],
           "tags": []
         },
         "swap_suggestions": [],
@@ -213,6 +217,9 @@
           ],
           "productType": "food",
           "resolution": null,
+          "resolution_semantics": [
+            "low_confidence"
+          ],
           "tags": []
         },
         "source": "manualLabel",

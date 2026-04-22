@@ -1143,7 +1143,7 @@ final class WellnessLensTests: XCTestCase {
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(StoredAppState.self, from: data)
 
-        XCTAssertEqual(decoded.schemaVersion, 6)
+        XCTAssertEqual(decoded.schemaVersion, 7)
         XCTAssertEqual(decoded.onboardingDraft?.currentStep, .consent)
         XCTAssertEqual(decoded.onboardingDraft?.formData, .starter)
         XCTAssertEqual(decoded.onboardingDraft?.createdAt, createdAt)
@@ -1172,7 +1172,7 @@ final class WellnessLensTests: XCTestCase {
         let data = try JSONEncoder().encode(state)
         let decoded = try JSONDecoder().decode(StoredAppState.self, from: data)
 
-        XCTAssertEqual(decoded.schemaVersion, 6)
+        XCTAssertEqual(decoded.schemaVersion, 7)
         XCTAssertNil(decoded.conversationThreads.first?.messages.first?.coachPayload)
     }
 
@@ -1788,6 +1788,180 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(plan.verdictTitle, "Strong fit for today")
     }
 
+    @MainActor
+    func testFollowUpCheckInClosesExperimentByStableProductIdentity() async throws {
+        let analysis = makeRemoteReadyAnalysis()
+        let model = AppModel(
+            services: makeServices(
+                scanService: StubScanService(analysis: analysis)
+            )
+        )
+
+        await model.analyzeBarcode("850000001")
+        let event = try XCTUnwrap(model.scanEvents.first)
+        model.experiments = [
+            Experiment(
+                title: "Retest legacy title",
+                hypothesis: "Confirm the stronger packaged-food identity path.",
+                status: .active,
+                relatedProductID: analysis.resolvedProduct.stableIdentityKey,
+                relatedGoal: .steadyEnergy,
+                createdAt: .now,
+                lastUpdatedAt: .now
+            )
+        ]
+
+        model.addCheckIn(
+            energy: 4,
+            skin: 3,
+            bloatingRelief: 4,
+            cravingControl: 3,
+            mood: 4,
+            note: "",
+            satiety: 4,
+            readHelpful: true,
+            linkedScanIDs: [event.id]
+        )
+
+        XCTAssertEqual(model.experiments.first?.status, .learned)
+    }
+
+    @MainActor
+    func testFollowUpCheckInKeepsLegacyExperimentTitleFallbackWithoutRelatedProductID() async throws {
+        let analysis = makeAnalysis(barcode: "850000001")
+        let model = AppModel(
+            services: makeServices(
+                scanService: StubScanService(analysis: analysis)
+            )
+        )
+
+        await model.analyzeBarcode("850000001")
+        let event = try XCTUnwrap(model.scanEvents.first)
+        model.experiments = [
+            Experiment(
+                title: "Retest \(analysis.resolvedProduct.name)",
+                hypothesis: "Fallback title matching should stay backward compatible.",
+                status: .active,
+                relatedGoal: .steadyEnergy,
+                createdAt: .now,
+                lastUpdatedAt: .now
+            )
+        ]
+
+        model.addCheckIn(
+            energy: 4,
+            skin: 3,
+            bloatingRelief: 4,
+            cravingControl: 3,
+            mood: 4,
+            note: "",
+            satiety: 4,
+            readHelpful: true,
+            linkedScanIDs: [event.id]
+        )
+
+        XCTAssertEqual(model.experiments.first?.status, .learned)
+    }
+
+    func testProductReferenceOverlapBridgesStableAndCanonicalAliases() throws {
+        let analysis = makeRemoteReadyAnalysis()
+        let scanReference = analysis.productReference()
+        let routineReference = RoutineItem(
+            productID: analysis.resolvedProduct.id,
+            productName: analysis.resolvedProduct.name,
+            cadenceSummary: "Keep as a likely repeat choice",
+            note: "Canonical provider-backed routine.",
+            createdAt: .now
+        ).productReference
+
+        XCTAssertEqual(scanReference.graphID, analysis.resolvedProduct.stableIdentityKey)
+        XCTAssertTrue(scanReference.aliases.contains(analysis.resolvedProduct.id))
+        XCTAssertTrue(scanReference.aliases.contains(analysis.resolvedProduct.stableIdentityKey))
+        XCTAssertTrue(scanReference.overlaps(with: try XCTUnwrap(routineReference)))
+    }
+
+    func testScanEventProductReferenceCarriesEventAliasesAlongsideResolvedIdentity() throws {
+        let analysis = makeRemoteReadyAnalysis()
+        let input = ScanInput(
+            sourceType: .manualBarcode,
+            barcode: analysis.resolvedProduct.barcode,
+            capturedImageRef: nil,
+            rawText: nil,
+            productTypeHint: .food,
+            locale: "en_US"
+        )
+        let event = RootOrchestrator().composeScanEvent(
+            input: input,
+            legacyAnalysis: analysis,
+            structuredAnalysis: nil,
+            localProfileID: "local-user",
+            recentScans: [],
+            recentCheckIns: [],
+            latencyMs: 90
+        )
+
+        XCTAssertEqual(event.productReference.graphID, event.preferredRelatedProductID)
+        XCTAssertTrue(event.productReference.aliases.contains(event.id))
+        XCTAssertTrue(event.productReference.aliases.contains("scan:\(event.id)"))
+        XCTAssertTrue(event.productReference.aliases.contains(analysis.resolvedProduct.id))
+    }
+
+    func testProductResolutionSemanticsDeriveFromDecodedLegacyPayloadWithoutExplicitField() throws {
+        let payload = Data(
+            #"""
+            {
+              "id": "off:7501031311309",
+              "name": "Greek Yogurt",
+              "brand": "Good Farm",
+              "productType": "food",
+              "barcode": "7501031311309",
+              "headline": "Exact packaged-food match from Open Food Facts.",
+              "ingredients": [{ "name": "Milk" }],
+              "claims": [],
+              "tags": [],
+              "alternativeIDs": [],
+              "notes": [],
+              "lookupTokens": ["greek", "yogurt"],
+              "resolution": {
+                "canonical_product_id": "off:7501031311309",
+                "source": "openFoodFacts",
+                "confidence": 0.42,
+                "nutrition_snapshot": null,
+                "is_directional": false
+              }
+            }
+            """#.utf8
+        )
+
+        let product = try JSONDecoder().decode(ProductCandidate.self, from: payload)
+
+        XCTAssertNil(product.resolutionSemantics)
+        XCTAssertEqual(
+            product.resolvedResolutionSemantics,
+            [.canonical, .providerBacked, .lowConfidence]
+        )
+    }
+
+    func testProductGraphKeyPrefersExplicitProvisionalSemanticOverLegacyFallbacks() {
+        var analysis = makeAnalysis(barcode: "850000001", source: .labelPhoto)
+        analysis.resolvedProduct.id = "product-manual"
+        analysis.resolvedProduct.resolution = nil
+        analysis.resolvedProduct.resolutionSemantics = [.provisional]
+
+        XCTAssertEqual(analysis.productGraphKey(scanEventID: "scan-semantic"), "scan:scan-semantic")
+        XCTAssertEqual(analysis.productReference(scanEventID: "scan-semantic").graphID, "scan:scan-semantic")
+    }
+
+    func testLILAVerdictResolvedProductPreservesExplicitResolutionSemantics() {
+        var analysis = makeRemoteReadyAnalysis()
+        analysis.resolvedProduct.resolutionSemantics = [.canonical, .providerBacked]
+
+        let verdict = analysis.lilaVerdict(context: UserContext.starter.lilaContext())
+
+        XCTAssertEqual(verdict.resolvedProduct.resolutionSemantics, [.canonical, .providerBacked])
+        XCTAssertEqual(verdict.resolvedProduct.resolvedResolutionSemantics, [.canonical, .providerBacked])
+    }
+
     func testAnalysisPresentationPlanPrefersSwapForAvoidVerdictWhenAlternativeExists() {
         let analysis = makeAnalysis(barcode: "850000002")
         XCTAssertFalse(analysis.alternatives.isEmpty)
@@ -2308,6 +2482,71 @@ final class WellnessLensTests: XCTestCase {
 
         let linked = try XCTUnwrap(model.pantryAnalysis(for: pantryItem))
         XCTAssertEqual(linked.id, analysis.id)
+    }
+
+    @MainActor
+    func testPantryAnalysisUsesStableRelatedProductIdentityBeforeTitleFallback() async throws {
+        let analysis = makeRemoteReadyAnalysis()
+        let model = AppModel(
+            services: makeServices(
+                subscriptionStatus: .pro,
+                scanService: StubScanService(analysis: analysis)
+            )
+        )
+
+        await model.analyzeBarcode("850000001")
+
+        let pantryItem = PantryItem(
+            id: "pantry-canonical",
+            title: "Different shelf title",
+            summary: analysis.overallSummary,
+            relatedProductID: analysis.resolvedProduct.stableIdentityKey,
+            sourceKind: .manualSave,
+            sourceScanID: nil,
+            createdAt: .now,
+            lastUpdatedAt: .now,
+            archivedAt: nil
+        )
+
+        let linked = try XCTUnwrap(model.pantryAnalysis(for: pantryItem))
+        XCTAssertEqual(linked.id, analysis.id)
+    }
+
+    @MainActor
+    func testPantryRoutineMembershipUsesResolvedProductAliasesBeforeTitleFallback() async throws {
+        let analysis = makeRemoteReadyAnalysis()
+        let model = AppModel(
+            services: makeServices(
+                subscriptionStatus: .pro,
+                scanService: StubScanService(analysis: analysis)
+            )
+        )
+
+        await model.analyzeBarcode("850000001")
+        let event = try XCTUnwrap(model.scanEvents.first)
+        model.routines = [
+            RoutineItem(
+                productID: analysis.resolvedProduct.id,
+                productName: analysis.resolvedProduct.name,
+                cadenceSummary: "Keep as a likely repeat choice",
+                note: "Saved after a supportive read.",
+                createdAt: .now
+            )
+        ]
+
+        let pantryItem = PantryItem(
+            id: "pantry-routine-canonical",
+            title: "Mismatched pantry title",
+            summary: analysis.overallSummary,
+            relatedProductID: analysis.resolvedProduct.stableIdentityKey,
+            sourceKind: .manualSave,
+            sourceScanID: event.id,
+            createdAt: .now,
+            lastUpdatedAt: .now,
+            archivedAt: nil
+        )
+
+        XCTAssertTrue(model.pantryItemIsInRoutine(pantryItem))
     }
 
     @MainActor
