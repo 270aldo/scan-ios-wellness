@@ -339,7 +339,13 @@ protocol SubscriptionClient: AnyObject {
 
 protocol ScanService: Sendable {
     var featuredProducts: [ProductCandidate] { get }
-    func analyze(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis
+    func analyze(input: ScanInput, userContext: UserContext, scanContext: ScanContext?) async throws -> ScanAnalysis
+}
+
+extension ScanService {
+    func analyze(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis {
+        try await analyze(input: input, userContext: userContext, scanContext: nil)
+    }
 }
 
 enum ScanServiceError: LocalizedError {
@@ -410,7 +416,7 @@ final class DemoScanService: ScanService, @unchecked Sendable {
         self.featuredProducts = Array(catalog.prefix(5))
     }
 
-    func analyze(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis {
+    func analyze(input: ScanInput, userContext: UserContext, scanContext: ScanContext? = nil) async throws -> ScanAnalysis {
         guard input.barcode?.isEmpty == false || input.rawText?.isEmpty == false else {
             throw ScanServiceError.emptyInput
         }
@@ -423,6 +429,7 @@ final class DemoScanService: ScanService, @unchecked Sendable {
         return analysisEngine.analyze(
             product: product,
             userContext: userContext,
+            scanContext: scanContext,
             source: input.sourceType,
             confidence: resolution.confidence,
             catalog: catalog

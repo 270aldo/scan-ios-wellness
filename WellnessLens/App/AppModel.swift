@@ -1429,13 +1429,19 @@ final class AppModel {
         let startedAt = Date()
 
         do {
-            let analysis = try await services.scanService.analyze(input: input, userContext: userContext)
+            let biometrics = await services.healthKitService.currentSnapshot(for: userProfile)
+            let scanContext = userProfile.scanContext(biometrics: biometrics)
+            let analysis = try await services.scanService.analyze(
+                input: input,
+                userContext: userContext,
+                scanContext: scanContext
+            )
             latestAnalysis = analysis
             let structuredAnalysis = await preferredStructuredAnalysis(
                 for: input,
-                legacyAnalysis: analysis
+                legacyAnalysis: analysis,
+                scanContext: scanContext
             )
-            let biometrics = await services.healthKitService.currentSnapshot(for: userProfile)
             let event = rootOrchestrator.composeScanEvent(
                 input: input,
                 legacyAnalysis: analysis,
@@ -1443,6 +1449,7 @@ final class AppModel {
                 localProfileID: localProfileID,
                 recentScans: scanEvents,
                 recentCheckIns: checkInEvents,
+                scanContext: scanContext,
                 latencyMs: Int(Date().timeIntervalSince(startedAt) * 1000)
             )
             scanEvents.insert(event, at: 0)
@@ -1524,7 +1531,8 @@ final class AppModel {
 
     private func preferredStructuredAnalysis(
         for input: ScanInput,
-        legacyAnalysis: ScanAnalysis
+        legacyAnalysis: ScanAnalysis,
+        scanContext: ScanContext?
     ) async -> AnalysisEnvelope? {
         guard featureFlags.structuredAnalysis, let backendAPI = services.backendAPI else {
             if services.backendAPI == nil {
@@ -1555,7 +1563,8 @@ final class AppModel {
                 input: input,
                 profile: userProfile,
                 recentScans: scanEvents,
-                recentCheckIns: checkInEvents
+                recentCheckIns: checkInEvents,
+                scanContext: scanContext
             )
             updateBackendStatus(.structuredScan, state: .live, detail: "Remote AnalysisEnvelope applied.")
             return analysis
@@ -1907,10 +1916,12 @@ final class AppModel {
             from: targetAnalysis.resolvedProduct,
             targetConfidence: targetAnalysis.confidence
         )
+        let scanContext = sourceEvent.normalizedPayload.scanContext
 
         var correctedAnalysis = AnalysisEngine().analyze(
             product: correctedProduct,
             userContext: userContext,
+            scanContext: scanContext,
             source: sourceAnalysis.source,
             confidence: targetAnalysis.confidence,
             catalog: SampleCatalog.products

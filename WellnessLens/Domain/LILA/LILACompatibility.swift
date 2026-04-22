@@ -70,6 +70,32 @@ extension UserProfile {
 
         return baseContext.applying(biometrics: biometrics)
     }
+
+    func scanContext(biometrics: BiometricsSnapshot? = nil) -> ScanContext? {
+        let phase = lilaContext(biometrics: biometrics).biology.currentPhase.flatMap { phase -> ScanCyclePhase? in
+            switch phase {
+            case .menstrual:
+                .menstrual
+            case .follicular:
+                .follicular
+            case .ovulatory:
+                .ovulatory
+            case .luteal:
+                .luteal
+            }
+        }
+
+        let normalized = ScanContext(
+            cyclePhase: phase,
+            isInAnabolicWindow: biometrics?.trainingLoad?.isInAnabolicWindow,
+            sleepHours: biometrics?.sleepHours,
+            hrvMilliseconds: biometrics?.hrvMilliseconds,
+            restingHeartRate: biometrics?.restingHeartRate,
+            wristTemperatureDeltaCelsius: biometrics?.wristTemperatureDeltaCelsius
+        )
+
+        return normalized.isEmpty ? nil : normalized
+    }
 }
 
 extension UserContext {

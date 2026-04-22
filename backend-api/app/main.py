@@ -108,7 +108,9 @@ async def analyze_product(
     request: AnalyzeProductRequest,
     services: BackendServices = Depends(get_backend_services),
 ) -> AnalyzeProductResponse:
-    return AnalyzeProductResponse(analysis=services.analyze_product(request.input, request.userContext))
+    return AnalyzeProductResponse(
+        analysis=services.analyze_product(request.input, request.userContext, request.scanContext)
+    )
 
 
 @app.post("/v1/scan/analyze", response_model=AnalyzeStructuredScanResponse, dependencies=[Depends(validate_client_context)])
@@ -122,6 +124,7 @@ async def analyze_structured(
             profile=request.profile,
             recent_scans=request.recentScans,
             recent_checkins=request.recentCheckIns,
+            scan_context=request.scanContext,
         )
     )
 
