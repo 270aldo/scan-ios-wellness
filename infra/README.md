@@ -20,3 +20,26 @@ Terraform foundation for the WellnessLens production stack on GCP.
 - `envs/prod`
 
 Each environment root wires the same core module with environment-specific names.
+
+## Firestore Security Rules
+
+Rules live at the repo root in `firestore.rules` and are deployed with the
+Firebase CLI (not Terraform). Keeping rules out of Terraform means the
+application team can iterate on them without a full `terraform apply`, and
+Firebase validates them in the deploy pipeline.
+
+```bash
+# From the repo root
+firebase use wellnesslens-prod           # or -staging / -dev
+firebase deploy --only firestore:rules
+```
+
+Full-fidelity local validation requires Java plus the Firebase emulator:
+
+```bash
+firebase emulators:exec --only firestore --project demo-wellnesslens 'echo OK'
+```
+
+CI should run the emulator check on every PR that touches `firestore.rules`.
+See `docs/PRODUCTION_SETUP_CHECKLIST.md` for the ordering between Terraform
+apply, backend deploy, and rules deploy.

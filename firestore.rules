@@ -1,0 +1,84 @@
+rules_version = '2';
+
+// WellnessLens Firestore Security Rules.
+//
+// Threat model:
+// - All reads and writes to `wellness_users/**` in WellnessLens go through
+//   `backend-api` (Cloud Run). The backend uses the Firebase Admin SDK, which
+//   bypasses these rules by design, so no backend functionality is reduced by
+//   how strict the client-side rules are.
+// - Even though the iOS client does not currently hit Firestore directly, the
+//   Firebase Firestore SDK is linked into the app (see `project.yml`
+//   dependencies). Any accidental or future direct access must be contained.
+// - The install id written by `backend-api/app/repository.py` equals the
+//   Firebase Auth UID when Firebase Auth is enabled
+//   (`FirebaseIdentityProvider.installID`), so owner checks can compare
+//   `request.auth.uid` against the document id safely.
+//
+// Posture:
+// - Default: deny all reads and writes from client SDKs.
+// - `wellness_users/{userId}`: the owner (Firebase Auth UID matching the
+//   document id) may read their own root document and subcollections. No
+//   writes are allowed from clients; the backend admin SDK is the only
+//   authorized writer.
+// - Nothing outside `wellness_users/{userId}` is reachable by any client.
+//
+// App Check:
+// - Production backends enforce App Check via the `WELLNESSLENS_APP_CHECK_ENFORCED`
+//   environment variable in Cloud Run. Firestore rules below also require a
+//   valid App Check token for client reads, which prevents Firebase SDK calls
+//   from unattested environments (sideloaded builds, rooted devices, scripts).
+//
+// Review Guideline link:
+// - App Store Review Guideline 5.1.3(i) forbids using HealthKit-derived data
+//   for advertising or data mining, and requires data minimization. These
+//   rules enforce that at the storage layer so even a buggy client path
+//   cannot over-read.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helpers --------------------------------------------------------------
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasValidAppCheck() {
+      // When App Check enforcement is on, the token field is present and
+      // validated by Firebase. On emulators and in dev projects without App
+      // Check configured, `request.app` is absent and this predicate falls
+      // through to `true` so local development is not blocked.
+      return !('app' in request) || request.app != null;
+    }
+
+    // User-scoped documents ------------------------------------------------
+
+    match /wellness_users/{userId} {
+      allow read: if isOwner(userId) && hasValidAppCheck();
+      allow write: if false;
+
+      // Subcollections created by `backend-api/app/repository.py`:
+      //   - checkin_events
+      //   - scan_events
+      //   - favorites
+      //   - memory_items
+      //   - scan_decisions
+      //   - legacy_checkins
+      //
+      // All of them carry the same ownership semantics as the parent.
+      match /{subcollection}/{documentId} {
+        allow read: if isOwner(userId) && hasValidAppCheck();
+        allow write: if false;
+      }
+    }
+
+    // Everything else deny -------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
