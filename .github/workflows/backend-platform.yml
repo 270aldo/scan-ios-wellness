@@ -40,7 +40,7 @@ jobs:
         run: pytest
 
   ios:
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Select simulator
