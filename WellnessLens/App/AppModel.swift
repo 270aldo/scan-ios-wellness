@@ -1212,10 +1212,12 @@ final class AppModel {
             )
         else {
             let structuredAnalysis = sourceEvent.analysis
+            let scanContext = sourceEvent.normalizedPayload.scanContext
             let fallbackVerdict = scanVerdicts.first(where: { $0.scanEventID == sourceEvent.id })?.verdict
                 ?? structuredAnalysis.lilaVerdict(
                     fallbackAnalysis: analysis,
-                    context: userProfile.lilaContext()
+                    context: userProfile.lilaContext(),
+                    scanContext: scanContext
                 )
             return PresentedScanAnalysisContext(
                 analysis: analysis,
@@ -1944,7 +1946,8 @@ final class AppModel {
 
         let correctedVerdict = correctedEnvelope.lilaVerdict(
             fallbackAnalysis: correctedAnalysis,
-            context: userProfile.lilaContext()
+            context: userProfile.lilaContext(),
+            scanContext: scanContext
         )
 
         return PresentedScanAnalysisContext(
@@ -2035,7 +2038,8 @@ final class AppModel {
         latestVerdict = scanVerdicts.first(where: { $0.scanEventID == latestEvent.id })?.verdict
             ?? latestEvent.analysis.lilaVerdict(
                 fallbackAnalysis: latestEvent.legacyAnalysis,
-                context: userProfile.lilaContext()
+                context: userProfile.lilaContext(),
+                scanContext: latestEvent.normalizedPayload.scanContext
             )
     }
 
@@ -2097,7 +2101,8 @@ final class AppModel {
                     scanEventID: event.id,
                     verdict: event.analysis.lilaVerdict(
                         fallbackAnalysis: event.legacyAnalysis,
-                        context: context
+                        context: context,
+                        scanContext: event.normalizedPayload.scanContext
                     ),
                     createdAt: event.timestamp
                 )

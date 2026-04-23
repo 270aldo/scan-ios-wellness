@@ -124,12 +124,13 @@ extension UserContext {
 extension ScanAnalysis {
     func lilaVerdict(
         context: LILADomain.UserContext,
-        biometrics: BiometricsSnapshot? = nil
+        biometrics: BiometricsSnapshot? = nil,
+        scanContext: ScanContext? = nil
     ) -> LILADomain.ScanVerdict {
         let dominantLens = lensScores.max(by: { $0.score < $1.score })?.lens.lilaLens ?? .energyAndMood
         let score = Int(Double(lensScores.map(\.score).reduce(0, +)) / Double(max(lensScores.count, 1)))
         let fit = score.lilaFitLevel
-        let contextFactors = makeContextFactors(context: context, biometrics: biometrics)
+        let contextFactors = makeContextFactors(context: context, biometrics: biometrics, scanContext: scanContext)
         let personalizedLensScores = lensScores.map {
             LILADomain.LensScore(
                 lens: $0.lens.lilaLens,
@@ -178,7 +179,7 @@ extension ScanAnalysis {
             watchouts: watchouts,
             betterSwap: alternative,
             trackPrompt: LILADomain.FollowUpPrompt(
-                triggerAfterHours: biometrics?.trainingLoad?.isInAnabolicWindow == true ? 2 : 3,
+                triggerAfterHours: hasAnabolicWindowContext(biometrics: biometrics, scanContext: scanContext) ? 2 : 3,
                 questionText: source.followUpPrompt,
                 targetLens: dominantLens,
                 expectedResponseType: .openText
@@ -206,7 +207,8 @@ extension AnalysisEnvelope {
     func lilaVerdict(
         fallbackAnalysis: ScanAnalysis?,
         context: LILADomain.UserContext,
-        biometrics: BiometricsSnapshot? = nil
+        biometrics: BiometricsSnapshot? = nil,
+        scanContext: ScanContext? = nil
     ) -> LILADomain.ScanVerdict {
         let fallbackProduct = resolvedProduct?.lilaResolvedProduct()
             ?? fallbackAnalysis?.resolvedProduct.lilaResolvedProduct()
@@ -225,7 +227,7 @@ extension AnalysisEnvelope {
                 imageURL: nil
             )
         let dominantLens = lensScores.dominantLILALens
-        let contextFactors = makeContextFactors(context: context, biometrics: biometrics)
+        let contextFactors = makeContextFactors(context: context, biometrics: biometrics, scanContext: scanContext)
         let verdict = LILADomain.ScanVerdict(
             createdAt: timestamp,
             resolvedProduct: fallbackProduct,
@@ -252,7 +254,7 @@ extension AnalysisEnvelope {
                 )
             },
             trackPrompt: followUpPrompt.isEmpty ? nil : LILADomain.FollowUpPrompt(
-                triggerAfterHours: 3,
+                triggerAfterHours: hasAnabolicWindowContext(biometrics: biometrics, scanContext: scanContext) ? 2 : 3,
                 questionText: followUpPrompt,
                 targetLens: dominantLens ?? .energyAndMood,
                 expectedResponseType: .openText
@@ -919,7 +921,8 @@ private extension LILADomain.UserContext {
 
 private func makeContextFactors(
     context: LILADomain.UserContext,
-    biometrics: BiometricsSnapshot?
+    biometrics: BiometricsSnapshot?,
+    scanContext: ScanContext? = nil
 ) -> [LILADomain.WellnessLens: [LILADomain.ContextFactor]] {
     var factors: [LILADomain.WellnessLens: [LILADomain.ContextFactor]] = [:]
 
@@ -932,17 +935,17 @@ private func makeContextFactors(
         factors[goal.primaryLens, default: []].append(factor)
     }
 
-    if let phase = biometrics?.cycleState?.currentPhase ?? context.biology.currentPhase {
+    if let phaseLabel = resolvedCyclePhaseLabel(context: context, biometrics: biometrics, scanContext: scanContext) {
         factors[.hormoneBalance, default: []].append(
             .init(
-                label: phase.displayTitle,
+                label: phaseLabel,
                 direction: .boost,
                 explanation: "Cycle-aware context is available, so hormone-fit signals carry more weight."
             )
         )
     }
 
-    if biometrics?.trainingLoad?.isInAnabolicWindow == true {
+    if hasAnabolicWindowContext(biometrics: biometrics, scanContext: scanContext) {
         factors[.bodyCompositionAndStrength, default: []].append(
             .init(
                 label: "Post-workout window",
@@ -952,7 +955,7 @@ private func makeContextFactors(
         )
     }
 
-    if let sleepHours = biometrics?.sleepHours, sleepHours < 6 {
+    if let sleepHours = biometrics?.sleepHours ?? scanContext?.sleepHours, sleepHours < 6 {
         factors[.energyAndMood, default: []].append(
             .init(
                 label: "Short sleep",
@@ -963,4 +966,33 @@ private func makeContextFactors(
     }
 
     return factors
+}
+
+private func resolvedCyclePhaseLabel(
+    context: LILADomain.UserContext,
+    biometrics: BiometricsSnapshot?,
+    scanContext: ScanContext?
+) -> String? {
+    if let phase = biometrics?.cycleState?.currentPhase ?? context.biology.currentPhase {
+        return phase.displayTitle
+    }
+    return scanContext?.cyclePhase?.displayTitle
+}
+
+private func hasAnabolicWindowContext(
+    biometrics: BiometricsSnapshot?,
+    scanContext: ScanContext?
+) -> Bool {
+    biometrics?.trainingLoad?.isInAnabolicWindow == true || scanContext?.isInAnabolicWindow == true
+}
+
+private extension ScanCyclePhase {
+    var displayTitle: String {
+        switch self {
+        case .menstrual: "Menstrual"
+        case .follicular: "Folicular"
+        case .ovulatory: "Ovulatoria"
+        case .luteal: "Lútea"
+        }
+    }
 }

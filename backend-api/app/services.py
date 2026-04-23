@@ -42,6 +42,7 @@ from app.contracts import (
     PatternContext,
     ProductCandidate,
     ProductResolutionSemantic,
+    ProductResolutionSource,
     ProductType,
     ReasonImpact,
     ReasonItem,
@@ -748,18 +749,13 @@ def build_reasons(
     reasons: list[ReasonItem] = []
 
     if product.resolution is not None:
+        directional = product_has_resolution_semantic(product, ProductResolutionSemantic.directional)
         reasons.append(
             ReasonItem(
                 id=_stable_id("reason", "resolution-signal"),
                 title="Resolution signal",
-                detail=(
-                    "Exact packaged-food match from Open Food Facts."
-                    if not product_has_resolution_semantic(product, ProductResolutionSemantic.directional)
-                    else "No exact packaged-food match yet. The scan is staying directional instead of inventing certainty."
-                ),
-                impact=ReasonImpact.positive
-                if not product_has_resolution_semantic(product, ProductResolutionSemantic.directional)
-                else ReasonImpact.caution,
+                detail=resolution_signal_detail(product),
+                impact=ReasonImpact.positive if not directional else ReasonImpact.caution,
             )
         )
 
@@ -975,11 +971,7 @@ def build_why_today(analysis: ScanAnalysis, recent_checkins: list[CheckInEvent],
         "This read is being structured server-side to match the app contract without removing the local fallback."
     ]
     if analysis.resolvedProduct.resolution is not None:
-        reasons.append(
-            "Product identity came from Open Food Facts."
-            if not product_has_resolution_semantic(analysis.resolvedProduct, ProductResolutionSemantic.directional)
-            else "Product identity is still directional because the resolver did not find a confident packaged-food match."
-        )
+        reasons.append(why_today_resolution_detail(analysis.resolvedProduct))
     if recent_checkins:
         reasons.append("Recent body-signal context is available and can shape the next decision.")
     if source == ScanSource.menuPhoto:
@@ -1014,6 +1006,44 @@ def build_recommended_actions(overall: int, product: ProductCandidate) -> list[s
         "Use a follow-up check-in if you try it anyway.",
         "Ask the strategist for the single safest next move.",
     ]
+
+
+def resolution_signal_detail(product: ProductCandidate) -> str:
+    resolution = product.resolution
+    if resolution is None:
+        return "The resolver did not contribute a stable product record."
+    if product_has_resolution_semantic(product, ProductResolutionSemantic.directional):
+        return "No exact packaged-food match yet. The scan is staying directional instead of inventing certainty."
+
+    return {
+        ProductResolutionSource.openFoodFacts: "Exact packaged-food match from Open Food Facts.",
+        ProductResolutionSource.usdaFoodDataCentral: "Matched against USDA FoodData Central for nutrient-backed food facts.",
+        ProductResolutionSource.nihDSLD: "Matched against NIH DSLD for provider-backed supplement facts.",
+        ProductResolutionSource.cosing: "Matched against CosIng for ingredient-backed cosmetic facts.",
+        ProductResolutionSource.localCatalog: "Matched against the local WellnessLens catalog for a stable product record.",
+        ProductResolutionSource.userProvided: "Matched against user-provided product details.",
+        ProductResolutionSource.userEdited: "Matched against a user-corrected product record.",
+        ProductResolutionSource.agentInferred: "Matched against a deterministic inferred product record.",
+    }.get(resolution.source, "Matched against a stable resolved product record.")
+
+
+def why_today_resolution_detail(product: ProductCandidate) -> str:
+    resolution = product.resolution
+    if resolution is None:
+        return "Product identity is not backed by a stable resolver record yet."
+    if product_has_resolution_semantic(product, ProductResolutionSemantic.directional):
+        return "Product identity is still directional because the resolver did not find a confident packaged-food match."
+
+    return {
+        ProductResolutionSource.openFoodFacts: "Product identity came from Open Food Facts.",
+        ProductResolutionSource.usdaFoodDataCentral: "Product facts came from USDA FoodData Central.",
+        ProductResolutionSource.nihDSLD: "Product identity came from NIH DSLD.",
+        ProductResolutionSource.cosing: "Product facts came from CosIng.",
+        ProductResolutionSource.localCatalog: "Product identity came from the local WellnessLens catalog.",
+        ProductResolutionSource.userProvided: "Product identity came from user-provided details.",
+        ProductResolutionSource.userEdited: "Product identity came from a manual correction.",
+        ProductResolutionSource.agentInferred: "Product identity came from a deterministic inferred record.",
+    }.get(resolution.source, "Product identity came from a stable resolver record.")
 
 
 def follow_up_prompt_for_source(source: ScanSource) -> str:

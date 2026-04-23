@@ -38,3 +38,39 @@ jobs:
         run: pip install -e .[dev]
       - name: Run agent tests
         run: pytest
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select simulator
+        id: simulator
+        run: |
+          DEVICE_ID=$(python3 - <<'PY'
+          import json
+          import subprocess
+
+          data = json.loads(subprocess.check_output([
+              "xcrun",
+              "simctl",
+              "list",
+              "devices",
+              "available",
+              "--json",
+          ]))
+
+          runtimes = sorted(data["devices"].keys(), reverse=True)
+          for runtime in runtimes:
+              for device in data["devices"][runtime]:
+                  if device.get("isAvailable") and device["name"].startswith("iPhone"):
+                      print(device["udid"])
+                      raise SystemExit(0)
+
+          raise SystemExit("No available iPhone simulator found")
+          PY
+          )
+          echo "device_id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+      - name: Build iOS app
+        run: xcodebuild -project WellnessLens.xcodeproj -scheme WellnessLens -destination "id=${{ steps.simulator.outputs.device_id }}" build CODE_SIGNING_ALLOWED=NO
+      - name: Run iOS tests
+        run: xcodebuild -project WellnessLens.xcodeproj -scheme WellnessLens -destination "id=${{ steps.simulator.outputs.device_id }}" test CODE_SIGNING_ALLOWED=NO

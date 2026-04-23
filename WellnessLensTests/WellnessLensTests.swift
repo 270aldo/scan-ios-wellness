@@ -2457,7 +2457,9 @@ final class WellnessLensTests: XCTestCase {
         let stableAnalysis = makeRemoteReadyAnalysis()
         let unstableTarget = makeDirectionalAnalysis()
 
-        let sourceEvent = makeScanEvent(
+        let baseTimestamp = Date()
+
+        var sourceEvent = makeScanEvent(
             analysis: sourceAnalysis,
             input: ScanInput(
                 sourceType: .manualLabel,
@@ -2512,7 +2514,9 @@ final class WellnessLensTests: XCTestCase {
         let sourceAnalysis = makeDirectionalAnalysis()
         let stableAnalysis = makeRemoteReadyAnalysis()
 
-        let sourceEvent = makeScanEvent(
+        let baseTimestamp = Date()
+
+        var sourceEvent = makeScanEvent(
             analysis: sourceAnalysis,
             input: ScanInput(
                 sourceType: .manualLabel,
@@ -2567,7 +2571,9 @@ final class WellnessLensTests: XCTestCase {
             wristTemperatureDeltaCelsius: nil
         )
 
-        let sourceEvent = makeScanEvent(
+        let baseTimestamp = Date()
+
+        var sourceEvent = makeScanEvent(
             analysis: sourceAnalysis,
             input: ScanInput(
                 sourceType: .manualLabel,
@@ -2579,7 +2585,7 @@ final class WellnessLensTests: XCTestCase {
             ),
             scanContext: scanContext
         )
-        let stableEvent = makeScanEvent(
+        var stableEvent = makeScanEvent(
             analysis: stableAnalysis,
             input: ScanInput(
                 sourceType: .manualBarcode,
@@ -2590,6 +2596,10 @@ final class WellnessLensTests: XCTestCase {
                 locale: "en_US"
             )
         )
+        sourceEvent.timestamp = baseTimestamp
+        sourceEvent.analysis.timestamp = baseTimestamp
+        stableEvent.timestamp = baseTimestamp.addingTimeInterval(-60)
+        stableEvent.analysis.timestamp = stableEvent.timestamp
 
         let store = InMemoryStore(snapshot: .fresh())
         store.snapshot.scanEvents = [sourceEvent, stableEvent]
@@ -2614,7 +2624,27 @@ final class WellnessLensTests: XCTestCase {
 
         XCTAssertEqual(corrected.analysis.resolvedProduct.name, stableAnalysis.resolvedProduct.name)
         XCTAssertEqual(corrected.analysis.lensScores, expected.lensScores)
+        XCTAssertEqual(corrected.verdict.trackPrompt?.triggerAfterHours, 2)
+        XCTAssertTrue(
+            corrected.verdict.lensScores
+                .first(where: { $0.lens == .hormoneBalance })?
+                .contextApplied
+                .contains(where: { $0.label == "Menstrual" }) == true
+        )
+        XCTAssertTrue(
+            corrected.verdict.lensScores
+                .first(where: { $0.lens == .bodyCompositionAndStrength })?
+                .contextApplied
+                .contains(where: { $0.label == "Post-workout window" }) == true
+        )
+        XCTAssertTrue(
+            corrected.verdict.lensScores
+                .first(where: { $0.lens == .energyAndMood })?
+                .contextApplied
+                .contains(where: { $0.label == "Short sleep" }) == true
+        )
         XCTAssertEqual(relaunchedModel.latestVerdict?.resolvedProduct.name, stableAnalysis.resolvedProduct.name)
+        XCTAssertEqual(relaunchedModel.latestVerdict?.trackPrompt?.triggerAfterHours, 2)
     }
 
     @MainActor
