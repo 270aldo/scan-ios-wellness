@@ -357,7 +357,7 @@ struct ScanView: View {
                 ScanStatusAction(title: "Use a label photo", systemImage: "photo") {
                     requestPhotoSelection(for: .labelPhoto)
                 },
-                ScanStatusAction(title: "Show manual fallback", systemImage: "ellipsis.circle") {
+                ScanStatusAction(title: "Enter details manually", systemImage: "ellipsis.circle") {
                     revealFallbackInputs(focus: .labelText)
                 }
             ]
@@ -384,7 +384,7 @@ private struct ScanHeaderCard: View {
                     .font(WLTypography.title)
                     .foregroundStyle(WLPalette.ink)
 
-                Text("Barcode and label reads are the strongest paths in this phase. Start with packaged foods first, then use meal or menu modes as directional guidance when there is no package to resolve.")
+                Text("Barcode and label reads are the strongest paths right now. Start with packaged foods first, then use meal or menu modes as directional guidance when there is no package to resolve.")
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
             }
@@ -401,7 +401,7 @@ private struct ScanPrimaryActionCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: WLProductCopy.Scan.primaryTitle,
-                    subtitle: "Use live barcode for the strongest packaged-food match. A label photo is the next-best fallback when the package is in hand.",
+                    subtitle: "Use live barcode for the strongest packaged-food match. A label photo is the next-best option when the package is in hand.",
                     systemImage: "camera.viewfinder"
                 )
 
@@ -431,7 +431,7 @@ private struct ScanModeActionsCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "More scan modes",
-                    subtitle: "Meal and menu modes stay available here, but they remain directional in this phase instead of exact packaged-food resolution.",
+                    subtitle: "Meal and menu modes stay available here, but they remain directional for now instead of exact packaged-food resolution.",
                     systemImage: "square.grid.2x2"
                 )
 

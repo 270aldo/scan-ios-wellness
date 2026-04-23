@@ -133,6 +133,17 @@ private struct PhaseTwoPaywallSheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var plans: [SubscriptionPlan] = []
+
+    private var targetPlan: SubscriptionPlan? {
+        plans.first(where: { $0.tier == context.targetTier })
+            ?? plans.first
+    }
+
+    private var secondaryPlan: SubscriptionPlan? {
+        guard context.targetTier == .plus else { return nil }
+        return plans.first(where: { $0.tier == .pro })
+    }
 
     var body: some View {
         NavigationStack {
@@ -150,7 +161,7 @@ private struct PhaseTwoPaywallSheet: View {
                             .foregroundStyle(WLPalette.inkSoft)
 
                         VStack(alignment: .leading, spacing: WLSpacing.xs) {
-                            Text("Preview")
+                            Text("What unlocks")
                                 .font(WLTypography.captionStrong)
                                 .foregroundStyle(WLPalette.ink)
 
@@ -173,9 +184,13 @@ private struct PhaseTwoPaywallSheet: View {
                             }
                         }
 
+                        if let plan = targetPlan {
+                            planDisclosureCard(plan)
+                        }
+
                         VStack(alignment: .leading, spacing: WLSpacing.s) {
                             WLPrimaryButton(
-                                title: context.targetTier == .pro ? "Unlock Pro" : "Unlock Plus",
+                                title: primaryButtonTitle,
                                 systemImage: "arrow.up.right.circle"
                             ) {
                                 Task {
@@ -185,6 +200,7 @@ private struct PhaseTwoPaywallSheet: View {
                                     }
                                 }
                             }
+                            .accessibilityHint("Opens Apple's purchase confirmation. You can cancel before being charged.")
 
                             ViewThatFits(in: .horizontal) {
                                 HStack(spacing: WLSpacing.s) {
@@ -196,6 +212,8 @@ private struct PhaseTwoPaywallSheet: View {
                                 }
                             }
                         }
+
+                        legalFooter
                     }
                 }
             }
@@ -209,6 +227,89 @@ private struct PhaseTwoPaywallSheet: View {
                     .font(WLTypography.captionStrong)
                 }
             }
+            .task {
+                plans = await model.services.subscription.availablePlans()
+            }
+        }
+    }
+
+    private var primaryButtonTitle: String {
+        let base = context.targetTier == .pro ? "Unlock Pro" : "Unlock Plus"
+        if let plan = targetPlan, !plan.displayPrice.isEmpty, !plan.isDemo {
+            return "\(base) · \(plan.displayPrice) \(plan.displayPeriod)"
+                .trimmingCharacters(in: .whitespaces)
+        }
+        return base
+    }
+
+    @ViewBuilder
+    private func planDisclosureCard(_ plan: SubscriptionPlan) -> some View {
+        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(plan.tier == .pro ? "Pro" : "Plus")
+                    .font(WLTypography.captionStrong)
+                    .foregroundStyle(WLPalette.ink)
+                Spacer()
+                if plan.isDemo {
+                    Text("Demo build")
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                } else if !plan.displayPrice.isEmpty {
+                    Text("\(plan.displayPrice) \(plan.displayPeriod)")
+                        .font(WLTypography.bodyEmphasis)
+                        .foregroundStyle(WLPalette.ink)
+                }
+            }
+
+            if let offer = plan.introductoryOffer {
+                Text(offer)
+                    .font(WLTypography.captionStrong)
+                    .foregroundStyle(WLPalette.success)
+            }
+
+            Text(plan.renewalDisclosure)
+                .font(WLTypography.caption)
+                .foregroundStyle(WLPalette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let secondary = secondaryPlan, !secondary.displayPrice.isEmpty, !secondary.isDemo {
+                Text("Pro available at \(secondary.displayPrice) \(secondary.displayPeriod).")
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var legalFooter: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+            Text("Subscriptions auto-renew until cancelled in Settings > Apple ID > Subscriptions at least 24 hours before the end of the current period. Payment is charged to your Apple ID. Any unused portion of a free trial is forfeited when you subscribe.")
+                .font(WLTypography.caption)
+                .foregroundStyle(WLPalette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: WLSpacing.m) {
+                    legalLinks
+                }
+                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                    legalLinks
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var legalLinks: some View {
+        if let terms = model.services.configuration.termsOfUseURL {
+            Link("Terms of Use (EULA)", destination: terms)
+                .font(WLTypography.captionStrong)
+                .foregroundStyle(WLPalette.tint)
+        }
+        if let privacy = model.services.configuration.privacyPolicyURL {
+            Link("Privacy Policy", destination: privacy)
+                .font(WLTypography.captionStrong)
+                .foregroundStyle(WLPalette.tint)
         }
     }
 

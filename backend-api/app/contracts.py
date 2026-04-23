@@ -821,5 +821,79 @@ class EmptyResponse(ContractModel):
     ok: bool = True
 
 
+# --- Subscription receipt reporting --------------------------------------
+#
+# These contracts carry StoreKit 2 transaction metadata from the iOS client to
+# the backend so we have a server-side audit trail of who was granted what and
+# when. They deliberately do NOT make the backend the source of truth for
+# entitlements yet — iOS still trusts its local StoreKit 2 JWS verification.
+# The grant model is ready for a follow-up slice that adds App Store Server
+# API verification and uses the grant to authoritatively gate backend-only
+# premium features.
+
+
+class SubscriptionTier(str, Enum):
+    free = "free"
+    plus = "plus"
+    pro = "pro"
+
+
+class SubscriptionGrantState(str, Enum):
+    active = "active"
+    expired = "expired"
+    revoked = "revoked"
+    unknown = "unknown"
+
+
+class SubscriptionGrant(ContractModel):
+    installID: str
+    tier: SubscriptionTier
+    productID: str
+    originalTransactionID: str
+    transactionID: str
+    purchasedAt: AppleTimestamp
+    expiresAt: AppleTimestamp | None = None
+    revokedAt: AppleTimestamp | None = None
+    state: SubscriptionGrantState
+    rawTransactionJWS: str | None = Field(
+        default=None,
+        description=(
+            "Original StoreKit 2 JWS string the client forwarded. Stored for "
+            "future signature verification against Apple's x5c certificate "
+            "chain. Never returned to the client."
+        ),
+    )
+    updatedAt: AppleTimestamp
+
+
+class SubscriptionReportRequest(ContractModel):
+    installID: str
+    productID: str
+    originalTransactionID: str
+    transactionID: str
+    purchasedAt: AppleTimestamp
+    expiresAt: AppleTimestamp | None = None
+    revokedAt: AppleTimestamp | None = None
+    tier: SubscriptionTier
+    rawTransactionJWS: str | None = None
+
+
+class SubscriptionStatusResponse(ContractModel):
+    installID: str
+    grant: SubscriptionGrant | None = None
+
+
+class SubscriptionLifecycleNotificationRequest(ContractModel):
+    """App Store Server Notifications v2 webhook payload.
+
+    Apple signs the notification with a JWS whose payload is the
+    `responseBodyV2DecodedPayload`. We accept the raw signed payload and,
+    until full signature verification lands, log it for ops visibility and
+    no-op the entitlement path.
+    """
+
+    signedPayload: str
+
+
 def fixture_payload(data: ContractModel) -> dict[str, Any]:
     return data.model_dump(by_alias=True, mode="json")

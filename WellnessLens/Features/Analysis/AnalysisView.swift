@@ -376,152 +376,8 @@ extension LILADomain.FitLevel {
     }
 }
 
-private extension LILADomain.Confidence {
-    var surfaceTitle: String {
-        switch self {
-        case .high:
-            "High confidence"
-        case .medium:
-            "Medium confidence"
-        case .low:
-            "Low confidence"
-        case .insufficient:
-            "Insufficient confidence"
-        }
-    }
-}
-
-private extension LILADomain.ScanSource {
-    var surfaceTitle: String {
-        switch self {
-        case .liveBarcode:
-            "Live barcode"
-        case .manualBarcode:
-            "Manual barcode"
-        case .labelPhoto:
-            "Label photo"
-        case .mealPhoto:
-            "Meal snapshot"
-        case .menuPhoto:
-            "Menu scanner"
-        case .manualLabel:
-            "Manual label"
-        case .voiceLog:
-            "Voice log"
-        }
-    }
-
-    func readStateTitle(for resolvedProduct: LILADomain.ResolvedProduct) -> String {
-        guard resolvedProduct.hasResolutionSemantic(.directional) else {
-            return "Resolved product"
-        }
-        switch self {
-        case .labelPhoto, .manualLabel:
-            return "Directional label read"
-        case .mealPhoto:
-            return "Directional meal read"
-        case .menuPhoto:
-            return "Directional menu read"
-        case .liveBarcode, .manualBarcode:
-            return "Unresolved barcode read"
-        case .voiceLog:
-            return "Directional voice read"
-        }
-    }
-
-    func directionalGuidanceNote(for resolvedProduct: LILADomain.ResolvedProduct) -> String? {
-        guard resolvedProduct.hasResolutionSemantic(.directional) else {
-            return nil
-        }
-        switch self {
-        case .labelPhoto, .manualLabel:
-            return "This is a directional label read, not an exact packaged-food match yet. Rescan with a barcode or a cleaner label when you can."
-        case .mealPhoto:
-            return "This meal read stays directional in this phase. Use it for guidance, not exact product identity."
-        case .menuPhoto:
-            return "This menu read stays directional in this phase. Treat it as a pre-order steer, not a resolved product."
-        case .liveBarcode, .manualBarcode:
-            return "The barcode did not resolve to a stable packaged-food match yet. Try another scan or add clearer label details."
-        case .voiceLog:
-            return "This voice-led read is directional and should be confirmed with a stronger packaged-food input."
-        }
-    }
-}
-
-private extension LILADomain.ResolutionSource {
-    var surfaceTitle: String {
-        switch self {
-        case .openFoodFacts:
-            "Open Food Facts"
-        case .usdaFoodDataCentral:
-            "USDA nutrients"
-        case .nihDSLD:
-            "NIH DSLD"
-        case .cosing:
-            "COSING"
-        case .localCatalog:
-            "Local catalog"
-        case .agentInferred:
-            "Directional inference"
-        case .userProvided:
-            "User provided"
-        case .userEdited:
-            "User edited"
-        }
-    }
-}
-
-private extension LILADomain.WatchoutSeverity {
-    var surfaceTitle: String {
-        switch self {
-        case .gentle:
-            "Gentle"
-        case .moderate:
-            "Watch"
-        case .important:
-            "Important"
-        }
-    }
-
-    var pillTone: WLPill.Tone {
-        switch self {
-        case .gentle:
-            .soft
-        case .moderate, .important:
-            .neutral
-        }
-    }
-}
-
-private extension LILADomain.PersonalRelevance {
-    var surfaceTitle: String {
-        switch self {
-        case .general:
-            "General"
-        case .personal:
-            "Personal"
-        case .clinical:
-            "Higher sensitivity"
-        }
-    }
-}
-
-private extension ProductResolutionSemantic {
-    var surfaceTitle: String {
-        switch self {
-        case .canonical:
-            "Exact match"
-        case .provisional:
-            "Provisional"
-        case .directional:
-            "Directional"
-        case .providerBacked:
-            "Provider-backed"
-        case .lowConfidence:
-            "Thin input"
-        }
-    }
-}
+// Presentation-only extensions moved to `AnalysisPresentationExtensions.swift`.
+// Keeping this anchor so blame/grep history still lands near the view body.
 
 struct AnalysisView: View {
     let analysis: ScanAnalysis
@@ -1075,7 +931,7 @@ private struct AnalysisOutcomeCard: View {
                    let swapPreviewReason = presentation.swapPreviewReason,
                    presentation.primaryAction != .swapInstead {
                     VStack(alignment: .leading, spacing: WLSpacing.xs) {
-                        Text("Swap preview")
+                        Text("Better swap")
                             .font(WLTypography.captionStrong)
                             .foregroundStyle(WLPalette.ink)
 
@@ -1484,7 +1340,7 @@ private struct AnalysisPatternInsightCard: View {
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
                 } else {
-                    Text("Preview only. The deeper pattern action opens with Plus.")
+                    Text("The deeper pattern action opens with Plus.")
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
 
@@ -1634,50 +1490,7 @@ private struct AnalysisSuggestionCard: View {
     }
 }
 
-private struct FlowLayout: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 320
-        var currentX: CGFloat = 0
-        var currentY: CGFloat = 0
-        var rowHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-
-            if currentX + size.width > width, currentX > 0 {
-                currentX = 0
-                currentY += rowHeight + spacing
-                rowHeight = 0
-            }
-
-            rowHeight = max(rowHeight, size.height)
-            currentX += size.width + spacing
-        }
-
-        return CGSize(width: width, height: currentY + rowHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var point = CGPoint(x: bounds.minX, y: bounds.minY)
-        var rowHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-
-            if point.x + size.width > bounds.maxX, point.x > bounds.minX {
-                point.x = bounds.minX
-                point.y += rowHeight + spacing
-                rowHeight = 0
-            }
-
-            subview.place(at: point, proposal: ProposedViewSize(width: size.width, height: size.height))
-            rowHeight = max(rowHeight, size.height)
-            point.x += size.width + spacing
-        }
-    }
-}
+// `FlowLayout` moved to `FlowLayout.swift`.
 
 #Preview("Analysis") {
     AnalysisView(analysis: previewAnalysis)

@@ -151,16 +151,25 @@ class ProductResolver:
         with urlopen(request, timeout=self._settings.resolver_request_timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
 
-    def _post_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post_json(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        headers: dict[str, str] = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": self._settings.open_food_facts_user_agent,
+        }
+        if extra_headers:
+            headers.update(extra_headers)
         request = Request(
             url,
             method="POST",
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "User-Agent": self._settings.open_food_facts_user_agent,
-            },
+            headers=headers,
         )
         with urlopen(request, timeout=self._settings.resolver_request_timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -847,14 +856,22 @@ class _USDANutritionEnrichmentStep:
         )
 
     def _search_food(self, product: ProductCandidate, input: ScanInput) -> dict[str, Any] | None:
+        api_key = (self._settings.usda_api_key or "").strip()
+        if not api_key:
+            return None
         try:
+            # USDA FoodData Central accepts `X-Api-Key` as an alternative to
+            # the `api_key` query string. Keeping the key out of the URL
+            # prevents accidental disclosure through access logs, upstream
+            # retries, or exception messages that capture the full URL.
             payload = self._post_json(
-                f"{self._settings.usda_base_url}/foods/search?api_key={quote_plus(self._settings.usda_api_key or '')}",
+                f"{self._settings.usda_base_url}/foods/search",
                 {
                     "query": " ".join(part for part in [product.brand, product.name] if part).strip() or product.name,
                     "dataType": ["Branded"],
                     "pageSize": 5,
                 },
+                extra_headers={"X-Api-Key": api_key},
             )
         except (HTTPError, URLError, TimeoutError):
             return None

@@ -167,6 +167,8 @@ final class AppModel {
     private let strategistResponseEngine = StrategistResponseEngine()
     private let rootOrchestrator = RootOrchestrator()
     private let accessPolicy = AccessPolicy()
+    private let deterministicScanVerdictAgent = DeterministicScanVerdictAgent()
+    private let deterministicCoachAgent = DeterministicCoachAgent()
     private var coachReplyTask: Task<Void, Never>?
 
     init(services: AppServices? = nil) {
@@ -408,6 +410,32 @@ final class AppModel {
         activePaywall = nil
     }
 
+    /// Open the paywall sheet for a top-level upgrade (e.g. from Profile), so
+    /// the usuaria always sees price, duration, auto-renewal terms, and legal
+    /// links before Apple's purchase confirmation runs. Satisfies App Store
+    /// Review Guideline 3.1.2(c).
+    func presentUpgradePaywall(targetTier: SubscriptionStatus) {
+        guard targetTier.rank > subscriptionStatus.rank else { return }
+        // Use a canonical entitlement per tier to produce value copy for the
+        // sheet. The user may already have other premium features, but this
+        // simply selects which paragraph of copy to render.
+        let entitlement: WellnessEntitlement
+        switch targetTier {
+        case .pro:
+            entitlement = .pantryMVP
+        case .plus:
+            entitlement = .patternAgent
+        case .free:
+            return
+        }
+        activePaywall = accessPolicy.paywallContext(
+            for: entitlement,
+            surface: .profile,
+            previewLines: [],
+            snapshot: entitlementSnapshot
+        )
+    }
+
     func purchase(from context: PaywallContext) async {
         subscriptionStatus = await services.subscription.purchase(context.targetTier)
         refreshEntitlementSnapshot()
@@ -415,6 +443,67 @@ final class AppModel {
         if hasAccess(to: context.feature) {
             activePaywall = nil
         }
+    }
+
+    // `deleteAccount()` lives in `AppModel+AccountDeletion.swift` so this
+    // file stays focused on day-to-day mutations. The reset helper below is
+    // internal so that extension can call it.
+
+    func resetToFreshState() {
+        let snapshot = StoredAppState.fresh()
+        let derivedProfile = UserProfile.migrated(from: snapshot.userContext)
+        let billingMode: BillingMode = services.configuration.isStoreKitEnabled ? .storeKit : .demo
+
+        selectedTab = .home
+        localProfileID = snapshot.localProfileID
+        hasCompletedOnboarding = false
+        onboardingDraft = OnboardingDraft(profile: derivedProfile)
+        userContext = derivedProfile.userContext
+        userProfile = derivedProfile
+        activeGoals = []
+        firstWeekPlan = nil
+        history = []
+        checkIns = []
+        scanEvents = []
+        scanVerdicts = []
+        scanProductCorrections = []
+        checkInEvents = []
+        favoriteItems = []
+        consentRecords = []
+        routines = []
+        memoryItems = []
+        scanDecisions = []
+        experiments = []
+        conversationThreads = []
+        lastDemoScenarioID = nil
+        latestAnalysis = nil
+        latestVerdict = nil
+        activeComparison = nil
+        scanFeedback = nil
+        isAnalyzing = false
+        subscriptionStatus = .free
+        patternInsights = []
+        weeklyNarrative = nil
+        pantryItems = []
+        entitlementSnapshot = accessPolicy.snapshot(
+            subscriptionStatus: .free,
+            billingMode: billingMode
+        )
+        activePaywall = nil
+        remoteInsights = []
+        remoteHomePayload = nil
+        remoteHomePayloadV2 = nil
+        remoteClientConfig = nil
+        backendStatuses = initialBackendStatuses(
+            hasBackend: services.backendAPI != nil,
+            hasAgentService: services.configuration.hasAgentService
+        )
+        hasAttemptedRemoteInsightsRefresh = false
+        hasAttemptedRemoteHomeRefresh = false
+        bootstrapCompleted = false
+        pendingStrategistReplyMessageIDs.removeAll()
+        coachReplyTask?.cancel()
+        coachReplyTask = nil
     }
 
     var historyTimelineEntries: [HistoryTimelineEntry] {
@@ -1431,7 +1520,7 @@ final class AppModel {
         let startedAt = Date()
 
         do {
-            let biometrics = await services.healthKitService.currentSnapshot(for: userProfile)
+            let biometrics = await currentBiometricsSnapshotIfAllowed()
             let scanContext = userProfile.scanContext(biometrics: biometrics)
             let analysis = try await services.scanService.analyze(
                 input: input,
@@ -1455,23 +1544,24 @@ final class AppModel {
                 latencyMs: Int(Date().timeIntervalSince(startedAt) * 1000)
             )
             scanEvents.insert(event, at: 0)
-            if services.configuration.hasAgentService {
+            if canUseRemoteAI {
                 updateBackendStatus(.scanVerdict, state: .syncPending, detail: "Requesting remote scan verdict.", incrementAttempt: true)
+            } else if services.configuration.hasAgentService {
+                updateBackendStatus(
+                    .scanVerdict,
+                    state: .unavailable,
+                    detail: "AI processing is off. Using on-device scan verdicts."
+                )
             } else {
                 updateBackendStatus(.scanVerdict, state: .unavailable, detail: "No agent service configured. Using deterministic local verdicts.")
             }
-            let verdict = await services.scanVerdictAgent.generateVerdict(
-                for: ScanVerdictRequest(
-                    input: input,
-                    legacyAnalysis: analysis,
-                    structuredAnalysis: structuredAnalysis,
-                    profile: userProfile,
-                    recentScans: scanEvents,
-                    recentCheckIns: checkInEvents,
-                    biometrics: biometrics
-                )
+            let verdict = await generateScanVerdict(
+                input: input,
+                legacyAnalysis: analysis,
+                structuredAnalysis: structuredAnalysis,
+                biometrics: biometrics
             )
-            if services.configuration.hasAgentService {
+            if canUseRemoteAI {
                 let usedIOSFallback = verdict.reasoningBreakdown.agentInsights.contains {
                     $0.modelUsed.hasPrefix("ios-remote-fallback/")
                 }
@@ -2090,6 +2180,41 @@ final class AppModel {
         )
     }
 
+    private var canUseRemoteAI: Bool {
+        userProfile.consentFlags.aiProcessing && services.configuration.hasAgentService
+    }
+
+    private func currentBiometricsSnapshotIfAllowed() async -> BiometricsSnapshot? {
+        guard userProfile.consentFlags.healthDataProcessing else {
+            return nil
+        }
+
+        return await services.healthKitService.currentSnapshot(for: userProfile)
+    }
+
+    private func generateScanVerdict(
+        input: ScanInput,
+        legacyAnalysis: ScanAnalysis,
+        structuredAnalysis: AnalysisEnvelope?,
+        biometrics: BiometricsSnapshot?
+    ) async -> LILADomain.ScanVerdict {
+        let request = ScanVerdictRequest(
+            input: input,
+            legacyAnalysis: legacyAnalysis,
+            structuredAnalysis: structuredAnalysis,
+            profile: userProfile,
+            recentScans: scanEvents,
+            recentCheckIns: checkInEvents,
+            biometrics: biometrics
+        )
+
+        if userProfile.consentFlags.aiProcessing {
+            return await services.scanVerdictAgent.generateVerdict(for: request)
+        }
+
+        return await deterministicScanVerdictAgent.generateVerdict(for: request)
+    }
+
     private func reconcileScanVerdictsIfNeeded() {
         let context = userProfile.lilaContext()
         let knownIDs = Set(scanVerdicts.map(\.scanEventID))
@@ -2133,7 +2258,7 @@ final class AppModel {
         threadID: ConversationThread.ID,
         userMessageID: ConversationMessage.ID
     ) async -> CoachReply {
-        let biometrics = await services.healthKitService.currentSnapshot(for: userProfile)
+        let biometrics = await currentBiometricsSnapshotIfAllowed()
         let thread = conversationThreads.first(where: { $0.id == threadID }) ?? fallbackStrategistThread()
 
         let request = CoachAgentRequest(
@@ -2148,7 +2273,11 @@ final class AppModel {
             threadHistory: coachThreadHistory(for: thread, through: userMessageID)
         )
 
-        return await services.coachAgent.generateReply(for: request)
+        if userProfile.consentFlags.aiProcessing {
+            return await services.coachAgent.generateReply(for: request)
+        }
+
+        return await deterministicCoachAgent.generateReply(for: request)
     }
 
     private func coachThreadHistory(

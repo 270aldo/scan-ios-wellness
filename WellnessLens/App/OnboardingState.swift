@@ -80,8 +80,30 @@ struct StrategistProfileFormData: Codable, Hashable {
     var memoryEnabled: Bool
     var optInCycleAware: Bool
     var aiProcessingConsent: Bool
+    var healthDataProcessingConsent: Bool
     var analyticsConsent: Bool
     var notificationsConsent: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case goals
+        case frictions
+        case sensitivities
+        case skinConcerns
+        case nutritionPriorities
+        case dietStyle
+        case lifeStage
+        case guidanceStyle
+        case eatingRhythm
+        case supplementStyle
+        case ageRange
+        case restaurantFrequency
+        case memoryEnabled
+        case optInCycleAware
+        case aiProcessingConsent
+        case healthDataProcessingConsent
+        case analyticsConsent
+        case notificationsConsent
+    }
 
     static let starter = StrategistProfileFormData(profile: .starter)
 
@@ -101,6 +123,7 @@ struct StrategistProfileFormData: Codable, Hashable {
         memoryEnabled: Bool,
         optInCycleAware: Bool,
         aiProcessingConsent: Bool,
+        healthDataProcessingConsent: Bool,
         analyticsConsent: Bool,
         notificationsConsent: Bool
     ) {
@@ -119,6 +142,7 @@ struct StrategistProfileFormData: Codable, Hashable {
         self.memoryEnabled = memoryEnabled
         self.optInCycleAware = optInCycleAware
         self.aiProcessingConsent = aiProcessingConsent
+        self.healthDataProcessingConsent = healthDataProcessingConsent
         self.analyticsConsent = analyticsConsent
         self.notificationsConsent = notificationsConsent
     }
@@ -140,9 +164,57 @@ struct StrategistProfileFormData: Codable, Hashable {
             memoryEnabled: profile.memoryEnabled,
             optInCycleAware: profile.userContext.optInCycleAware,
             aiProcessingConsent: profile.consentFlags.aiProcessing,
+            healthDataProcessingConsent: profile.consentFlags.healthDataProcessing,
             analyticsConsent: profile.consentFlags.analytics,
             notificationsConsent: profile.consentFlags.notifications
         )
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = StrategistProfileFormData(profile: .starter)
+
+        goals = try container.decodeIfPresent([UserGoal].self, forKey: .goals) ?? defaults.goals
+        frictions = try container.decodeIfPresent([UserFriction].self, forKey: .frictions) ?? defaults.frictions
+        sensitivities = try container.decodeIfPresent([SensitivityFlag].self, forKey: .sensitivities) ?? defaults.sensitivities
+        skinConcerns = try container.decodeIfPresent([SkinConcern].self, forKey: .skinConcerns) ?? defaults.skinConcerns
+        nutritionPriorities = try container.decodeIfPresent([DailyNutritionPriority].self, forKey: .nutritionPriorities) ?? defaults.nutritionPriorities
+        dietStyle = try container.decodeIfPresent(DietStyle.self, forKey: .dietStyle) ?? defaults.dietStyle
+        lifeStage = try container.decodeIfPresent(LifeStage.self, forKey: .lifeStage) ?? defaults.lifeStage
+        guidanceStyle = try container.decodeIfPresent(GuidanceStyle.self, forKey: .guidanceStyle) ?? defaults.guidanceStyle
+        eatingRhythm = try container.decodeIfPresent(EatingRhythm.self, forKey: .eatingRhythm) ?? defaults.eatingRhythm
+        supplementStyle = try container.decodeIfPresent(SupplementRoutineStyle.self, forKey: .supplementStyle) ?? defaults.supplementStyle
+        ageRange = try container.decodeIfPresent(AgeRange.self, forKey: .ageRange) ?? defaults.ageRange
+        restaurantFrequency = try container.decodeIfPresent(RestaurantFrequency.self, forKey: .restaurantFrequency) ?? defaults.restaurantFrequency
+        memoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .memoryEnabled) ?? defaults.memoryEnabled
+        optInCycleAware = try container.decodeIfPresent(Bool.self, forKey: .optInCycleAware) ?? defaults.optInCycleAware
+        aiProcessingConsent = try container.decodeIfPresent(Bool.self, forKey: .aiProcessingConsent) ?? defaults.aiProcessingConsent
+        healthDataProcessingConsent = try container.decodeIfPresent(Bool.self, forKey: .healthDataProcessingConsent)
+            ?? defaults.healthDataProcessingConsent
+        analyticsConsent = try container.decodeIfPresent(Bool.self, forKey: .analyticsConsent) ?? defaults.analyticsConsent
+        notificationsConsent = try container.decodeIfPresent(Bool.self, forKey: .notificationsConsent) ?? defaults.notificationsConsent
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(goals, forKey: .goals)
+        try container.encode(frictions, forKey: .frictions)
+        try container.encode(sensitivities, forKey: .sensitivities)
+        try container.encode(skinConcerns, forKey: .skinConcerns)
+        try container.encode(nutritionPriorities, forKey: .nutritionPriorities)
+        try container.encode(dietStyle, forKey: .dietStyle)
+        try container.encode(lifeStage, forKey: .lifeStage)
+        try container.encode(guidanceStyle, forKey: .guidanceStyle)
+        try container.encode(eatingRhythm, forKey: .eatingRhythm)
+        try container.encode(supplementStyle, forKey: .supplementStyle)
+        try container.encode(ageRange, forKey: .ageRange)
+        try container.encode(restaurantFrequency, forKey: .restaurantFrequency)
+        try container.encode(memoryEnabled, forKey: .memoryEnabled)
+        try container.encode(optInCycleAware, forKey: .optInCycleAware)
+        try container.encode(aiProcessingConsent, forKey: .aiProcessingConsent)
+        try container.encode(healthDataProcessingConsent, forKey: .healthDataProcessingConsent)
+        try container.encode(analyticsConsent, forKey: .analyticsConsent)
+        try container.encode(notificationsConsent, forKey: .notificationsConsent)
     }
 
     func makeProfile(createdAt: Date) -> UserProfile {
@@ -170,7 +242,7 @@ struct StrategistProfileFormData: Codable, Hashable {
                 aiProcessing: aiProcessingConsent,
                 analytics: analyticsConsent,
                 notifications: notificationsConsent,
-                healthDataProcessing: true
+                healthDataProcessing: healthDataProcessingConsent
             ),
             createdAt: createdAt
         )

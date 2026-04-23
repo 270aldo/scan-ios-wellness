@@ -7,6 +7,8 @@ struct ProfileView: View {
     @State private var strategistEntryPoint: StrategistEntryPoint?
     @State private var showPantry = false
     @State private var showBackendAdmin = false
+    @State private var showDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
 
     var body: some View {
         WLScreen {
@@ -20,6 +22,7 @@ struct ProfileView: View {
             if model.featureFlags.pantryMVP {
                 pantryCard
             }
+            privacyAndAccountCard
         }
         .navigationTitle("Profile")
         .sheet(isPresented: $showProfileEditor) {
@@ -36,6 +39,27 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showBackendAdmin) {
             BackendAdminView()
+        }
+        .confirmationDialog(
+            "Delete your account and all stored data?",
+            isPresented: $showDeleteAccountConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete account", role: .destructive) {
+                performAccountDeletion()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently removes your profile, scans, check-ins, memory items, favorites, routines and HealthKit write-back history from this device and from the WellnessLens backend. You will be returned to onboarding with a fresh installation.")
+        }
+    }
+
+    private func performAccountDeletion() {
+        guard !isDeletingAccount else { return }
+        isDeletingAccount = true
+        Task {
+            await model.deleteAccount()
+            isDeletingAccount = false
         }
     }
 
@@ -133,6 +157,46 @@ struct ProfileView: View {
         }
     }
 
+    private var privacyAndAccountCard: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Privacy and account",
+                    subtitle: "Control what WellnessLens remembers about you.",
+                    systemImage: "lock.shield"
+                )
+
+                Text("Deleting your account permanently removes your profile, scans, check-ins, memory items, favorites, routines, and any data that was synced to the backend. This cannot be undone.")
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                WLActionGroup {
+                    Button(role: .destructive) {
+                        showDeleteAccountConfirmation = true
+                    } label: {
+                        HStack(spacing: WLSpacing.xs) {
+                            if isDeletingAccount {
+                                ProgressView()
+                                    .progressViewStyle(.circular)
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "trash")
+                            }
+                            Text(isDeletingAccount ? "Deleting…" : "Delete my account")
+                        }
+                        .font(WLTypography.bodyEmphasis)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, WLSpacing.s)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .disabled(isDeletingAccount)
+                    .accessibilityHint("Permanently deletes your WellnessLens account and all stored data.")
+                }
+            }
+        }
+    }
+
     private var subscriptionCard: some View {
         WLPrimaryCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
@@ -142,7 +206,7 @@ struct ProfileView: View {
                     .font(WLTypography.title)
                     .foregroundStyle(WLPalette.ink)
 
-                Text("Premium unlocks history-based pattern reads, weekly narrative guidance, menu scanning, and pantry actions without replacing the deterministic fallback.")
+                Text("Premium unlocks history-based pattern reads, weekly narrative guidance, menu scanning, and pantry actions while keeping core on-device guidance available.")
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
 
@@ -153,7 +217,7 @@ struct ProfileView: View {
 
                     Text(
                         model.activeEntitlements.isEmpty
-                            ? "Core phase 1 flows only."
+                            ? "Core flows only."
                             : model.activeEntitlements.map(\.title).joined(separator: ", ")
                     )
                     .font(WLTypography.caption)
@@ -219,17 +283,16 @@ struct ProfileView: View {
 
     @ViewBuilder
     private func subscriptionPrimaryButton(for target: SubscriptionStatus) -> some View {
+        // Purchases always go through the paywall sheet so the usuaria sees
+        // price, duration, auto-renewal terms, and legal links before Apple's
+        // confirmation prompt (App Store Review Guideline 3.1.2(c)).
         if target == .pro {
-            WLPrimaryButton(title: "Unlock Pro", systemImage: "sparkles") {
-                Task {
-                    await model.purchase(.pro)
-                }
+            WLPrimaryButton(title: "See Pro options", systemImage: "sparkles") {
+                model.presentUpgradePaywall(targetTier: .pro)
             }
         } else {
-            WLPrimaryButton(title: "Unlock Plus", systemImage: "arrow.up.right.circle") {
-                Task {
-                    await model.purchase(.plus)
-                }
+            WLPrimaryButton(title: "See Plus options", systemImage: "arrow.up.right.circle") {
+                model.presentUpgradePaywall(targetTier: .plus)
             }
         }
     }
@@ -237,10 +300,8 @@ struct ProfileView: View {
     @ViewBuilder
     private var subscriptionSupportingButtons: some View {
         if model.subscriptionStatus.upgradeTargets.contains(.plus) && subscriptionPrimaryTarget != .plus {
-            WLSecondaryButton(title: "Unlock Plus", systemImage: "arrow.up.right.circle") {
-                Task {
-                    await model.purchase(.plus)
-                }
+            WLSecondaryButton(title: "See Plus options", systemImage: "arrow.up.right.circle") {
+                model.presentUpgradePaywall(targetTier: .plus)
             }
         }
 
@@ -312,7 +373,7 @@ struct ProfileView: View {
                         showPantry = true
                     }
                 } else {
-                    WLUtilityButton(title: "Preview pantry", systemImage: "shippingbox") {
+                    WLUtilityButton(title: "See pantry", systemImage: "shippingbox") {
                         showPantry = true
                     }
                 }
@@ -477,6 +538,9 @@ private struct ProfileStrategistEditor: View {
                             .tint(WLPalette.tint)
 
                         Toggle("Allow AI processing", isOn: $formData.aiProcessingConsent)
+                            .tint(WLPalette.tint)
+
+                        Toggle("Allow health data processing for cycle, recovery, and sleep context", isOn: $formData.healthDataProcessingConsent)
                             .tint(WLPalette.tint)
 
                         Toggle("Allow analytics", isOn: $formData.analyticsConsent)

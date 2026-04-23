@@ -60,6 +60,12 @@ from app.contracts import (
     ScanSource,
     StrategistNote,
     StructuredLensScores,
+    SubscriptionGrant,
+    SubscriptionGrantState,
+    SubscriptionLifecycleNotificationRequest,
+    SubscriptionReportRequest,
+    SubscriptionStatusResponse,
+    SubscriptionTier,
     SwapPriority,
     SwapSuggestion,
     TodayFocus,
@@ -187,6 +193,71 @@ class BackendServices:
         state = self.repository.get_state(install_id)
         insights = build_weekly_insights(state)
         return WeeklyInsightsResponse(insights=insights)
+
+    # --- Subscription receipt audit trail -----------------------------
+    #
+    # The iOS client is still the authoritative source of entitlements
+    # (StoreKit 2 JWS is cryptographically verified on-device). What the
+    # backend stores here is an audit/receipts trail so ops, support, and
+    # a future server-authoritative grant flow can reason about purchases
+    # without parsing the device state. Full signature verification and
+    # App Store Server API cross-reference live in a follow-up slice.
+
+    def process_subscription_report(self, request: SubscriptionReportRequest) -> SubscriptionGrant:
+        now = apple_timestamp_now()
+        state = _derive_grant_state(request.expiresAt, request.revokedAt, now)
+        grant = SubscriptionGrant(
+            installID=request.installID,
+            tier=request.tier,
+            productID=request.productID,
+            originalTransactionID=request.originalTransactionID,
+            transactionID=request.transactionID,
+            purchasedAt=request.purchasedAt,
+            expiresAt=request.expiresAt,
+            revokedAt=request.revokedAt,
+            state=state,
+            rawTransactionJWS=request.rawTransactionJWS,
+            updatedAt=now,
+        )
+        self.repository.save_subscription_grant(request.installID, grant)
+        return grant
+
+    def get_subscription_status(self, install_id: str) -> SubscriptionStatusResponse:
+        grant = self.repository.get_subscription_grant(install_id)
+        return SubscriptionStatusResponse(installID=install_id, grant=grant)
+
+    def process_subscription_lifecycle_notification(
+        self, request: SubscriptionLifecycleNotificationRequest
+    ) -> EmptyResponse:
+        # App Store Server Notifications v2 always wrap the real payload in a
+        # JWS. Until the full verification layer lands (separate slice), we
+        # store nothing — we only log enough metadata to confirm Apple can
+        # reach the endpoint. Re-entering this function with the same payload
+        # must be idempotent by construction.
+        import logging
+
+        logging.getLogger(__name__).info(
+            "appstore_notification_received length=%d",
+            len(request.signedPayload),
+        )
+        return EmptyResponse()
+
+
+def _derive_grant_state(
+    expires_at: AppleTimestamp | None,
+    revoked_at: AppleTimestamp | None,
+    now: AppleTimestamp,
+) -> SubscriptionGrantState:
+    if revoked_at is not None:
+        return SubscriptionGrantState.revoked
+    if expires_at is None:
+        # StoreKit non-subscription purchases (e.g. lifetime unlocks) arrive
+        # without an expiration. Treat them as active until a future lifecycle
+        # notification says otherwise.
+        return SubscriptionGrantState.active
+    if expires_at > now:
+        return SubscriptionGrantState.active
+    return SubscriptionGrantState.expired
 
 
 def _product_type_for_input(input: ScanInput) -> ProductType:

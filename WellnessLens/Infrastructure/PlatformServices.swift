@@ -328,6 +328,32 @@ struct StoredAppState: Codable {
 protocol AppDataStore {
     func load() -> StoredAppState
     func save(_ state: StoredAppState)
+    /// Remove every persisted record so the next `load()` returns a fresh state.
+    /// Used by the account-deletion flow (App Store Review Guideline 5.1.1(v)).
+    func reset()
+}
+
+extension AppDataStore {
+    func reset() {
+        save(.fresh())
+    }
+}
+
+/// Product offer surfaced to the paywall. Produced by `SubscriptionClient`
+/// implementations so the UI never has to import StoreKit directly.
+struct SubscriptionPlan: Hashable, Sendable {
+    let tier: SubscriptionStatus
+    let productID: String
+    /// Localized price, e.g. `"$4.99"`. Empty when the plan is a demo placeholder.
+    let displayPrice: String
+    /// Human-readable recurrence, e.g. `"per month"` or `"per year"`.
+    let displayPeriod: String
+    /// Introductory offer copy (e.g. `"7-day free trial"`) if the Product has one.
+    let introductoryOffer: String?
+    /// Full auto-renewal disclosure line Apple requires on the paywall.
+    let renewalDisclosure: String
+    /// `true` when this plan is only a local stand-in because StoreKit is disabled.
+    let isDemo: Bool
 }
 
 @MainActor
@@ -335,6 +361,16 @@ protocol SubscriptionClient: AnyObject {
     var status: SubscriptionStatus { get }
     func purchase(_ target: SubscriptionStatus) async -> SubscriptionStatus
     func restore() async -> SubscriptionStatus
+    /// Fetch the available subscription offers so the paywall can display
+    /// localized pricing, duration, and auto-renewal disclosure.
+    /// Implementations must return an empty array when no offers can be loaded
+    /// (e.g. StoreKit disabled, offline, or products still loading).
+    func availablePlans() async -> [SubscriptionPlan]
+}
+
+extension SubscriptionClient {
+    /// Default implementation so legacy or demo clients opt in only when ready.
+    func availablePlans() async -> [SubscriptionPlan] { [] }
 }
 
 protocol ScanService: Sendable {
@@ -386,6 +422,10 @@ final class LocalAppDataStore: AppDataStore {
         guard let data = try? encoder.encode(state) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
+
+    func reset() {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
 }
 
 @MainActor
@@ -403,6 +443,32 @@ final class DemoSubscriptionController: SubscriptionClient {
 
     func restore() async -> SubscriptionStatus {
         status
+    }
+
+    func availablePlans() async -> [SubscriptionPlan] {
+        // Demo placeholders only. Real pricing comes from the StoreKit client.
+        // These let the paywall layout render with complete disclosure in local
+        // builds where StoreKit is disabled.
+        [
+            SubscriptionPlan(
+                tier: .plus,
+                productID: "demo.plus",
+                displayPrice: "Demo",
+                displayPeriod: "monthly in release",
+                introductoryOffer: nil,
+                renewalDisclosure: "Demo mode. No purchase is made; this build does not charge anything. In release, Plus auto-renews monthly until cancelled in Settings > Apple ID > Subscriptions.",
+                isDemo: true
+            ),
+            SubscriptionPlan(
+                tier: .pro,
+                productID: "demo.pro",
+                displayPrice: "Demo",
+                displayPeriod: "monthly in release",
+                introductoryOffer: nil,
+                renewalDisclosure: "Demo mode. No purchase is made; this build does not charge anything. In release, Pro auto-renews monthly until cancelled in Settings > Apple ID > Subscriptions.",
+                isDemo: true
+            )
+        ]
     }
 }
 
@@ -626,7 +692,11 @@ struct AppServices {
 
         let subscription: SubscriptionClient
         if configuration.isStoreKitEnabled {
-            subscription = StoreKitSubscriptionController(configuration: configuration)
+            subscription = StoreKitSubscriptionController(
+                configuration: configuration,
+                backendAPI: backendAPI,
+                identityProvider: identityProvider
+            )
         } else {
             subscription = DemoSubscriptionController(status: snapshot.subscriptionStatus)
         }

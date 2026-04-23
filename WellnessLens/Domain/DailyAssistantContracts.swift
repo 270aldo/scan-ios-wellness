@@ -64,10 +64,10 @@ struct ConsentFlags: Codable, Hashable {
     var healthDataProcessing: Bool
 
     static let starter = ConsentFlags(
-        aiProcessing: true,
+        aiProcessing: false,
         analytics: false,
         notifications: false,
-        healthDataProcessing: true
+        healthDataProcessing: false
     )
 }
 
@@ -485,6 +485,9 @@ enum PaywallSurface: String, Codable, CaseIterable, Identifiable {
     case menuScanner = "menu_scanner"
     case pantry = "pantry"
     case pantrySuggestions = "pantry_suggestions"
+    /// Top-level upgrade tap (e.g. the Profile subscription card) that is not
+    /// scoped to a specific entitlement.
+    case profile = "profile"
 
     var id: String { rawValue }
 }
@@ -585,7 +588,7 @@ struct AccessPolicy {
             title: tier == .pro ? "Unlock Pro" : "Unlock Plus",
             message: snapshot.billingMode == .storeKit
                 ? message
-                : "\(message) Demo mode still lets you simulate the upgrade path safely.",
+                : "\(message) Purchases are simulated safely in this build.",
             previewLines: preview
         )
     }
@@ -598,7 +601,7 @@ enum PantryPresentationCopy {
             return "Suggestions will appear after a few more supportive repeat choices."
         }
 
-        return "Preview only. Pantry actions and suggestions unlock with Pro."
+        return "Pantry actions and suggestions unlock with Pro."
     }
 }
 

@@ -9,3 +9,8 @@ WL_USE_APP_CHECK_DEBUG_PROVIDER = NO
 WL_PLUS_PRODUCT_ID = com.aldoolivas.wellnesslens.plus
 WL_PRO_PRODUCT_ID = com.aldoolivas.wellnesslens.pro
 WL_APP_ATTEST_ENVIRONMENT = development
+// Apple's standard EULA satisfies App Store Review Guideline 3.1.2 unless a
+// custom EULA is published. Override per environment once the marketing site
+// publishes the WellnessLens-specific terms.
+WL_TERMS_OF_USE_URL = https:/$()/www.apple.com/legal/internet-services/itunes/dev/stdeula/
+WL_PRIVACY_POLICY_URL = https:/$()/wellnesslens.app/privacy

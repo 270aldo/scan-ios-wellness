@@ -33,6 +33,7 @@ from app.contracts import (
     CoachEvidenceTier,
     CoachVoiceTag,
 )
+from app.prompt_safety import sanitize_prompt_text
 
 DEFAULT_ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "coach_agent"
 SYSTEM_PROMPT_FILE = "LILA_CoachPrompt.md"
@@ -172,7 +173,11 @@ def build_coach_context_prompt(request: CoachReplyRequest) -> str:
 
     sections.append(
         "## UserContext summary\n"
-        + (request.userContextSummary.strip() or "Sin contexto adicional.")
+        + sanitize_prompt_text(
+            request.userContextSummary,
+            max_length=2000,
+            fallback="Sin contexto adicional.",
+        )
     )
 
     if request.latestVerdictSummary:
@@ -200,25 +205,37 @@ def build_coach_context_prompt(request: CoachReplyRequest) -> str:
                 f"mood {c.mood}/5"
             )
             if c.note:
-                base += f", note: {c.note}"
+                # Notes are free text from the usuaria; sanitize before
+                # splicing so injected delimiters can't reopen the prompt.
+                safe_note = sanitize_prompt_text(
+                    c.note, max_length=240, fallback=""
+                )
+                if safe_note:
+                    base += f", note: {safe_note}"
             lines.append(base)
         sections.append("## Recent check-ins\n" + "\n".join(lines))
 
     if request.memorySummaries:
         sections.append(
             "## Memory summaries\n"
-            + "\n".join(f"- {m}" for m in request.memorySummaries[:5])
+            + "\n".join(
+                f"- {sanitize_prompt_text(m, max_length=240, fallback='[removed]')}"
+                for m in request.memorySummaries[:5]
+            )
         )
 
     if request.patternInsights:
         sections.append(
             "## Pattern insights\n"
-            + "\n".join(f"- {p}" for p in request.patternInsights[:3])
+            + "\n".join(
+                f"- {sanitize_prompt_text(p, max_length=240, fallback='[removed]')}"
+                for p in request.patternInsights[:3]
+            )
         )
 
     if request.threadHistory:
         lines = [
-            f"- [{turn.role}] {turn.content}"
+            f"- [{turn.role}] {sanitize_prompt_text(turn.content, max_length=640, fallback='[removed]')}"
             for turn in request.threadHistory[-10:]
         ]
         sections.append("## Recent conversation\n" + "\n".join(lines))
@@ -228,11 +245,16 @@ def build_coach_context_prompt(request: CoachReplyRequest) -> str:
 
 def build_coach_task_prompt(request: CoachReplyRequest) -> str:
     """CAPA 3: task prompt con el mensaje actual y output rules."""
+    safe_message = sanitize_prompt_text(
+        request.userMessage,
+        max_length=2000,
+        fallback="(mensaje vacío)",
+    )
     return "\n".join(
         [
             "Responde a la usuaria. Usa el contexto inyectado y aplica los guardrails del sistema.",
             "",
-            f"USER MESSAGE: {request.userMessage}",
+            f"USER MESSAGE: {safe_message}",
             "",
             "OUTPUT RULES",
             "- Devuelve solo JSON válido conforme al schema.",

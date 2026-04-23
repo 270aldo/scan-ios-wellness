@@ -2,7 +2,27 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- App Attest: drives `DeviceCheck` attestation used by App Check. The
+	     environment value comes from xcconfig (development in Debug/Staging,
+	     production in Release). -->
 	<key>com.apple.developer.devicecheck.appattest-environment</key>
 	<string>$(WL_APP_ATTEST_ENVIRONMENT)</string>
+
+	<!-- HealthKit: required by `WellnessLens/Infrastructure/HealthKitService.swift`
+	     which reads menstrual flow, workouts, HRV, resting heart rate, sleep,
+	     and wrist temperature samples, and writes nutrition entries back with
+	     explicit opt-in. The matching Info.plist keys are
+	     `NSHealthShareUsageDescription` and `NSHealthUpdateUsageDescription`.
+
+	     Apple developer portal also needs the HealthKit capability enabled on
+	     the `com.aldoolivas.WellnessLens` App ID, and the provisioning profile
+	     must be regenerated so it carries this entitlement. Without both, any
+	     build signed for device will fail `HKHealthStore.isHealthDataAvailable`
+	     checks or will be rejected during App Store Review.
+
+	     Clinical Records are NOT read by this app, so the narrower
+	     `com.apple.developer.healthkit.access` array is intentionally omitted. -->
+	<key>com.apple.developer.healthkit</key>
+	<true/>
 </dict>
 </plist>

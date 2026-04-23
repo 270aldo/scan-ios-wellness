@@ -564,7 +564,7 @@ private struct HistoryWeeklyFallbackCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.s) {
                 WLSectionHeader(
                     title: insight.title,
-                    subtitle: "Fallback weekly guidance stays available even before the deeper structured narrative is ready.",
+                    subtitle: "Lightweight weekly guidance is available now; the deeper structured narrative arrives with more data.",
                     systemImage: "sparkles"
                 )
 
@@ -633,7 +633,7 @@ private struct HistoryWeeklyNarrativeCard: View {
                         tone: .soft
                     )
                 } else {
-                    Text("Preview: the weekly narrative is ready, but the protect/reduce layer unlocks with Plus.")
+                    Text("The weekly narrative is ready, and the protect/reduce layer unlocks with Plus.")
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
 
@@ -697,7 +697,7 @@ private struct HistoryPatternCard: View {
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
                 } else {
-                    Text("Preview only. The deeper pattern read and recommendation unlock with Plus.")
+                    Text("The deeper pattern read and recommendation unlock with Plus.")
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
 
@@ -960,13 +960,13 @@ private struct HistoryFallbackStateCard: View {
     var body: some View {
         WLCompactCard {
             VStack(alignment: .leading, spacing: WLSpacing.s) {
-                WLStatusBadge(title: "Fallback active", systemImage: "icloud.slash", tone: .caution)
+                WLStatusBadge(title: "Offline mode", systemImage: "icloud.slash", tone: .caution)
 
-                Text("Showing local history synthesis")
+                Text("Showing on-device history insights")
                     .font(WLTypography.bodyEmphasis)
                     .foregroundStyle(WLPalette.ink)
 
-                Text("Weekly and pattern layers are currently using the deterministic local fallback while the remote insight refresh catches up.")
+                Text("Weekly and pattern layers are using on-device insights right now.")
                     .font(WLTypography.caption)
                     .foregroundStyle(WLPalette.inkSoft)
             }
