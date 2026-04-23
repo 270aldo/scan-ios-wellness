@@ -15,13 +15,19 @@ from app.contracts import (
     ProductResolutionSemantic,
     ProductResolutionSource,
     ProductType,
+    ScanContext,
+    ScanCyclePhase,
     ScanInput,
     ScanSource,
+    NutritionSnapshot,
+    UserContext,
+    WellnessLensKind,
 )
 from app.main import app, build_backend_services
 from app.product_resolver import ProductResolver, ResolverResult
 from app.security import SecurityVerificationError
 from app.services import (
+    build_analysis_envelope,
     build_scan_analysis,
     fixture_models,
     starter_history_sync_request,
@@ -30,6 +36,111 @@ from app.services import (
 
 
 client = TestClient(app)
+
+
+def starter_user_context() -> UserContext:
+    return starter_home_request("install-prd5-test").profile.userContext
+
+
+def lens_score(analysis, lens: WellnessLensKind) -> int:
+    return next(item.score for item in analysis.lensScores if item.lens == lens)
+
+
+def overall_score(analysis) -> int:
+    return int(sum(item.score for item in analysis.lensScores) / max(len(analysis.lensScores), 1))
+
+
+def make_resolver_result(
+    product: ProductCandidate,
+    confidence: ConfidenceLevel = ConfidenceLevel.high,
+) -> ResolverResult:
+    resolution_source = product.resolution.source if product.resolution is not None else ProductResolutionSource.agentInferred
+    resolution_confidence = product.resolution.confidence if product.resolution is not None else 0.42
+    return ResolverResult(
+        product=product,
+        confidence=confidence,
+        resolution_confidence=resolution_confidence,
+        is_directional=product.resolution.isDirectional if product.resolution is not None else confidence == ConfidenceLevel.low,
+        identity_source=resolution_source,
+        fact_sources=(resolution_source,),
+    )
+
+
+def make_provider_backed_product(
+    resolution_source: ProductResolutionSource,
+) -> ProductCandidate:
+    if resolution_source == ProductResolutionSource.nihDSLD:
+        return ProductCandidate(
+            id="dsld:steady-capsules",
+            name="Steady Capsules",
+            brand="Inner Balance",
+            productType=ProductType.supplement,
+            barcode="888800001",
+            headline="Provider-backed supplement facts.",
+            ingredients=[Ingredient(name="Lactobacillus blend"), Ingredient(name="Vegetable capsule")],
+            claims=["Gut support"],
+            tags=[],
+            alternativeIDs=[],
+            notes=[],
+            lookupTokens=["probiotic", "capsules"],
+            resolution=ProductResolution(
+                canonicalProductID="dsld:steady-capsules",
+                source=resolution_source,
+                confidence=0.88,
+                nutritionSnapshot=NutritionSnapshot(
+                    energyKcalPer100g=300,
+                    proteinGPer100g=24,
+                    carbsGPer100g=40,
+                    fatGPer100g=8,
+                    sugarsGPer100g=24,
+                    fiberGPer100g=0,
+                    sodiumMgPer100g=15,
+                    caffeineMgPer100g=80,
+                    novaGroup=4,
+                ),
+                isDirectional=False,
+            ),
+            resolutionSemantics=[
+                ProductResolutionSemantic.canonical,
+                ProductResolutionSemantic.providerBacked,
+            ],
+        )
+
+    return ProductCandidate(
+        id=f"{resolution_source.value}:850000001",
+        name="Balanced Protein Yogurt",
+        brand="Good Farm" if resolution_source != ProductResolutionSource.localCatalog else "Glow Pantry",
+        productType=ProductType.food,
+        barcode="850000001",
+        headline="Provider-backed protein and fiber anchor.",
+        ingredients=[Ingredient(name="Cultured milk"), Ingredient(name="Chia fiber")],
+        claims=["15g protein", "5g fiber"],
+        tags=[],
+        alternativeIDs=[],
+        notes=[],
+        lookupTokens=["protein yogurt", "chia", "cultures"],
+        resolution=ProductResolution(
+            canonicalProductID=f"{resolution_source.value}:850000001",
+            source=resolution_source,
+            confidence=0.92,
+            nutritionSnapshot=NutritionSnapshot(
+                energyKcalPer100g=110,
+                proteinGPer100g=15,
+                carbsGPer100g=8,
+                fatGPer100g=3,
+                sugarsGPer100g=4,
+                fiberGPer100g=5,
+                sodiumMgPer100g=75,
+                caffeineMgPer100g=None,
+                novaGroup=3,
+            ),
+            isDirectional=False,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.canonical,
+            ProductResolutionSemantic.providerBacked,
+        ],
+    )
 
 
 def test_healthz():
@@ -116,6 +227,561 @@ def test_analyze_structured_returns_contract_compatible_payload(monkeypatch):
     assert analysis["resolved_product"]["resolution"]["source"] == "openFoodFacts"
     assert analysis["resolved_product"]["resolution"]["confidence"] == pytest.approx(0.91)
     assert analysis["resolved_product"]["resolution"]["is_directional"] is False
+
+
+def test_analyze_structured_accepts_scan_context_and_applies_it(monkeypatch):
+    sync_request, _ = starter_history_sync_request()
+    profile_request = starter_home_request(sync_request.installID)
+    services = getattr(app.state, "backend_services", None)
+    if services is None:
+        services = build_backend_services(Settings())
+        app.state.backend_services = services
+
+    product = make_provider_backed_product(ProductResolutionSource.openFoodFacts)
+    monkeypatch.setattr(services.resolver, "resolve", lambda input: make_resolver_result(product), raising=False)
+
+    base_request = {
+        "input": {
+            "sourceType": "manualBarcode",
+            "barcode": product.barcode,
+            "locale": "en_US",
+        },
+        "profile": profile_request.profile.model_dump(mode="json"),
+        "recentScans": [item.model_dump(by_alias=True, mode="json") for item in sync_request.scans[0:1]],
+        "recentCheckIns": [item.model_dump(by_alias=True, mode="json") for item in sync_request.checkIns[0:1]],
+        "installID": sync_request.installID,
+    }
+
+    response_without = client.post("/v1/scan/analyze", json=base_request)
+    assert response_without.status_code == 200
+
+    response_with = client.post(
+        "/v1/scan/analyze",
+        json={
+            **base_request,
+            "scanContext": {
+                "cycle_phase": "menstrual",
+                "is_in_anabolic_window": True,
+                "sleep_hours": 5.4,
+                "hrv_milliseconds": 44,
+                "resting_heart_rate": 58,
+            },
+        },
+    )
+    assert response_with.status_code == 200
+
+    baseline_lenses = response_without.json()["analysis"]["lens_scores"]
+    contextual_lenses = response_with.json()["analysis"]["lens_scores"]
+
+    assert contextual_lenses["energy"] > baseline_lenses["energy"]
+    assert contextual_lenses["body_comp"] > baseline_lenses["body_comp"]
+
+
+def test_analyze_product_accepts_optional_scan_context_and_is_backward_compatible(monkeypatch):
+    services = getattr(app.state, "backend_services", None)
+    if services is None:
+        services = build_backend_services(Settings())
+        app.state.backend_services = services
+
+    product = ProductCandidate(
+        id="off:850000001",
+        name="Balanced Protein Yogurt",
+        brand="Good Farm",
+        productType=ProductType.food,
+        barcode="850000001",
+        headline="Provider-backed protein and fiber anchor.",
+        ingredients=[Ingredient(name="Cultured milk"), Ingredient(name="Chia fiber")],
+        claims=["15g protein", "5g fiber"],
+        tags=[],
+        alternativeIDs=[],
+        notes=[],
+        lookupTokens=["protein yogurt", "chia", "cultures"],
+        resolution=ProductResolution(
+            canonicalProductID="off:850000001",
+            source=ProductResolutionSource.openFoodFacts,
+            confidence=0.92,
+            nutritionSnapshot=NutritionSnapshot(
+                energyKcalPer100g=110,
+                proteinGPer100g=15,
+                carbsGPer100g=8,
+                fatGPer100g=3,
+                sugarsGPer100g=4,
+                fiberGPer100g=5,
+                sodiumMgPer100g=75,
+                caffeineMgPer100g=None,
+                novaGroup=3,
+            ),
+            isDirectional=False,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.canonical,
+            ProductResolutionSemantic.providerBacked,
+        ],
+    )
+    monkeypatch.setattr(services.resolver, "resolve", lambda input: make_resolver_result(product), raising=False)
+
+    base_request = {
+        "input": {
+            "sourceType": "manualBarcode",
+            "barcode": "850000001",
+            "locale": "en_US",
+        },
+        "userContext": starter_user_context().model_dump(mode="json"),
+        "installID": "install-prd5-scan-context",
+    }
+
+    response_without = client.post("/analyzeProduct", json=base_request)
+    assert response_without.status_code == 200
+
+    response_with = client.post(
+        "/analyzeProduct",
+        json={
+            **base_request,
+            "scanContext": {
+                "cycle_phase": "menstrual",
+                "is_in_anabolic_window": True,
+                "sleep_hours": 5.4,
+                "hrv_milliseconds": 44,
+                "resting_heart_rate": 58,
+            },
+        },
+    )
+    assert response_with.status_code == 200
+
+    baseline = response_without.json()["analysis"]
+    contextual = response_with.json()["analysis"]
+    baseline_lenses = {item["lens"]: item["score"] for item in baseline["lensScores"]}
+    contextual_lenses = {item["lens"]: item["score"] for item in contextual["lensScores"]}
+
+    assert contextual_lenses["energyMood"] > baseline_lenses["energyMood"]
+    assert contextual_lenses["bodyCompositionStrength"] > baseline_lenses["bodyCompositionStrength"]
+
+
+@pytest.mark.parametrize(
+    ("resolution_source", "expected_reason", "expected_why_today"),
+    [
+        (
+            ProductResolutionSource.openFoodFacts,
+            "Exact packaged-food match from Open Food Facts.",
+            "Product identity came from Open Food Facts.",
+        ),
+        (
+            ProductResolutionSource.usdaFoodDataCentral,
+            "Matched against USDA FoodData Central for nutrient-backed food facts.",
+            "Product facts came from USDA FoodData Central.",
+        ),
+        (
+            ProductResolutionSource.nihDSLD,
+            "Matched against NIH DSLD for provider-backed supplement facts.",
+            "Product identity came from NIH DSLD.",
+        ),
+        (
+            ProductResolutionSource.localCatalog,
+            "Matched against the local WellnessLens catalog for a stable product record.",
+            "Product identity came from the local WellnessLens catalog.",
+        ),
+    ],
+)
+def test_provider_backed_resolution_messages_reflect_actual_source(
+    resolution_source: ProductResolutionSource,
+    expected_reason: str,
+    expected_why_today: str,
+):
+    product = make_provider_backed_product(resolution_source)
+    input = ScanInput(sourceType=ScanSource.manualBarcode, barcode=product.barcode, locale="en_US")
+
+    analysis = build_scan_analysis(
+        input,
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+    )
+    envelope = build_analysis_envelope(
+        input,
+        starter_user_context(),
+        recent_scans=[],
+        recent_checkins=[],
+        resolution=make_resolver_result(product),
+    )
+
+    resolution_reason = next(item for item in analysis.topReasons if item.title == "Resolution signal")
+
+    assert resolution_reason.detail == expected_reason
+    assert expected_why_today in envelope.whyToday
+    if resolution_source != ProductResolutionSource.openFoodFacts:
+        assert "Open Food Facts" not in resolution_reason.detail
+        assert "Open Food Facts" not in " ".join(envelope.whyToday)
+
+
+def test_build_scan_analysis_scores_provider_backed_protein_fiber_food_strongly():
+    product = ProductCandidate(
+        id="off:850000001",
+        name="Balanced Protein Yogurt",
+        brand="Good Farm",
+        productType=ProductType.food,
+        barcode="850000001",
+        headline="Provider-backed protein and fiber anchor.",
+        ingredients=[Ingredient(name="Cultured milk"), Ingredient(name="Chia fiber")],
+        claims=["15g protein", "5g fiber"],
+        tags=[],
+        alternativeIDs=[],
+        notes=[],
+        lookupTokens=["protein yogurt", "chia", "cultures"],
+        resolution=ProductResolution(
+            canonicalProductID="off:850000001",
+            source=ProductResolutionSource.openFoodFacts,
+            confidence=0.92,
+            nutritionSnapshot=NutritionSnapshot(
+                energyKcalPer100g=110,
+                proteinGPer100g=15,
+                carbsGPer100g=8,
+                fatGPer100g=3,
+                sugarsGPer100g=4,
+                fiberGPer100g=5,
+                sodiumMgPer100g=75,
+                caffeineMgPer100g=None,
+                novaGroup=3,
+            ),
+            isDirectional=False,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.canonical,
+            ProductResolutionSemantic.providerBacked,
+        ],
+    )
+
+    analysis = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="850000001", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+    )
+
+    assert lens_score(analysis, WellnessLensKind.energyMood) >= 80
+    assert lens_score(analysis, WellnessLensKind.gutComfort) >= 85
+    assert lens_score(analysis, WellnessLensKind.bodyCompositionStrength) >= 75
+    assert overall_score(analysis) >= 75
+
+
+def test_build_scan_analysis_softens_high_sugar_high_caffeine_drink():
+    product = ProductCandidate(
+        id="off:850000002",
+        name="Spark Rush Energy Drink",
+        brand="Rush Lab",
+        productType=ProductType.food,
+        barcode="850000002",
+        headline="Fast buzz with rougher stability.",
+        ingredients=[Ingredient(name="Cane sugar"), Ingredient(name="Caffeine"), Ingredient(name="Natural flavors")],
+        claims=["Fast focus"],
+        tags=[],
+        alternativeIDs=[],
+        notes=[],
+        lookupTokens=["energy drink", "cane sugar", "caffeine"],
+        resolution=ProductResolution(
+            canonicalProductID="off:850000002",
+            source=ProductResolutionSource.openFoodFacts,
+            confidence=0.9,
+            nutritionSnapshot=NutritionSnapshot(
+                energyKcalPer100g=52,
+                proteinGPer100g=0,
+                carbsGPer100g=13,
+                fatGPer100g=0,
+                sugarsGPer100g=13,
+                fiberGPer100g=0,
+                sodiumMgPer100g=32,
+                caffeineMgPer100g=58,
+                novaGroup=4,
+            ),
+            isDirectional=False,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.canonical,
+            ProductResolutionSemantic.providerBacked,
+        ],
+    )
+
+    analysis = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="850000002", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+    )
+
+    assert lens_score(analysis, WellnessLensKind.energyMood) < 55
+    assert lens_score(analysis, WellnessLensKind.hormoneBalance) < 55
+    assert overall_score(analysis) < 55
+
+
+def test_build_scan_analysis_softens_nova4_processed_snack():
+    product = ProductCandidate(
+        id="off:899900001",
+        name="Crunch Lab Snack",
+        brand="Crunch Lab",
+        productType=ProductType.food,
+        barcode="899900001",
+        headline="Ultra-processed snack with softer digestion support.",
+        ingredients=[Ingredient(name="Corn flour"), Ingredient(name="Natural flavors"), Ingredient(name="Maltodextrin")],
+        claims=["Crunchy"],
+        tags=[],
+        alternativeIDs=[],
+        notes=[],
+        lookupTokens=["crunchy snack", "natural flavors", "maltodextrin"],
+        resolution=ProductResolution(
+            canonicalProductID="off:899900001",
+            source=ProductResolutionSource.openFoodFacts,
+            confidence=0.89,
+            nutritionSnapshot=NutritionSnapshot(
+                energyKcalPer100g=470,
+                proteinGPer100g=4,
+                carbsGPer100g=56,
+                fatGPer100g=23,
+                sugarsGPer100g=6,
+                fiberGPer100g=2,
+                sodiumMgPer100g=420,
+                caffeineMgPer100g=None,
+                novaGroup=4,
+            ),
+            isDirectional=False,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.canonical,
+            ProductResolutionSemantic.providerBacked,
+        ],
+    )
+
+    analysis = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="899900001", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+    )
+
+    assert lens_score(analysis, WellnessLensKind.gutComfort) < 60
+    assert lens_score(analysis, WellnessLensKind.hormoneBalance) < 60
+    assert overall_score(analysis) < 60
+
+
+def test_build_scan_analysis_applies_training_and_short_sleep_to_protein_anchor():
+    product = ProductCandidate(
+        id="off:850000001",
+        name="Balanced Protein Yogurt",
+        brand="Good Farm",
+        productType=ProductType.food,
+        barcode="850000001",
+        headline="Provider-backed protein and fiber anchor.",
+        ingredients=[Ingredient(name="Cultured milk"), Ingredient(name="Chia fiber")],
+        claims=["15g protein", "5g fiber"],
+        tags=[],
+        alternativeIDs=[],
+        notes=[],
+        lookupTokens=["protein yogurt", "chia", "cultures"],
+        resolution=ProductResolution(
+            canonicalProductID="off:850000001",
+            source=ProductResolutionSource.openFoodFacts,
+            confidence=0.92,
+            nutritionSnapshot=NutritionSnapshot(
+                energyKcalPer100g=110,
+                proteinGPer100g=15,
+                carbsGPer100g=8,
+                fatGPer100g=3,
+                sugarsGPer100g=4,
+                fiberGPer100g=5,
+                sodiumMgPer100g=75,
+                caffeineMgPer100g=None,
+                novaGroup=3,
+            ),
+            isDirectional=False,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.canonical,
+            ProductResolutionSemantic.providerBacked,
+        ],
+    )
+
+    baseline = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="850000001", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+    )
+    contextual = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="850000001", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+        scan_context=ScanContext(
+            cycle_phase=ScanCyclePhase.menstrual,
+            is_in_anabolic_window=True,
+            sleep_hours=5.4,
+            hrv_milliseconds=44,
+            resting_heart_rate=58,
+        ),
+    )
+
+    assert lens_score(contextual, WellnessLensKind.energyMood) > lens_score(baseline, WellnessLensKind.energyMood)
+    assert lens_score(contextual, WellnessLensKind.bodyCompositionStrength) > lens_score(baseline, WellnessLensKind.bodyCompositionStrength)
+    assert overall_score(contextual) > overall_score(baseline)
+
+
+def test_build_scan_analysis_keeps_directional_meal_conservative():
+    product = ProductCandidate(
+        id="directional:chicken-bowl",
+        name="Chicken bowl read",
+        brand="Directional meal",
+        productType=ProductType.food,
+        barcode=None,
+        headline="Meal snapshot with protein and greens cues.",
+        ingredients=[Ingredient(name="Chicken"), Ingredient(name="Greens"), Ingredient(name="Beans")],
+        claims=[],
+        tags=[],
+        alternativeIDs=[],
+        notes=["Directional meal inference only."],
+        lookupTokens=["grilled chicken", "greens", "beans"],
+        resolution=ProductResolution(
+            canonicalProductID=None,
+            source=ProductResolutionSource.agentInferred,
+            confidence=0.44,
+            nutritionSnapshot=None,
+            isDirectional=True,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.provisional,
+            ProductResolutionSemantic.directional,
+            ProductResolutionSemantic.lowConfidence,
+        ],
+    )
+
+    analysis = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.mealPhoto, rawText="grilled chicken bowl", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product, confidence=ConfidenceLevel.low),
+    )
+
+    assert analysis.confidence == ConfidenceLevel.low
+    assert analysis.resolvedProduct.resolutionSemantics == [
+        ProductResolutionSemantic.provisional,
+        ProductResolutionSemantic.directional,
+        ProductResolutionSemantic.lowConfidence,
+    ]
+    assert "Directional read only" in analysis.overallSummary
+    assert lens_score(analysis, WellnessLensKind.energyMood) >= 60
+
+
+def test_build_scan_analysis_keeps_provider_backed_supplement_on_conservative_path():
+    product = ProductCandidate(
+        id="dsld:steady-capsules",
+        name="Steady Capsules",
+        brand="Inner Balance",
+        productType=ProductType.supplement,
+        barcode="888800001",
+        headline="Provider-backed supplement that stays on the conservative path.",
+        ingredients=[Ingredient(name="Lactobacillus blend"), Ingredient(name="Vegetable capsule")],
+        claims=["Gut support"],
+        tags=[],
+        alternativeIDs=[],
+        notes=[],
+        lookupTokens=["probiotic", "capsules"],
+        resolution=ProductResolution(
+            canonicalProductID="dsld:steady-capsules",
+            source=ProductResolutionSource.nihDSLD,
+            confidence=0.88,
+            nutritionSnapshot=NutritionSnapshot(
+                energyKcalPer100g=300,
+                proteinGPer100g=24,
+                carbsGPer100g=40,
+                fatGPer100g=8,
+                sugarsGPer100g=24,
+                fiberGPer100g=0,
+                sodiumMgPer100g=15,
+                caffeineMgPer100g=80,
+                novaGroup=4,
+            ),
+            isDirectional=False,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.canonical,
+            ProductResolutionSemantic.providerBacked,
+        ],
+    )
+
+    baseline = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="888800001", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+    )
+    contextual = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="888800001", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+        scan_context=ScanContext(
+            cycle_phase=ScanCyclePhase.luteal,
+            is_in_anabolic_window=True,
+            sleep_hours=5.1,
+            hrv_milliseconds=28,
+            resting_heart_rate=74,
+            wrist_temperature_delta_celsius=0.4,
+        ),
+    )
+
+    assert contextual.lensScores == baseline.lensScores
+    assert lens_score(contextual, WellnessLensKind.energyMood) == 60
+    assert lens_score(contextual, WellnessLensKind.hormoneBalance) == 60
+
+
+def test_build_scan_analysis_is_deterministic_with_same_scan_context():
+    product = ProductCandidate(
+        id="off:850000001",
+        name="Balanced Protein Yogurt",
+        brand="Good Farm",
+        productType=ProductType.food,
+        barcode="850000001",
+        headline="Provider-backed protein and fiber anchor.",
+        ingredients=[Ingredient(name="Cultured milk"), Ingredient(name="Chia fiber")],
+        claims=["15g protein", "5g fiber"],
+        tags=[],
+        alternativeIDs=[],
+        notes=[],
+        lookupTokens=["protein yogurt", "chia", "cultures"],
+        resolution=ProductResolution(
+            canonicalProductID="off:850000001",
+            source=ProductResolutionSource.openFoodFacts,
+            confidence=0.92,
+            nutritionSnapshot=NutritionSnapshot(
+                energyKcalPer100g=110,
+                proteinGPer100g=15,
+                carbsGPer100g=8,
+                fatGPer100g=3,
+                sugarsGPer100g=4,
+                fiberGPer100g=5,
+                sodiumMgPer100g=75,
+                caffeineMgPer100g=None,
+                novaGroup=3,
+            ),
+            isDirectional=False,
+        ),
+        resolutionSemantics=[
+            ProductResolutionSemantic.canonical,
+            ProductResolutionSemantic.providerBacked,
+        ],
+    )
+    scan_context = ScanContext(
+        cycle_phase=ScanCyclePhase.menstrual,
+        is_in_anabolic_window=True,
+        sleep_hours=5.4,
+        hrv_milliseconds=44,
+        resting_heart_rate=58,
+    )
+
+    first = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="850000001", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+        scan_context=scan_context,
+    )
+    second = build_scan_analysis(
+        ScanInput(sourceType=ScanSource.manualBarcode, barcode="850000001", locale="en_US"),
+        starter_user_context(),
+        resolution=make_resolver_result(product),
+        scan_context=scan_context,
+    )
+
+    assert first.lensScores == second.lensScores
+    assert first.topReasons == second.topReasons
+    assert first.warnings == second.warnings
 
 
 def test_profile_sync_history_sync_and_home_flow():

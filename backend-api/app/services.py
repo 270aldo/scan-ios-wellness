@@ -32,6 +32,7 @@ from app.contracts import (
     GoalMilestone,
     GoalStatus,
     HistorySyncRequest,
+    IngredientTag,
     Ingredient,
     LensScore,
     MedicalSafety,
@@ -41,6 +42,7 @@ from app.contracts import (
     PatternContext,
     ProductCandidate,
     ProductResolutionSemantic,
+    ProductResolutionSource,
     ProductType,
     ReasonImpact,
     ReasonItem,
@@ -53,6 +55,7 @@ from app.contracts import (
     ScanDecision,
     ScanDecisionKind,
     ScanEvent,
+    ScanContext,
     ScanInput,
     ScanSource,
     StrategistNote,
@@ -66,6 +69,7 @@ from app.contracts import (
     UserProfile,
     WeeklyInsight,
     WeeklyInsightsResponse,
+    WellnessLensKind,
     WellnessFeatureFlags,
     fixture_payload,
 )
@@ -116,11 +120,18 @@ class BackendServices:
             updatedAt=apple_timestamp_now(),
         )
 
-    def analyze_product(self, input: ScanInput, user_context: UserContext) -> ScanAnalysis:
+    def analyze_product(self, input: ScanInput, user_context: UserContext, scan_context: ScanContext | None = None) -> ScanAnalysis:
         resolution = self.resolver.resolve(input)
-        return build_scan_analysis(input=input, user_context=user_context, resolution=resolution)
+        return build_scan_analysis(input=input, user_context=user_context, resolution=resolution, scan_context=scan_context)
 
-    def analyze_structured(self, input: ScanInput, profile: UserProfile, recent_scans: list[ScanEvent], recent_checkins: list[CheckInEvent]) -> AnalysisEnvelope:
+    def analyze_structured(
+        self,
+        input: ScanInput,
+        profile: UserProfile,
+        recent_scans: list[ScanEvent],
+        recent_checkins: list[CheckInEvent],
+        scan_context: ScanContext | None = None,
+    ) -> AnalysisEnvelope:
         resolution = self.resolver.resolve(input)
         return build_analysis_envelope(
             input=input,
@@ -128,6 +139,7 @@ class BackendServices:
             recent_scans=recent_scans,
             recent_checkins=recent_checkins,
             resolution=resolution,
+            scan_context=scan_context,
         )
 
     def save_profile(self, request: CompleteOnboardingRequest) -> EmptyResponse:
@@ -205,6 +217,7 @@ def build_scan_analysis(
     input: ScanInput,
     user_context: UserContext,
     resolution: ResolverResult | None = None,
+    scan_context: ScanContext | None = None,
     created_at: AppleTimestamp | None = None,
 ) -> ScanAnalysis:
     resolved = resolution.product if resolution is not None else None
@@ -232,10 +245,10 @@ def build_scan_analysis(
         identity_source=resolution.identity_source if resolution is not None else None,
         fact_sources=resolution.fact_sources if resolution is not None else (),
     )
-    lens_scores = build_lens_scores(tokens, user_context, product)
+    lens_scores = build_lens_scores(tokens, user_context, product, input.sourceType, scan_context)
     overall_score = int(sum(score.score for score in lens_scores) / max(len(lens_scores), 1))
-    reasons = build_reasons(product, tokens, overall_score)
-    warnings = build_warnings(product, tokens, overall_score)
+    reasons = build_reasons(product, overall_score, input.sourceType, scan_context)
+    warnings = build_warnings(product, overall_score, input.sourceType, scan_context)
     alternatives: list[AlternativeSuggestion] = []
     if overall_score < 62 and product.productType == ProductType.food:
         alternatives.append(
@@ -269,9 +282,16 @@ def build_analysis_envelope(
     recent_scans: list[ScanEvent],
     recent_checkins: list[CheckInEvent],
     resolution: ResolverResult | None = None,
+    scan_context: ScanContext | None = None,
     created_at: AppleTimestamp | None = None,
 ) -> AnalysisEnvelope:
-    analysis = build_scan_analysis(input, user_context, resolution=resolution, created_at=created_at)
+    analysis = build_scan_analysis(
+        input,
+        user_context,
+        resolution=resolution,
+        scan_context=scan_context,
+        created_at=created_at,
+    )
     lens_map = {score.lens: score.score for score in analysis.lensScores}
     overall = int(sum(lens_map.values()) / max(len(lens_map), 1))
     verdict = AnalysisVerdict.good if overall >= 75 else AnalysisVerdict.adjust if overall >= 55 else AnalysisVerdict.avoid
@@ -422,77 +442,371 @@ def analysis_tokens(input: ScanInput, product: ProductCandidate | None) -> list[
     parts = [*(input.rawText or "").split(","), *(product.lookupTokens if product else [])]
     return [token.strip().lower() for token in parts if token and token.strip()]
 
+CORE_FOOD_TAGS: set[IngredientTag] = {
+    IngredientTag.proteinDense,
+    IngredientTag.fiberSupport,
+    IngredientTag.sugarSpike,
+    IngredientTag.stimulant,
+    IngredientTag.ultraProcessed,
+}
+PROBIOTIC_TOKENS = ("probiotic", "cultures", "lactobacillus", "bifidobacterium", "fermented")
+PROTEIN_TOKENS = ("protein", "whey", "greek yogurt", "milk protein", "egg white")
+FIBER_TOKENS = ("fiber", "chia", "flax", "oats", "beans", "greens")
+SUGAR_TOKENS = ("sugar", "syrup", "candy", "sweetened", "cane sugar", "fructose")
+STIMULANT_TOKENS = ("caffeine", "coffee", "energy drink", "pre workout", "pre-workout", "guarana", "matcha")
+ULTRA_PROCESSED_TOKENS = ("natural flavors", "flavorings", "energy drink", "soda", "emulsifier", "maltodextrin")
 
-def build_lens_scores(tokens: list[str], user_context: UserContext, product: ProductCandidate) -> list[LensScore]:
-    snapshot = product.resolution.nutritionSnapshot if product.resolution else None
-    sugarish = any(token in {"sugar", "syrup", "fries", "soda"} for token in tokens)
-    calming = any(token in {"fiber", "protein", "chia", "greens", "salad"} for token in tokens)
-    skincare = any(token in {"niacinamide", "peptides", "hyaluronic"} for token in tokens)
 
-    if snapshot and snapshot.sugarsGPer100g is not None and snapshot.sugarsGPer100g >= 12:
-        sugarish = True
-    if snapshot and snapshot.fiberGPer100g is not None and snapshot.fiberGPer100g >= 5:
-        calming = True
-    if snapshot and snapshot.proteinGPer100g is not None and snapshot.proteinGPer100g >= 10:
-        calming = True
+@dataclass(frozen=True)
+class DerivedFeatures:
+    effective_tags: set[IngredientTag]
+    protein_g_per_100g: float | None
+    fiber_g_per_100g: float | None
+    sugars_g_per_100g: float | None
+    caffeine_mg_per_100g: float | None
+    nova_group: int | None
+    conservative_inferred_mode: bool
 
-    baseline = 72 if calming else 58 if sugarish else 66
-    bonuses = {
-        "glowSkin": 8 if skincare else 0,
-        "hormoneBalance": 6 if calming else -6 if sugarish else 0,
-        "gutComfort": 8 if calming else -8 if sugarish else 0,
-        "energyMood": 6 if calming else -10 if sugarish else 0,
-        "bodyCompositionStrength": 5 if calming else -5 if sugarish else 0,
+    def contains(self, tag: IngredientTag) -> bool:
+        return tag in self.effective_tags
+
+
+def build_lens_scores(
+    tokens: list[str],
+    user_context: UserContext,
+    product: ProductCandidate,
+    source: ScanSource,
+    scan_context: ScanContext | None,
+) -> list[LensScore]:
+    features = derive_features(product, source)
+    scores: list[LensScore] = []
+
+    for lens in WellnessLensKind:
+        score = 60
+        positive_hits = 0
+        caution_hits = 0
+
+        for tag in features.effective_tags:
+            delta = adjustment_for(tag, lens)
+            score += delta
+            if delta > 0:
+                positive_hits += 1
+            if delta < 0:
+                caution_hits += 1
+
+        score += user_context_adjustment(lens, features, user_context)
+        score += scan_context_adjustment(lens, features, scan_context)
+        score = max(15, min(95, score))
+
+        if score >= 80:
+            summary = "Strong fit"
+        elif score >= 65:
+            summary = "Solid fit"
+        elif score >= 50:
+            summary = "Mixed fit"
+        else:
+            summary = "Friction likely" if caution_hits > positive_hits else "Needs context"
+
+        scores.append(LensScore(lens=lens, score=score, summary=summary))
+
+    return scores
+
+
+def derive_features(product: ProductCandidate, source: ScanSource) -> DerivedFeatures:
+    conservative_inferred_mode = should_use_conservative_inference(product, source)
+    snapshot = None if conservative_inferred_mode else (product.resolution.nutritionSnapshot if product.resolution else None)
+    joined_text = searchable_text(product)
+    effective_tags = {
+        tag for tag in product.tags
+        if product.productType != ProductType.food or tag not in CORE_FOOD_TAGS
     }
-    if snapshot and snapshot.proteinGPer100g is not None and snapshot.proteinGPer100g >= 15:
-        bonuses["bodyCompositionStrength"] += 8
-        bonuses["energyMood"] += 4
-    if snapshot and snapshot.fiberGPer100g is not None and snapshot.fiberGPer100g >= 5:
-        bonuses["gutComfort"] += 5
-    if snapshot and snapshot.caffeineMgPer100g is not None and snapshot.caffeineMgPer100g >= 45:
-        bonuses["energyMood"] -= 10
-    if snapshot and snapshot.novaGroup is not None and snapshot.novaGroup >= 4:
-        bonuses["hormoneBalance"] -= 6
-        bonuses["gutComfort"] -= 4
-    if UserGoal.gutCalm in user_context.goals:
-        bonuses["gutComfort"] += 4
-    if UserGoal.steadyEnergy in user_context.goals:
-        bonuses["energyMood"] += 4
-    return [
-        LensScore(lens="glowSkin", score=max(25, min(92, baseline + bonuses["glowSkin"])), summary=score_summary(baseline + bonuses["glowSkin"])),
-        LensScore(lens="hormoneBalance", score=max(25, min(92, baseline + bonuses["hormoneBalance"])), summary=score_summary(baseline + bonuses["hormoneBalance"])),
-        LensScore(lens="gutComfort", score=max(25, min(92, baseline + bonuses["gutComfort"])), summary=score_summary(baseline + bonuses["gutComfort"])),
-        LensScore(lens="energyMood", score=max(25, min(92, baseline + bonuses["energyMood"])), summary=score_summary(baseline + bonuses["energyMood"])),
-        LensScore(lens="bodyCompositionStrength", score=max(25, min(92, baseline + bonuses["bodyCompositionStrength"])), summary=score_summary(baseline + bonuses["bodyCompositionStrength"])),
-    ]
+
+    if product.productType != ProductType.food:
+        return DerivedFeatures(
+            effective_tags=effective_tags.union(set(product.tags)),
+            protein_g_per_100g=snapshot.proteinGPer100g if snapshot else None,
+            fiber_g_per_100g=snapshot.fiberGPer100g if snapshot else None,
+            sugars_g_per_100g=snapshot.sugarsGPer100g if snapshot else None,
+            caffeine_mg_per_100g=snapshot.caffeineMgPer100g if snapshot else None,
+            nova_group=snapshot.novaGroup if snapshot else None,
+            conservative_inferred_mode=conservative_inferred_mode,
+        )
+
+    if has_protein_support(snapshot, product, joined_text):
+        effective_tags.add(IngredientTag.proteinDense)
+    if has_fiber_support(snapshot, product, joined_text):
+        effective_tags.add(IngredientTag.fiberSupport)
+    if has_sugar_spike(snapshot, product, joined_text):
+        effective_tags.add(IngredientTag.sugarSpike)
+    if has_stimulant_load(snapshot, product, joined_text):
+        effective_tags.add(IngredientTag.stimulant)
+    if has_ultra_processed_signal(snapshot, product, joined_text):
+        effective_tags.add(IngredientTag.ultraProcessed)
+    if product.tags and IngredientTag.probiotic in product.tags or contains_any(PROBIOTIC_TOKENS, joined_text):
+        effective_tags.add(IngredientTag.probiotic)
+    if product.tags and IngredientTag.sugarAlcohol in product.tags or contains_any(("xylitol", "erythritol", "sorbitol"), joined_text):
+        effective_tags.add(IngredientTag.sugarAlcohol)
+
+    return DerivedFeatures(
+        effective_tags=effective_tags,
+        protein_g_per_100g=snapshot.proteinGPer100g if snapshot else None,
+        fiber_g_per_100g=snapshot.fiberGPer100g if snapshot else None,
+        sugars_g_per_100g=snapshot.sugarsGPer100g if snapshot else None,
+        caffeine_mg_per_100g=snapshot.caffeineMgPer100g if snapshot else None,
+        nova_group=snapshot.novaGroup if snapshot else None,
+        conservative_inferred_mode=conservative_inferred_mode,
+    )
 
 
-def build_reasons(product: ProductCandidate, tokens: list[str], overall_score: int) -> list[ReasonItem]:
+def adjustment_for(tag: IngredientTag, lens: WellnessLensKind) -> int:
+    match (tag, lens):
+        case (IngredientTag.proteinDense, WellnessLensKind.energyMood):
+            return 8
+        case (IngredientTag.proteinDense, WellnessLensKind.bodyCompositionStrength):
+            return 12
+        case (IngredientTag.proteinDense, WellnessLensKind.hormoneBalance):
+            return 6
+        case (IngredientTag.probiotic, WellnessLensKind.gutComfort):
+            return 12
+        case (IngredientTag.probiotic, WellnessLensKind.energyMood):
+            return 3
+        case (IngredientTag.fiberSupport, WellnessLensKind.gutComfort):
+            return 10
+        case (IngredientTag.fiberSupport, WellnessLensKind.energyMood):
+            return 6
+        case (IngredientTag.fiberSupport, WellnessLensKind.hormoneBalance):
+            return 8
+        case (IngredientTag.fiberSupport, WellnessLensKind.bodyCompositionStrength):
+            return 5
+        case (IngredientTag.sugarSpike, WellnessLensKind.energyMood):
+            return -10
+        case (IngredientTag.sugarSpike, WellnessLensKind.hormoneBalance):
+            return -10
+        case (IngredientTag.sugarSpike, WellnessLensKind.glowSkin):
+            return -8
+        case (IngredientTag.sugarSpike, WellnessLensKind.bodyCompositionStrength):
+            return -6
+        case (IngredientTag.sugarAlcohol, WellnessLensKind.gutComfort):
+            return -10
+        case (IngredientTag.stimulant, WellnessLensKind.energyMood):
+            return -7
+        case (IngredientTag.stimulant, WellnessLensKind.hormoneBalance):
+            return -6
+        case (IngredientTag.ultraProcessed, WellnessLensKind.hormoneBalance):
+            return -8
+        case (IngredientTag.ultraProcessed, WellnessLensKind.gutComfort):
+            return -6
+        case (IngredientTag.ultraProcessed, WellnessLensKind.energyMood):
+            return -6
+        case (IngredientTag.ultraProcessed, WellnessLensKind.glowSkin):
+            return -6
+        case (IngredientTag.collagen, WellnessLensKind.glowSkin):
+            return 6
+        case (IngredientTag.collagen, WellnessLensKind.bodyCompositionStrength):
+            return 5
+        case (IngredientTag.omegaSupport, WellnessLensKind.hormoneBalance):
+            return 8
+        case (IngredientTag.omegaSupport, WellnessLensKind.glowSkin):
+            return 4
+        case (IngredientTag.niacinamide, WellnessLensKind.glowSkin):
+            return 12
+        case (IngredientTag.peptide, WellnessLensKind.glowSkin):
+            return 8
+        case (IngredientTag.hyaluronicAcid, WellnessLensKind.glowSkin):
+            return 10
+        case (IngredientTag.retinoid, WellnessLensKind.glowSkin):
+            return 12
+        case (IngredientTag.fragrance, WellnessLensKind.glowSkin):
+            return -12
+        case (IngredientTag.alcoholDrying, WellnessLensKind.glowSkin):
+            return -7
+        case (IngredientTag.harshSurfactants, WellnessLensKind.glowSkin):
+            return -8
+        case (IngredientTag.mineralSPF, WellnessLensKind.glowSkin):
+            return 10
+        case (IngredientTag.antioxidantBlend, WellnessLensKind.glowSkin):
+            return 10
+        case (IngredientTag.antioxidantBlend, WellnessLensKind.energyMood):
+            return 4
+        case (IngredientTag.emulsifierHeavy, WellnessLensKind.gutComfort):
+            return -7
+        case _:
+            return 0
+
+
+def user_context_adjustment(lens: WellnessLensKind, features: DerivedFeatures, user_context: UserContext) -> int:
+    adjustment = 0
+
+    for goal in user_context.goals:
+        match (goal, lens):
+            case (UserGoal.clearSkin, WellnessLensKind.glowSkin) if features.contains(IngredientTag.niacinamide) or features.contains(IngredientTag.retinoid):
+                adjustment += 6
+            case (UserGoal.steadyEnergy, WellnessLensKind.energyMood) if features.contains(IngredientTag.proteinDense) or features.contains(IngredientTag.fiberSupport):
+                adjustment += 5
+            case (UserGoal.steadyEnergy, WellnessLensKind.energyMood) if features.contains(IngredientTag.sugarSpike):
+                adjustment -= 4
+            case (UserGoal.gutCalm, WellnessLensKind.gutComfort) if features.contains(IngredientTag.probiotic) or features.contains(IngredientTag.fiberSupport):
+                adjustment += 6
+            case (UserGoal.deBloat, WellnessLensKind.gutComfort) if features.contains(IngredientTag.sugarAlcohol):
+                adjustment -= 5
+            case (UserGoal.hormoneSupport, WellnessLensKind.hormoneBalance) if features.contains(IngredientTag.fiberSupport) or features.contains(IngredientTag.omegaSupport):
+                adjustment += 5
+            case (UserGoal.leanStrength, WellnessLensKind.bodyCompositionStrength) if features.contains(IngredientTag.proteinDense):
+                adjustment += 6
+            case _:
+                pass
+
+    for sensitivity in user_context.sensitivities:
+        match sensitivity:
+            case "fragranceSensitive" if lens == WellnessLensKind.glowSkin and features.contains(IngredientTag.fragrance):
+                adjustment -= 8
+            case "caffeineSensitive" if lens == WellnessLensKind.energyMood and features.contains(IngredientTag.stimulant):
+                adjustment -= 6
+            case "sugarSensitive" if lens in {WellnessLensKind.energyMood, WellnessLensKind.hormoneBalance} and features.contains(IngredientTag.sugarSpike):
+                adjustment -= 6
+            case "acneProne" if lens == WellnessLensKind.glowSkin and (features.contains(IngredientTag.sugarSpike) or features.contains(IngredientTag.fragrance)):
+                adjustment -= 5
+            case "drySkin" if lens == WellnessLensKind.glowSkin and features.contains(IngredientTag.alcoholDrying):
+                adjustment -= 5
+            case "reactiveDigestion" if lens == WellnessLensKind.gutComfort and (features.contains(IngredientTag.sugarAlcohol) or features.contains(IngredientTag.emulsifierHeavy)):
+                adjustment -= 6
+            case _:
+                pass
+
+    if user_context.lifeStage == "highStress" and lens == WellnessLensKind.energyMood and features.contains(IngredientTag.stimulant):
+        adjustment -= 4
+
+    return adjustment
+
+
+def scan_context_adjustment(
+    lens: WellnessLensKind,
+    features: DerivedFeatures,
+    scan_context: ScanContext | None,
+) -> int:
+    if scan_context is None:
+        return 0
+
+    adjustment = 0
+
+    if scan_context.isInAnabolicWindow and features.contains(IngredientTag.proteinDense):
+        if lens == WellnessLensKind.bodyCompositionStrength:
+            adjustment += 6
+        elif lens == WellnessLensKind.energyMood:
+            adjustment += 4
+
+    if has_short_sleep(scan_context):
+        if features.contains(IngredientTag.stimulant):
+            if lens == WellnessLensKind.energyMood:
+                adjustment -= 6
+            elif lens == WellnessLensKind.hormoneBalance:
+                adjustment -= 3
+        if features.contains(IngredientTag.sugarSpike):
+            if lens == WellnessLensKind.energyMood:
+                adjustment -= 4
+            elif lens == WellnessLensKind.hormoneBalance:
+                adjustment -= 3
+        if (features.contains(IngredientTag.proteinDense) or features.contains(IngredientTag.fiberSupport)) and lens == WellnessLensKind.energyMood:
+            adjustment += 2
+
+    if has_recovery_strain(scan_context):
+        if features.contains(IngredientTag.proteinDense) and lens == WellnessLensKind.bodyCompositionStrength:
+            adjustment += 4
+        if features.contains(IngredientTag.ultraProcessed) and lens in {WellnessLensKind.energyMood, WellnessLensKind.bodyCompositionStrength}:
+            adjustment -= 5
+        if features.contains(IngredientTag.stimulant) and lens == WellnessLensKind.energyMood:
+            adjustment -= 4
+
+    if scan_context.cyclePhase == "luteal":
+        if features.contains(IngredientTag.sugarSpike):
+            if lens == WellnessLensKind.energyMood:
+                adjustment -= 4
+            elif lens == WellnessLensKind.hormoneBalance:
+                adjustment -= 5
+        if features.contains(IngredientTag.stimulant):
+            if lens == WellnessLensKind.energyMood:
+                adjustment -= 4
+            elif lens == WellnessLensKind.hormoneBalance:
+                adjustment -= 3
+        if features.contains(IngredientTag.fiberSupport) and lens == WellnessLensKind.hormoneBalance:
+            adjustment += 2
+    elif scan_context.cyclePhase == "menstrual" and features.contains(IngredientTag.proteinDense):
+        if lens == WellnessLensKind.bodyCompositionStrength:
+            adjustment += 3
+        elif lens == WellnessLensKind.energyMood:
+            adjustment += 2
+
+    return adjustment
+
+
+def build_reasons(
+    product: ProductCandidate,
+    overall_score: int,
+    source: ScanSource,
+    scan_context: ScanContext | None,
+) -> list[ReasonItem]:
+    features = derive_features(product, source)
     reasons: list[ReasonItem] = []
 
     if product.resolution is not None:
+        directional = product_has_resolution_semantic(product, ProductResolutionSemantic.directional)
         reasons.append(
             ReasonItem(
                 id=_stable_id("reason", "resolution-signal"),
                 title="Resolution signal",
-                detail=(
-                    "Exact packaged-food match from Open Food Facts."
-                    if not product_has_resolution_semantic(product, ProductResolutionSemantic.directional)
-                    else "No exact packaged-food match yet. The scan is staying directional instead of inventing certainty."
-                ),
-                impact=ReasonImpact.positive
-                if not product_has_resolution_semantic(product, ProductResolutionSemantic.directional)
-                else ReasonImpact.caution,
+                detail=resolution_signal_detail(product),
+                impact=ReasonImpact.positive if not directional else ReasonImpact.caution,
             )
         )
 
-    if any(token in {"fiber", "protein", "greens"} for token in tokens):
+    if features.contains(IngredientTag.proteinDense):
         reasons.append(
             ReasonItem(
                 id=_stable_id("reason", "steadier-anchor"),
-                title="Steadier anchor",
-                detail="Protein and fiber cues often support calmer energy and digestion reads.",
+                title="Protein support",
+                detail=f"The strongest food signal here is {rounded_metric(features.protein_g_per_100g, 'protein')} which usually supports steadier energy and stronger satiety.",
                 impact=ReasonImpact.positive,
+            )
+        )
+    if features.contains(IngredientTag.fiberSupport):
+        reasons.append(
+            ReasonItem(
+                id=_stable_id("reason", "fiber-support"),
+                title="Fiber support",
+                detail=f"{rounded_metric(features.fiber_g_per_100g, 'fiber').capitalize()} helps this read look calmer for digestion and steadier for energy.",
+                impact=ReasonImpact.positive,
+            )
+        )
+    if scan_context and scan_context.isInAnabolicWindow and features.contains(IngredientTag.proteinDense):
+        reasons.append(
+            ReasonItem(
+                id=_stable_id("reason", "recovery-window"),
+                title="Recovery window support",
+                detail="You trained recently, so protein support matters more for recovery and body-composition reads right now.",
+                impact=ReasonImpact.positive,
+            )
+        )
+    if features.contains(IngredientTag.sugarSpike) or features.contains(IngredientTag.stimulant) or features.contains(IngredientTag.ultraProcessed):
+        load_parts = [
+            "higher sugar load" if features.contains(IngredientTag.sugarSpike) else None,
+            "meaningful caffeine" if features.contains(IngredientTag.stimulant) else None,
+            "heavier processing" if features.contains(IngredientTag.ultraProcessed) else None,
+        ]
+        reasons.append(
+            ReasonItem(
+                id=_stable_id("reason", "load-to-watch"),
+                title="Load to watch",
+                detail=f"The softer part of this read is the {' + '.join(part for part in load_parts if part)}, which can work against calmer energy or hormone-friendly routines.",
+                impact=ReasonImpact.caution,
+            )
+        )
+    if scan_context and has_short_sleep(scan_context) and (features.contains(IngredientTag.stimulant) or features.contains(IngredientTag.sugarSpike)):
+        reasons.append(
+            ReasonItem(
+                id=_stable_id("reason", "short-sleep-context"),
+                title="Short sleep context",
+                detail="With shorter sleep, high sugar or caffeine tends to feel less steady than the product alone suggests.",
+                impact=ReasonImpact.caution,
             )
         )
     if overall_score < 60:
@@ -507,12 +821,24 @@ def build_reasons(product: ProductCandidate, tokens: list[str], overall_score: i
     return reasons[:3]
 
 
-def build_warnings(product: ProductCandidate, tokens: list[str], overall_score: int) -> list[str]:
+def build_warnings(
+    product: ProductCandidate,
+    overall_score: int,
+    source: ScanSource,
+    scan_context: ScanContext | None,
+) -> list[str]:
+    features = derive_features(product, source)
     warnings: list[str] = []
     if product_has_resolution_semantic(product, ProductResolutionSemantic.directional):
         warnings.append("No exact packaged-food match yet. Treat this as directional guidance until you rescan a clearer barcode or label.")
-    if any(token in {"sugar", "syrup", "fries", "soda"} for token in tokens):
+    if features.contains(IngredientTag.sugarSpike):
         warnings.append("Higher sugar or heavier-processing cues may soften the fit.")
+    if scan_context and has_short_sleep(scan_context) and features.contains(IngredientTag.stimulant):
+        warnings.append("Short sleep raises the bar for caffeine-forward products to feel steady.")
+    if scan_context and scan_context.cyclePhase == "luteal" and features.contains(IngredientTag.sugarSpike):
+        warnings.append("In a luteal-phase context, higher sugar can feel less stable than the label alone suggests.")
+    if scan_context and has_recovery_strain(scan_context) and features.contains(IngredientTag.ultraProcessed):
+        warnings.append("Recovery looks more taxed today, so heavier processing may soften the fit further.")
     if overall_score < 55:
         warnings.append("Use this as directional guidance and verify with a follow-up check-in.")
     if not warnings:
@@ -540,6 +866,71 @@ def score_summary(score: int) -> str:
     if score >= 50:
         return "Mixed fit"
     return "Friction likely"
+
+
+def should_use_conservative_inference(product: ProductCandidate, source: ScanSource) -> bool:
+    if product_has_resolution_semantic(product, ProductResolutionSemantic.directional) or product_has_resolution_semantic(product, ProductResolutionSemantic.provisional):
+        return True
+    if source in {ScanSource.mealPhoto, ScanSource.menuPhoto}:
+        return not product_has_resolution_semantic(product, ProductResolutionSemantic.canonical)
+    return False
+
+
+def searchable_text(product: ProductCandidate) -> str:
+    return " ".join(
+        [*product.claims, *product.lookupTokens, *[ingredient.name for ingredient in product.ingredients], product.headline, product.name, product.brand]
+    ).lower()
+
+
+def contains_any(needles: tuple[str, ...] | list[str], haystack: str) -> bool:
+    return any(needle in haystack for needle in needles)
+
+
+def has_protein_support(snapshot: Any, product: ProductCandidate, joined_text: str) -> bool:
+    if snapshot and snapshot.proteinGPer100g is not None and snapshot.proteinGPer100g >= 10:
+        return True
+    return IngredientTag.proteinDense in product.tags or contains_any(PROTEIN_TOKENS, joined_text)
+
+
+def has_fiber_support(snapshot: Any, product: ProductCandidate, joined_text: str) -> bool:
+    if snapshot and snapshot.fiberGPer100g is not None and snapshot.fiberGPer100g >= 5:
+        return True
+    return IngredientTag.fiberSupport in product.tags or contains_any(FIBER_TOKENS, joined_text)
+
+
+def has_sugar_spike(snapshot: Any, product: ProductCandidate, joined_text: str) -> bool:
+    if snapshot and snapshot.sugarsGPer100g is not None and snapshot.sugarsGPer100g >= 12:
+        return True
+    return IngredientTag.sugarSpike in product.tags or contains_any(SUGAR_TOKENS, joined_text)
+
+
+def has_stimulant_load(snapshot: Any, product: ProductCandidate, joined_text: str) -> bool:
+    if snapshot and snapshot.caffeineMgPer100g is not None and snapshot.caffeineMgPer100g >= 45:
+        return True
+    return IngredientTag.stimulant in product.tags or contains_any(STIMULANT_TOKENS, joined_text)
+
+
+def has_ultra_processed_signal(snapshot: Any, product: ProductCandidate, joined_text: str) -> bool:
+    if snapshot and snapshot.novaGroup is not None and snapshot.novaGroup >= 4:
+        return True
+    return IngredientTag.ultraProcessed in product.tags or contains_any(ULTRA_PROCESSED_TOKENS, joined_text)
+
+
+def has_short_sleep(scan_context: ScanContext) -> bool:
+    return scan_context.sleepHours is not None and scan_context.sleepHours < 6
+
+
+def has_recovery_strain(scan_context: ScanContext) -> bool:
+    hrv_strained = scan_context.hrvMilliseconds is not None and scan_context.hrvMilliseconds < 32
+    heart_rate_elevated = scan_context.restingHeartRate is not None and scan_context.restingHeartRate > 68
+    temperature_elevated = scan_context.wristTemperatureDeltaCelsius is not None and scan_context.wristTemperatureDeltaCelsius >= 0.3
+    return hrv_strained or heart_rate_elevated or temperature_elevated
+
+
+def rounded_metric(value: float | None, fallback: str) -> str:
+    if value is None:
+        return fallback
+    return f"{round(value)}g {fallback}/100g"
 
 
 def confidence_for_product(product: ProductCandidate, resolution: ResolverResult | None) -> ConfidenceLevel:
@@ -580,11 +971,7 @@ def build_why_today(analysis: ScanAnalysis, recent_checkins: list[CheckInEvent],
         "This read is being structured server-side to match the app contract without removing the local fallback."
     ]
     if analysis.resolvedProduct.resolution is not None:
-        reasons.append(
-            "Product identity came from Open Food Facts."
-            if not product_has_resolution_semantic(analysis.resolvedProduct, ProductResolutionSemantic.directional)
-            else "Product identity is still directional because the resolver did not find a confident packaged-food match."
-        )
+        reasons.append(why_today_resolution_detail(analysis.resolvedProduct))
     if recent_checkins:
         reasons.append("Recent body-signal context is available and can shape the next decision.")
     if source == ScanSource.menuPhoto:
@@ -619,6 +1006,44 @@ def build_recommended_actions(overall: int, product: ProductCandidate) -> list[s
         "Use a follow-up check-in if you try it anyway.",
         "Ask the strategist for the single safest next move.",
     ]
+
+
+def resolution_signal_detail(product: ProductCandidate) -> str:
+    resolution = product.resolution
+    if resolution is None:
+        return "The resolver did not contribute a stable product record."
+    if product_has_resolution_semantic(product, ProductResolutionSemantic.directional):
+        return "No exact packaged-food match yet. The scan is staying directional instead of inventing certainty."
+
+    return {
+        ProductResolutionSource.openFoodFacts: "Exact packaged-food match from Open Food Facts.",
+        ProductResolutionSource.usdaFoodDataCentral: "Matched against USDA FoodData Central for nutrient-backed food facts.",
+        ProductResolutionSource.nihDSLD: "Matched against NIH DSLD for provider-backed supplement facts.",
+        ProductResolutionSource.cosing: "Matched against CosIng for ingredient-backed cosmetic facts.",
+        ProductResolutionSource.localCatalog: "Matched against the local WellnessLens catalog for a stable product record.",
+        ProductResolutionSource.userProvided: "Matched against user-provided product details.",
+        ProductResolutionSource.userEdited: "Matched against a user-corrected product record.",
+        ProductResolutionSource.agentInferred: "Matched against a deterministic inferred product record.",
+    }.get(resolution.source, "Matched against a stable resolved product record.")
+
+
+def why_today_resolution_detail(product: ProductCandidate) -> str:
+    resolution = product.resolution
+    if resolution is None:
+        return "Product identity is not backed by a stable resolver record yet."
+    if product_has_resolution_semantic(product, ProductResolutionSemantic.directional):
+        return "Product identity is still directional because the resolver did not find a confident packaged-food match."
+
+    return {
+        ProductResolutionSource.openFoodFacts: "Product identity came from Open Food Facts.",
+        ProductResolutionSource.usdaFoodDataCentral: "Product facts came from USDA FoodData Central.",
+        ProductResolutionSource.nihDSLD: "Product identity came from NIH DSLD.",
+        ProductResolutionSource.cosing: "Product facts came from CosIng.",
+        ProductResolutionSource.localCatalog: "Product identity came from the local WellnessLens catalog.",
+        ProductResolutionSource.userProvided: "Product identity came from user-provided details.",
+        ProductResolutionSource.userEdited: "Product identity came from a manual correction.",
+        ProductResolutionSource.agentInferred: "Product identity came from a deterministic inferred record.",
+    }.get(resolution.source, "Product identity came from a stable resolver record.")
 
 
 def follow_up_prompt_for_source(source: ScanSource) -> str:

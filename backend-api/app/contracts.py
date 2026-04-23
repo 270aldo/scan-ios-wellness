@@ -41,6 +41,13 @@ class ScanSource(str, Enum):
     manualLabel = "manualLabel"
 
 
+class ScanCyclePhase(str, Enum):
+    menstrual = "menstrual"
+    follicular = "follicular"
+    ovulatory = "ovulatory"
+    luteal = "luteal"
+
+
 class WellnessLensKind(str, Enum):
     glowSkin = "glowSkin"
     hormoneBalance = "hormoneBalance"
@@ -569,6 +576,7 @@ class NormalizedScanPayload(ContractModel):
     claims: list[str]
     extractedText: str | None = None
     inferredTags: list[str]
+    scanContext: ScanContext | None = Field(default=None, alias="scan_context")
 
 
 class ScanEvent(ContractModel):
@@ -700,9 +708,19 @@ class ScanInput(ContractModel):
     locale: str
 
 
+class ScanContext(ContractModel):
+    cyclePhase: ScanCyclePhase | None = Field(default=None, alias="cycle_phase")
+    isInAnabolicWindow: bool | None = Field(default=None, alias="is_in_anabolic_window")
+    sleepHours: float | None = Field(default=None, alias="sleep_hours")
+    hrvMilliseconds: float | None = Field(default=None, alias="hrv_milliseconds")
+    restingHeartRate: float | None = Field(default=None, alias="resting_heart_rate")
+    wristTemperatureDeltaCelsius: float | None = Field(default=None, alias="wrist_temperature_delta_celsius")
+
+
 class AnalyzeProductRequest(ContractModel):
     input: ScanInput
     userContext: UserContext
+    scanContext: ScanContext | None = Field(default=None, alias="scan_context")
     installID: str
 
 
@@ -715,6 +733,7 @@ class AnalyzeStructuredScanRequest(ContractModel):
     profile: UserProfile
     recentScans: list[ScanEvent]
     recentCheckIns: list[CheckInEvent]
+    scanContext: ScanContext | None = Field(default=None, alias="scan_context")
     installID: str
 
 

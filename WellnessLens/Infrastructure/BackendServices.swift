@@ -12,6 +12,7 @@ import FirebaseAppCheck
 struct AnalyzeProductRequest: Codable {
     let input: ScanInput
     let userContext: UserContext
+    let scanContext: ScanContext?
     let installID: String
 }
 
@@ -24,6 +25,7 @@ struct AnalyzeStructuredScanRequest: Codable {
     let profile: UserProfile
     let recentScans: [ScanEvent]
     let recentCheckIns: [CheckInEvent]
+    let scanContext: ScanContext?
     let installID: String
 }
 
@@ -171,8 +173,8 @@ protocol AppCheckTokenProviding: Sendable {
 
 protocol WellnessBackendAPI: Sendable {
     func fetchClientConfig() async throws -> ClientConfigResponse
-    func analyzeProduct(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis
-    func analyzeStructuredScan(input: ScanInput, profile: UserProfile, recentScans: [ScanEvent], recentCheckIns: [CheckInEvent]) async throws -> AnalysisEnvelope
+    func analyzeProduct(input: ScanInput, userContext: UserContext, scanContext: ScanContext?) async throws -> ScanAnalysis
+    func analyzeStructuredScan(input: ScanInput, profile: UserProfile, recentScans: [ScanEvent], recentCheckIns: [CheckInEvent], scanContext: ScanContext?) async throws -> AnalysisEnvelope
     func resolveScan(input: ScanInput) async throws -> ResolveScanResponse
     func compareProducts(left: ScanAnalysis, right: ScanAnalysis) async throws -> ProductComparison
     func saveCheckIn(_ checkIn: CheckInEntry, userContext: UserContext) async throws
@@ -329,9 +331,9 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         self.appCheckProvider = appCheckProvider
     }
 
-    func analyzeProduct(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis {
+    func analyzeProduct(input: ScanInput, userContext: UserContext, scanContext: ScanContext? = nil) async throws -> ScanAnalysis {
         let installID = await identityProvider.installID()
-        let request = AnalyzeProductRequest(input: input, userContext: userContext, installID: installID)
+        let request = AnalyzeProductRequest(input: input, userContext: userContext, scanContext: scanContext, installID: installID)
         let response: AnalyzeProductResponse = try await send(path: "analyzeProduct", method: "POST", body: request)
         return response.analysis
     }
@@ -344,7 +346,8 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         input: ScanInput,
         profile: UserProfile,
         recentScans: [ScanEvent],
-        recentCheckIns: [CheckInEvent]
+        recentCheckIns: [CheckInEvent],
+        scanContext: ScanContext? = nil
     ) async throws -> AnalysisEnvelope {
         let installID = await identityProvider.installID()
         let response: AnalyzeStructuredScanResponse = try await send(
@@ -355,6 +358,7 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
                 profile: profile,
                 recentScans: recentScans,
                 recentCheckIns: recentCheckIns,
+                scanContext: scanContext,
                 installID: installID
             )
         )
@@ -608,12 +612,12 @@ final class CloudScanService: ScanService, @unchecked Sendable {
         self.featuredProducts = Array(fallbackCatalog.prefix(5))
     }
 
-    func analyze(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis {
+    func analyze(input: ScanInput, userContext: UserContext, scanContext: ScanContext? = nil) async throws -> ScanAnalysis {
         do {
-            return try await backendAPI.analyzeProduct(input: input, userContext: userContext)
+            return try await backendAPI.analyzeProduct(input: input, userContext: userContext, scanContext: scanContext)
         } catch {
             let fallback = DemoScanService(catalog: fallbackCatalog)
-            return try await fallback.analyze(input: input, userContext: userContext)
+            return try await fallback.analyze(input: input, userContext: userContext, scanContext: scanContext)
         }
     }
 }

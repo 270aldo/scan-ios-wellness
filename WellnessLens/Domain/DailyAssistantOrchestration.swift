@@ -404,6 +404,7 @@ struct RootOrchestrator {
         localProfileID: String,
         recentScans: [ScanEvent],
         recentCheckIns: [CheckInEvent],
+        scanContext: ScanContext? = nil,
         latencyMs: Int
     ) -> ScanEvent {
         let envelope = safetyGuard.review(
@@ -423,7 +424,8 @@ struct RootOrchestrator {
             ingredients: legacyAnalysis.resolvedProduct.ingredients.map(\.name),
             claims: legacyAnalysis.resolvedProduct.claims,
             extractedText: input.rawText,
-            inferredTags: legacyAnalysis.resolvedProduct.tags.map(\.rawValue)
+            inferredTags: legacyAnalysis.resolvedProduct.tags.map(\.rawValue),
+            scanContext: scanContext
         )
 
         return ScanEvent(

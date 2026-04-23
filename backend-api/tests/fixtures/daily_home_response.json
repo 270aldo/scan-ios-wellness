@@ -1,49 +1,49 @@
 {
   "payload": {
+    "state": "calibrating",
+    "todayFocus": {
+      "title": "Steadier energy",
+      "summary": "Protect a calmer first decision so the rest of the day feels easier to steer."
+    },
     "bodySignal": {
       "id": "00cacd57-4315-5f0b-a734-04ac1414668e",
-      "summary": "Add one signal to tighten the next recommendation.",
       "title": "No fresh body signal yet",
+      "summary": "Add one signal to tighten the next recommendation.",
       "tone": "neutral"
     },
     "nextAction": {
-      "cta": "Open scan",
       "id": "next-action-RecommendationKind.scanStaple",
       "kind": "scanStaple",
-      "relatedGoal": "steadyEnergy",
-      "relatedProductID": null,
+      "title": "Scan your first real choice",
       "summary": "Start with a real product, meal, or menu choice.",
-      "title": "Scan your first real choice"
+      "cta": "Open scan",
+      "relatedProductID": null,
+      "relatedGoal": "steadyEnergy"
     },
-    "openLoops": [],
-    "recentWins": [],
     "recommendedSwap": null,
-    "state": "calibrating",
+    "openLoops": [],
     "strategistNote": {
-      "summary": "The backend is returning a deterministic home contract while scan, sync, and premium signals accumulate.",
-      "title": "Production home is active"
+      "title": "Production home is active",
+      "summary": "The backend is returning a deterministic home contract while scan, sync, and premium signals accumulate."
     },
-    "todayFocus": {
-      "summary": "Protect a calmer first decision so the rest of the day feels easier to steer.",
-      "title": "Steadier energy"
-    }
+    "recentWins": []
   },
   "payloadV2": {
-    "ctaPriority": "scanStaple",
-    "deferredModules": [
-      "strategistNote"
-    ],
+    "schemaVersion": 2,
     "hero": {
       "emphasis": "onboarding",
       "whyNow": "The backend is prioritizing the shortest path to the next meaningful signal."
     },
     "primaryModule": "firstWeekPlan",
-    "schemaVersion": 2,
     "secondaryModules": [
       "activeGoals",
       "openLoops",
       "recentWins"
     ],
-    "suppressedModules": []
+    "deferredModules": [
+      "strategistNote"
+    ],
+    "suppressedModules": [],
+    "ctaPriority": "scanStaple"
   }
 }

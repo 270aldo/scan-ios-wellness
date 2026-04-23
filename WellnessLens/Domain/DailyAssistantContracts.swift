@@ -230,6 +230,7 @@ struct NormalizedScanPayload: Codable, Hashable {
     var claims: [String]
     var extractedText: String?
     var inferredTags: [String]
+    var scanContext: ScanContext? = nil
 }
 
 struct ScanEvent: Codable, Hashable, Identifiable {

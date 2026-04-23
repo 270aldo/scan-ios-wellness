@@ -231,6 +231,52 @@ struct ScanInput: Codable, Hashable {
     var locale: String
 }
 
+enum ScanCyclePhase: String, Codable, CaseIterable, Hashable, Sendable {
+    case menstrual
+    case follicular
+    case ovulatory
+    case luteal
+}
+
+struct ScanContext: Codable, Hashable, Sendable {
+    var cyclePhase: ScanCyclePhase?
+    var isInAnabolicWindow: Bool?
+    var sleepHours: Double?
+    var hrvMilliseconds: Double?
+    var restingHeartRate: Double?
+    var wristTemperatureDeltaCelsius: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case cyclePhase = "cycle_phase"
+        case isInAnabolicWindow = "is_in_anabolic_window"
+        case sleepHours = "sleep_hours"
+        case hrvMilliseconds = "hrv_milliseconds"
+        case restingHeartRate = "resting_heart_rate"
+        case wristTemperatureDeltaCelsius = "wrist_temperature_delta_celsius"
+    }
+
+    var isEmpty: Bool {
+        cyclePhase == nil
+            && isInAnabolicWindow == nil
+            && sleepHours == nil
+            && hrvMilliseconds == nil
+            && restingHeartRate == nil
+            && wristTemperatureDeltaCelsius == nil
+    }
+
+    var hasShortSleep: Bool {
+        guard let sleepHours else { return false }
+        return sleepHours < 6
+    }
+
+    var hasRecoveryStrain: Bool {
+        let hrvStrained = (hrvMilliseconds ?? .greatestFiniteMagnitude) < 32
+        let heartRateElevated = (restingHeartRate ?? .leastNormalMagnitude) > 68
+        let temperatureElevated = (wristTemperatureDeltaCelsius ?? .leastNormalMagnitude) >= 0.3
+        return hrvStrained || heartRateElevated || temperatureElevated
+    }
+}
+
 struct Ingredient: Codable, Hashable, Identifiable {
     var name: String
 
@@ -511,7 +557,24 @@ enum SampleCatalog {
             tags: [.proteinDense, .probiotic, .fiberSupport, .antioxidantBlend],
             alternativeIDs: ["gut-calm-oat-bar", "probiotic-complex-capsules"],
             notes: ["Works well for satiety and smoother energy."],
-            lookupTokens: ["yogurt", "protein yogurt", "live cultures", "blueberry", "chia", "cultured milk"]
+            lookupTokens: ["yogurt", "protein yogurt", "live cultures", "blueberry", "chia", "cultured milk"],
+            resolution: ProductResolution(
+                canonicalProductID: "catalog:balanced-protein-yogurt",
+                source: .localCatalog,
+                confidence: 0.88,
+                nutritionSnapshot: NutritionSnapshot(
+                    energyKcalPer100g: 110,
+                    proteinGPer100g: 15,
+                    carbsGPer100g: 8,
+                    fatGPer100g: 3,
+                    sugarsGPer100g: 4,
+                    fiberGPer100g: 5,
+                    sodiumMgPer100g: 75,
+                    caffeineMgPer100g: nil,
+                    novaGroup: 3
+                ),
+                isDirectional: false
+            )
         ),
         ProductCandidate(
             id: "spark-rush-energy-drink",
@@ -525,7 +588,24 @@ enum SampleCatalog {
             tags: [.stimulant, .sugarSpike, .ultraProcessed],
             alternativeIDs: ["balanced-protein-yogurt", "gut-calm-oat-bar"],
             notes: ["Can trigger crashes and amplify jitter if caffeine-sensitive."],
-            lookupTokens: ["energy drink", "caffeine", "spark rush", "cane sugar", "focus drink"]
+            lookupTokens: ["energy drink", "caffeine", "spark rush", "cane sugar", "focus drink"],
+            resolution: ProductResolution(
+                canonicalProductID: "catalog:spark-rush-energy-drink",
+                source: .localCatalog,
+                confidence: 0.86,
+                nutritionSnapshot: NutritionSnapshot(
+                    energyKcalPer100g: 52,
+                    proteinGPer100g: 0,
+                    carbsGPer100g: 13,
+                    fatGPer100g: 0,
+                    sugarsGPer100g: 13,
+                    fiberGPer100g: 0,
+                    sodiumMgPer100g: 32,
+                    caffeineMgPer100g: 58,
+                    novaGroup: 4
+                ),
+                isDirectional: false
+            )
         ),
         ProductCandidate(
             id: "gut-calm-oat-bar",
@@ -539,7 +619,24 @@ enum SampleCatalog {
             tags: [.fiberSupport, .antioxidantBlend],
             alternativeIDs: ["balanced-protein-yogurt"],
             notes: ["A good mid-afternoon swap when bloating is a concern."],
-            lookupTokens: ["oat bar", "flaxseed", "almond butter", "daily ritual"]
+            lookupTokens: ["oat bar", "flaxseed", "almond butter", "daily ritual"],
+            resolution: ProductResolution(
+                canonicalProductID: "catalog:gut-calm-oat-bar",
+                source: .localCatalog,
+                confidence: 0.85,
+                nutritionSnapshot: NutritionSnapshot(
+                    energyKcalPer100g: 360,
+                    proteinGPer100g: 7,
+                    carbsGPer100g: 44,
+                    fatGPer100g: 12,
+                    sugarsGPer100g: 5,
+                    fiberGPer100g: 7,
+                    sodiumMgPer100g: 120,
+                    caffeineMgPer100g: nil,
+                    novaGroup: 3
+                ),
+                isDirectional: false
+            )
         ),
         ProductCandidate(
             id: "collagen-complex-gummies",
@@ -803,21 +900,75 @@ enum DemoScenarioCatalog {
 
 struct AnalysisEngine {
     private let baseScore = 60
+    private static let nutrientDrivenFoodTags: Set<IngredientTag> = [
+        .proteinDense,
+        .fiberSupport,
+        .sugarSpike,
+        .stimulant,
+        .ultraProcessed,
+    ]
+    private static let probioticTokens = ["probiotic", "cultures", "lactobacillus", "bifidobacterium", "fermented"]
+    private static let proteinTokens = ["protein", "whey", "greek yogurt", "milk protein", "egg white"]
+    private static let fiberTokens = ["fiber", "chia", "flax", "oats", "beans", "greens"]
+    private static let sugarTokens = ["sugar", "syrup", "candy", "sweetened", "cane sugar", "fructose"]
+    private static let stimulantTokens = ["caffeine", "coffee", "energy drink", "pre workout", "pre-workout", "guarana", "matcha"]
+    private static let ultraProcessedTokens = ["natural flavors", "flavorings", "energy drink", "soda", "emulsifier", "maltodextrin"]
+
+    private struct DerivedFeatures {
+        var effectiveTags: Set<IngredientTag>
+        var proteinGPer100g: Double?
+        var fiberGPer100g: Double?
+        var sugarsGPer100g: Double?
+        var caffeineMgPer100g: Double?
+        var novaGroup: Int?
+        var conservativeInferredMode: Bool
+
+        func contains(_ tag: IngredientTag) -> Bool {
+            effectiveTags.contains(tag)
+        }
+    }
 
     func analyze(
         product: ProductCandidate,
         userContext: UserContext,
+        scanContext: ScanContext? = nil,
         source: ScanSource,
         confidence: ConfidenceLevel,
         catalog: [ProductCandidate]
     ) -> ScanAnalysis {
+        let features = deriveFeatures(for: product, source: source)
         let lensScores = WellnessLensKind.allCases.map { lens in
-            score(for: lens, product: product, userContext: userContext)
+            score(
+                for: lens,
+                product: product,
+                userContext: userContext,
+                scanContext: scanContext,
+                features: features
+            )
         }
         let overallSummary = buildOverallSummary(product: product, lensScores: lensScores)
-        let topReasons = collectTopReasons(from: lensScores, product: product, userContext: userContext)
-        let warnings = buildWarnings(product: product, userContext: userContext, confidence: confidence)
-        let alternatives = buildAlternatives(for: product, userContext: userContext, currentScores: lensScores, catalog: catalog)
+        let topReasons = collectTopReasons(
+            from: lensScores,
+            product: product,
+            userContext: userContext,
+            scanContext: scanContext,
+            features: features
+        )
+        let warnings = buildWarnings(
+            product: product,
+            userContext: userContext,
+            confidence: confidence,
+            scanContext: scanContext,
+            features: features
+        )
+        let alternatives = buildAlternatives(
+            for: product,
+            source: source,
+            userContext: userContext,
+            scanContext: scanContext,
+            currentScores: lensScores,
+            catalog: catalog
+        )
 
         return ScanAnalysis(
             createdAt: .now,
@@ -843,19 +994,26 @@ struct AnalysisEngine {
         return ProductComparison(left: left, right: right, deltas: deltas)
     }
 
-    private func score(for lens: WellnessLensKind, product: ProductCandidate, userContext: UserContext) -> LensScore {
+    private func score(
+        for lens: WellnessLensKind,
+        product: ProductCandidate,
+        userContext: UserContext,
+        scanContext: ScanContext?,
+        features: DerivedFeatures
+    ) -> LensScore {
         var score = baseScore
         var positiveHits = 0
         var cautionHits = 0
 
-        for tag in product.tags {
+        for tag in features.effectiveTags {
             let delta = adjustment(for: tag, lens: lens)
             score += delta
             if delta > 0 { positiveHits += 1 }
             if delta < 0 { cautionHits += 1 }
         }
 
-        score += userContextAdjustment(for: lens, product: product, userContext: userContext)
+        score += userContextAdjustment(for: lens, features: features, userContext: userContext)
+        score += scanContextAdjustment(for: lens, features: features, scanContext: scanContext)
         score = min(95, max(15, score))
 
         let summary: String
@@ -871,6 +1029,58 @@ struct AnalysisEngine {
         }
 
         return LensScore(lens: lens, score: score, summary: summary)
+    }
+
+    private func deriveFeatures(for product: ProductCandidate, source: ScanSource) -> DerivedFeatures {
+        let conservativeInferredMode = shouldUseConservativeInference(for: product, source: source)
+        let snapshot = conservativeInferredMode ? nil : product.resolution?.nutritionSnapshot
+        let joinedText = searchableText(for: product)
+
+        var effectiveTags = Set(product.tags.filter { product.productType != .food || !Self.nutrientDrivenFoodTags.contains($0) })
+
+        if product.productType != .food {
+            return DerivedFeatures(
+                effectiveTags: effectiveTags.union(product.tags),
+                proteinGPer100g: snapshot?.proteinGPer100g,
+                fiberGPer100g: snapshot?.fiberGPer100g,
+                sugarsGPer100g: snapshot?.sugarsGPer100g,
+                caffeineMgPer100g: snapshot?.caffeineMgPer100g,
+                novaGroup: snapshot?.novaGroup,
+                conservativeInferredMode: conservativeInferredMode
+            )
+        }
+
+        if hasProteinSupport(snapshot: snapshot, product: product, joinedText: joinedText) {
+            effectiveTags.insert(.proteinDense)
+        }
+        if hasFiberSupport(snapshot: snapshot, product: product, joinedText: joinedText) {
+            effectiveTags.insert(.fiberSupport)
+        }
+        if hasSugarSpike(snapshot: snapshot, product: product, joinedText: joinedText) {
+            effectiveTags.insert(.sugarSpike)
+        }
+        if hasStimulantLoad(snapshot: snapshot, product: product, joinedText: joinedText) {
+            effectiveTags.insert(.stimulant)
+        }
+        if hasUltraProcessedSignal(snapshot: snapshot, product: product, joinedText: joinedText) {
+            effectiveTags.insert(.ultraProcessed)
+        }
+        if containsAny(Self.probioticTokens, in: joinedText) || product.tags.contains(.probiotic) {
+            effectiveTags.insert(.probiotic)
+        }
+        if product.tags.contains(.sugarAlcohol) || containsAny(["xylitol", "erythritol", "sorbitol"], in: joinedText) {
+            effectiveTags.insert(.sugarAlcohol)
+        }
+
+        return DerivedFeatures(
+            effectiveTags: effectiveTags,
+            proteinGPer100g: snapshot?.proteinGPer100g,
+            fiberGPer100g: snapshot?.fiberGPer100g,
+            sugarsGPer100g: snapshot?.sugarsGPer100g,
+            caffeineMgPer100g: snapshot?.caffeineMgPer100g,
+            novaGroup: snapshot?.novaGroup,
+            conservativeInferredMode: conservativeInferredMode
+        )
     }
 
     private func adjustment(for tag: IngredientTag, lens: WellnessLensKind) -> Int {
@@ -914,24 +1124,28 @@ struct AnalysisEngine {
         }
     }
 
-    private func userContextAdjustment(for lens: WellnessLensKind, product: ProductCandidate, userContext: UserContext) -> Int {
+    private func userContextAdjustment(
+        for lens: WellnessLensKind,
+        features: DerivedFeatures,
+        userContext: UserContext
+    ) -> Int {
         var adjustment = 0
 
         for goal in userContext.goals {
             switch (goal, lens) {
-            case (.clearSkin, .glowSkin) where product.tags.contains(.niacinamide) || product.tags.contains(.retinoid):
+            case (.clearSkin, .glowSkin) where features.contains(.niacinamide) || features.contains(.retinoid):
                 adjustment += 6
-            case (.steadyEnergy, .energyMood) where product.tags.contains(.proteinDense) || product.tags.contains(.fiberSupport):
+            case (.steadyEnergy, .energyMood) where features.contains(.proteinDense) || features.contains(.fiberSupport):
                 adjustment += 5
-            case (.steadyEnergy, .energyMood) where product.tags.contains(.sugarSpike):
+            case (.steadyEnergy, .energyMood) where features.contains(.sugarSpike):
                 adjustment -= 4
-            case (.gutCalm, .gutComfort) where product.tags.contains(.probiotic) || product.tags.contains(.fiberSupport):
+            case (.gutCalm, .gutComfort) where features.contains(.probiotic) || features.contains(.fiberSupport):
                 adjustment += 6
-            case (.deBloat, .gutComfort) where product.tags.contains(.sugarAlcohol):
+            case (.deBloat, .gutComfort) where features.contains(.sugarAlcohol):
                 adjustment -= 5
-            case (.hormoneSupport, .hormoneBalance) where product.tags.contains(.fiberSupport) || product.tags.contains(.omegaSupport):
+            case (.hormoneSupport, .hormoneBalance) where features.contains(.fiberSupport) || features.contains(.omegaSupport):
                 adjustment += 5
-            case (.leanStrength, .bodyCompositionStrength) where product.tags.contains(.proteinDense):
+            case (.leanStrength, .bodyCompositionStrength) where features.contains(.proteinDense):
                 adjustment += 6
             default:
                 break
@@ -940,50 +1154,185 @@ struct AnalysisEngine {
 
         for sensitivity in userContext.sensitivities {
             switch sensitivity {
-            case .fragranceSensitive where lens == .glowSkin && product.tags.contains(.fragrance):
+            case .fragranceSensitive where lens == .glowSkin && features.contains(.fragrance):
                 adjustment -= 8
-            case .caffeineSensitive where lens == .energyMood && product.tags.contains(.stimulant):
+            case .caffeineSensitive where lens == .energyMood && features.contains(.stimulant):
                 adjustment -= 6
-            case .sugarSensitive where (lens == .energyMood || lens == .hormoneBalance) && product.tags.contains(.sugarSpike):
+            case .sugarSensitive where (lens == .energyMood || lens == .hormoneBalance) && features.contains(.sugarSpike):
                 adjustment -= 6
-            case .acneProne where lens == .glowSkin && (product.tags.contains(.sugarSpike) || product.tags.contains(.fragrance)):
+            case .acneProne where lens == .glowSkin && (features.contains(.sugarSpike) || features.contains(.fragrance)):
                 adjustment -= 5
-            case .drySkin where lens == .glowSkin && product.tags.contains(.alcoholDrying):
+            case .drySkin where lens == .glowSkin && features.contains(.alcoholDrying):
                 adjustment -= 5
-            case .reactiveDigestion where lens == .gutComfort && (product.tags.contains(.sugarAlcohol) || product.tags.contains(.emulsifierHeavy)):
+            case .reactiveDigestion where lens == .gutComfort && (features.contains(.sugarAlcohol) || features.contains(.emulsifierHeavy)):
                 adjustment -= 6
             default:
                 break
             }
         }
 
-        if userContext.lifeStage == .highStress && lens == .energyMood && product.tags.contains(.stimulant) {
+        if userContext.lifeStage == .highStress && lens == .energyMood && features.contains(.stimulant) {
             adjustment -= 4
         }
 
         return adjustment
     }
 
-    private func collectTopReasons(from lensScores: [LensScore], product: ProductCandidate, userContext: UserContext) -> [ReasonItem] {
+    private func scanContextAdjustment(
+        for lens: WellnessLensKind,
+        features: DerivedFeatures,
+        scanContext: ScanContext?
+    ) -> Int {
+        guard let scanContext else { return 0 }
+
+        var adjustment = 0
+
+        if scanContext.isInAnabolicWindow == true && features.contains(.proteinDense) {
+            switch lens {
+            case .bodyCompositionStrength:
+                adjustment += 6
+            case .energyMood:
+                adjustment += 4
+            default:
+                break
+            }
+        }
+
+        if scanContext.hasShortSleep {
+            if features.contains(.stimulant) {
+                switch lens {
+                case .energyMood:
+                    adjustment -= 6
+                case .hormoneBalance:
+                    adjustment -= 3
+                default:
+                    break
+                }
+            }
+            if features.contains(.sugarSpike) {
+                switch lens {
+                case .energyMood:
+                    adjustment -= 4
+                case .hormoneBalance:
+                    adjustment -= 3
+                default:
+                    break
+                }
+            }
+            if (features.contains(.proteinDense) || features.contains(.fiberSupport)) && lens == .energyMood {
+                adjustment += 2
+            }
+        }
+
+        if scanContext.hasRecoveryStrain {
+            if features.contains(.proteinDense) && lens == .bodyCompositionStrength {
+                adjustment += 4
+            }
+            if features.contains(.ultraProcessed) && (lens == .energyMood || lens == .bodyCompositionStrength) {
+                adjustment -= 5
+            }
+            if features.contains(.stimulant) && lens == .energyMood {
+                adjustment -= 4
+            }
+        }
+
+        switch scanContext.cyclePhase {
+        case .luteal:
+            if features.contains(.sugarSpike) {
+                if lens == .energyMood { adjustment -= 4 }
+                if lens == .hormoneBalance { adjustment -= 5 }
+            }
+            if features.contains(.stimulant) {
+                if lens == .energyMood { adjustment -= 4 }
+                if lens == .hormoneBalance { adjustment -= 3 }
+            }
+            if features.contains(.fiberSupport) && lens == .hormoneBalance {
+                adjustment += 2
+            }
+        case .menstrual:
+            if features.contains(.proteinDense) {
+                if lens == .bodyCompositionStrength { adjustment += 3 }
+                if lens == .energyMood { adjustment += 2 }
+            }
+        case .follicular, .ovulatory, .none:
+            break
+        }
+
+        return adjustment
+    }
+
+    private func collectTopReasons(
+        from lensScores: [LensScore],
+        product: ProductCandidate,
+        userContext: UserContext,
+        scanContext: ScanContext?,
+        features: DerivedFeatures
+    ) -> [ReasonItem] {
         var reasons: [ReasonItem] = []
 
-        if product.tags.contains(.proteinDense) {
-            reasons.append(ReasonItem(title: "Protein support", detail: "This product supports steadier energy and stronger satiety.", impact: .positive))
+        if features.contains(.proteinDense) {
+            let proteinText = features.proteinGPer100g.map { "\(Int($0.rounded()))g protein/100g" } ?? "protein support"
+            reasons.append(
+                ReasonItem(
+                    title: "Protein support",
+                    detail: "The strongest food signal here is \(proteinText), which tends to support steadier energy and stronger satiety.",
+                    impact: .positive
+                )
+            )
         }
-        if product.tags.contains(.probiotic) {
+        if features.contains(.fiberSupport) {
+            let fiberText = features.fiberGPer100g.map { "\(Int($0.rounded()))g fiber/100g" } ?? "fiber support"
+            reasons.append(
+                ReasonItem(
+                    title: "Fiber support",
+                    detail: "\(fiberText.capitalized) helps this read look calmer for digestion and steadier for energy.",
+                    impact: .positive
+                )
+            )
+        }
+        if features.contains(.probiotic) {
             reasons.append(ReasonItem(title: "Gut-friendly signal", detail: "Live cultures or probiotic support can help a calmer digestion profile.", impact: .positive))
         }
-        if product.tags.contains(.niacinamide) || product.tags.contains(.peptide) || product.tags.contains(.hyaluronicAcid) {
+        if features.contains(.niacinamide) || features.contains(.peptide) || features.contains(.hyaluronicAcid) {
             reasons.append(ReasonItem(title: "Barrier and glow support", detail: "The topical actives here line up well with glow and barrier goals.", impact: .positive))
         }
-        if product.tags.contains(.sugarSpike) {
-            reasons.append(ReasonItem(title: "Sugar spike risk", detail: "A sharper sugar load can work against stable energy, calm skin, or hormone-friendly routines.", impact: .caution))
+        if scanContext?.isInAnabolicWindow == true && features.contains(.proteinDense) {
+            reasons.append(
+                ReasonItem(
+                    title: "Recovery window support",
+                    detail: "You trained recently, so protein support matters more for recovery and body-composition reads right now.",
+                    impact: .positive
+                )
+            )
         }
-        if product.tags.contains(.fragrance) || product.tags.contains(.alcoholDrying) || product.tags.contains(.harshSurfactants) {
+        if features.contains(.sugarSpike) || features.contains(.stimulant) || features.contains(.ultraProcessed) {
+            let loadParts = [
+                features.contains(.sugarSpike) ? "higher sugar load" : nil,
+                features.contains(.stimulant) ? "meaningful caffeine" : nil,
+                features.contains(.ultraProcessed) ? "heavier processing" : nil,
+            ].compactMap { $0 }
+            reasons.append(
+                ReasonItem(
+                    title: "Load to watch",
+                    detail: "The softer part of this read is the \(loadParts.joined(separator: " + ")), which can work against calmer energy or hormone-friendly routines.",
+                    impact: .caution
+                )
+            )
+        }
+        if features.contains(.fragrance) || features.contains(.alcoholDrying) || features.contains(.harshSurfactants) {
             reasons.append(ReasonItem(title: "Barrier friction", detail: "This formula carries a higher chance of irritation for reactive or dry skin.", impact: .caution))
         }
-        if userContext.sensitivities.contains(.fragranceSensitive) && product.tags.contains(.fragrance) {
+        if userContext.sensitivities.contains(.fragranceSensitive) && features.contains(.fragrance) {
             reasons.append(ReasonItem(title: "Sensitivity mismatch", detail: "Your profile flags fragrance sensitivity, so this product deserves extra caution.", impact: .caution))
+        }
+        if scanContext?.hasShortSleep == true && (features.contains(.stimulant) || features.contains(.sugarSpike)) {
+            reasons.append(
+                ReasonItem(
+                    title: "Short sleep context",
+                    detail: "With shorter sleep, high sugar or caffeine tends to feel less steady than the product alone suggests.",
+                    impact: .caution
+                )
+            )
         }
 
         if reasons.isEmpty, let strongest = lensScores.max(by: { $0.score < $1.score }) {
@@ -994,20 +1343,38 @@ struct AnalysisEngine {
     }
 
     private func buildOverallSummary(product: ProductCandidate, lensScores: [LensScore]) -> String {
+        if product.isDirectionallyResolved {
+            return "\(product.name) is still a directional read, so this nutrient fit is a slower second look rather than a final product-level truth."
+        }
         let topLens = lensScores.max(by: { $0.score < $1.score })?.lens.title ?? "your daily goals"
         let weakLens = lensScores.min(by: { $0.score < $1.score })?.lens.title ?? "context"
         return "\(product.name) looks strongest for \(topLens.lowercased()), with the most caution around \(weakLens.lowercased())."
     }
 
-    private func buildWarnings(product: ProductCandidate, userContext: UserContext, confidence: ConfidenceLevel) -> [String] {
+    private func buildWarnings(
+        product: ProductCandidate,
+        userContext: UserContext,
+        confidence: ConfidenceLevel,
+        scanContext: ScanContext?,
+        features: DerivedFeatures
+    ) -> [String] {
         var warnings: [String] = []
         if confidence == .low {
             warnings.append("We resolved this scan with limited certainty. Double-check the ingredient list before acting on it.")
         }
-        if product.tags.contains(.stimulant) && userContext.sensitivities.contains(.caffeineSensitive) {
+        if features.contains(.stimulant) && userContext.sensitivities.contains(.caffeineSensitive) {
             warnings.append("You marked caffeine sensitivity, so this scan may feel rougher than the score alone suggests.")
         }
-        if product.tags.contains(.fragrance) && userContext.sensitivities.contains(.fragranceSensitive) {
+        if scanContext?.hasShortSleep == true && features.contains(.stimulant) {
+            warnings.append("Short sleep raises the bar for caffeine-forward products to feel steady.")
+        }
+        if scanContext?.cyclePhase == .luteal && features.contains(.sugarSpike) {
+            warnings.append("In a luteal-phase context, higher sugar can feel less stable than the label alone suggests.")
+        }
+        if scanContext?.hasRecoveryStrain == true && features.contains(.ultraProcessed) {
+            warnings.append("Recovery looks more taxed today, so heavier processing may soften the fit further.")
+        }
+        if features.contains(.fragrance) && userContext.sensitivities.contains(.fragranceSensitive) {
             warnings.append("Fragrance can be a major irritant for your current profile.")
         }
         return warnings
@@ -1015,7 +1382,9 @@ struct AnalysisEngine {
 
     private func buildAlternatives(
         for product: ProductCandidate,
+        source: ScanSource,
         userContext: UserContext,
+        scanContext: ScanContext?,
         currentScores: [LensScore],
         catalog: [ProductCandidate]
     ) -> [AlternativeSuggestion] {
@@ -1023,7 +1392,16 @@ struct AnalysisEngine {
 
         return product.alternativeIDs.compactMap { id -> AlternativeSuggestion? in
             guard let alternative = catalog.first(where: { $0.id == id }) else { return nil }
-            let altScores = WellnessLensKind.allCases.map { score(for: $0, product: alternative, userContext: userContext) }
+            let altFeatures = deriveFeatures(for: alternative, source: source)
+            let altScores = WellnessLensKind.allCases.map {
+                score(
+                    for: $0,
+                    product: alternative,
+                    userContext: userContext,
+                    scanContext: scanContext,
+                    features: altFeatures
+                )
+            }
             let improvedLenses = altScores.compactMap { alternativeScore -> WellnessLensKind? in
                 guard let currentScore = currentMap[alternativeScore.lens] else { return nil }
                 return alternativeScore.score >= currentScore + 8 ? alternativeScore.lens : nil
@@ -1038,6 +1416,66 @@ struct AnalysisEngine {
                 improvedLenses: improvedLenses
             )
         }
+    }
+
+    private func shouldUseConservativeInference(for product: ProductCandidate, source: ScanSource) -> Bool {
+        if product.isDirectionallyResolved || product.isProvisionallyResolved {
+            return true
+        }
+        if source == .mealPhoto || source == .menuPhoto {
+            return product.hasResolutionSemantic(.canonical) == false
+        }
+        return false
+    }
+
+    private func searchableText(for product: ProductCandidate) -> String {
+        (
+            product.claims
+            + product.lookupTokens
+            + product.ingredients.map(\.name)
+            + [product.headline, product.name, product.brand]
+        )
+        .joined(separator: " ")
+        .lowercased()
+    }
+
+    private func hasProteinSupport(snapshot: NutritionSnapshot?, product: ProductCandidate, joinedText: String) -> Bool {
+        if let protein = snapshot?.proteinGPer100g, protein >= 10 {
+            return true
+        }
+        return product.tags.contains(.proteinDense) || containsAny(Self.proteinTokens, in: joinedText)
+    }
+
+    private func hasFiberSupport(snapshot: NutritionSnapshot?, product: ProductCandidate, joinedText: String) -> Bool {
+        if let fiber = snapshot?.fiberGPer100g, fiber >= 5 {
+            return true
+        }
+        return product.tags.contains(.fiberSupport) || containsAny(Self.fiberTokens, in: joinedText)
+    }
+
+    private func hasSugarSpike(snapshot: NutritionSnapshot?, product: ProductCandidate, joinedText: String) -> Bool {
+        if let sugars = snapshot?.sugarsGPer100g, sugars >= 12 {
+            return true
+        }
+        return product.tags.contains(.sugarSpike) || containsAny(Self.sugarTokens, in: joinedText)
+    }
+
+    private func hasStimulantLoad(snapshot: NutritionSnapshot?, product: ProductCandidate, joinedText: String) -> Bool {
+        if let caffeine = snapshot?.caffeineMgPer100g, caffeine >= 45 {
+            return true
+        }
+        return product.tags.contains(.stimulant) || containsAny(Self.stimulantTokens, in: joinedText)
+    }
+
+    private func hasUltraProcessedSignal(snapshot: NutritionSnapshot?, product: ProductCandidate, joinedText: String) -> Bool {
+        if let novaGroup = snapshot?.novaGroup, novaGroup >= 4 {
+            return true
+        }
+        return product.tags.contains(.ultraProcessed) || containsAny(Self.ultraProcessedTokens, in: joinedText)
+    }
+
+    private func containsAny(_ needles: [String], in haystack: String) -> Bool {
+        needles.contains { haystack.contains($0) }
     }
 }
 

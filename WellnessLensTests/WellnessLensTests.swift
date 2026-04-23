@@ -44,8 +44,36 @@ final class WellnessLensTests: XCTestCase {
             featuredProducts = Array(SampleCatalog.products.prefix(5))
         }
 
-        func analyze(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis {
+        func analyze(input: ScanInput, userContext: UserContext, scanContext: ScanContext?) async throws -> ScanAnalysis {
             analysis
+        }
+    }
+
+    private final class CapturingScanService: ScanService, @unchecked Sendable {
+        let featuredProducts: [ProductCandidate]
+        private let analysis: ScanAnalysis
+        private let onAnalyze: (@Sendable (ScanInput, UserContext, ScanContext?) async -> Void)?
+        private(set) var receivedInputs: [ScanInput] = []
+        private(set) var receivedUserContexts: [UserContext] = []
+        private(set) var receivedScanContexts: [ScanContext?] = []
+
+        init(
+            analysis: ScanAnalysis,
+            onAnalyze: (@Sendable (ScanInput, UserContext, ScanContext?) async -> Void)? = nil
+        ) {
+            self.analysis = analysis
+            self.onAnalyze = onAnalyze
+            featuredProducts = Array(SampleCatalog.products.prefix(5))
+        }
+
+        func analyze(input: ScanInput, userContext: UserContext, scanContext: ScanContext?) async throws -> ScanAnalysis {
+            receivedInputs.append(input)
+            receivedUserContexts.append(userContext)
+            receivedScanContexts.append(scanContext)
+            if let onAnalyze {
+                await onAnalyze(input, userContext, scanContext)
+            }
+            return analysis
         }
     }
 
@@ -62,6 +90,52 @@ final class WellnessLensTests: XCTestCase {
         }
 
         func writeNutritionIfAllowed(verdict: LILADomain.ScanVerdict, preferences: LILADomain.DataSyncPreferences) async {}
+    }
+
+    private actor SequencedHealthKitService: HealthKitServicing {
+        enum Step: String {
+            case requestedSnapshot
+            case scanAnalyze
+            case structuredAnalyze
+        }
+
+        let report: HealthKitAuthorizationReport
+        let snapshot: BiometricsSnapshot?
+        private(set) var steps: [Step] = []
+
+        init(
+            report: HealthKitAuthorizationReport = HealthKitAuthorizationReport(
+                healthDataAvailable: true,
+                cycle: .sharingAuthorized,
+                workouts: .sharingAuthorized,
+                recovery: .sharingAuthorized,
+                sleep: .sharingAuthorized,
+                nutritionWriteBack: .notDetermined
+            ),
+            snapshot: BiometricsSnapshot?
+        ) {
+            self.report = report
+            self.snapshot = snapshot
+        }
+
+        func requestAuthorization(for preferences: LILADomain.DataSyncPreferences) async -> HealthKitAuthorizationReport {
+            report
+        }
+
+        func currentSnapshot(for profile: UserProfile) async -> BiometricsSnapshot? {
+            steps.append(.requestedSnapshot)
+            return snapshot
+        }
+
+        func writeNutritionIfAllowed(verdict: LILADomain.ScanVerdict, preferences: LILADomain.DataSyncPreferences) async {}
+
+        func mark(_ step: Step) {
+            steps.append(step)
+        }
+
+        func recordedSteps() -> [Step] {
+            steps
+        }
     }
 
     private struct StubCoachAgent: CoachAgentServing {
@@ -171,11 +245,17 @@ final class WellnessLensTests: XCTestCase {
         }
 
         var structuredAnalysisResult: Result<AnalysisEnvelope, Error>
+        var analyzeProductResult: Result<ScanAnalysis, Error> = .failure(MockError.structuredUnavailable)
+        var onAnalyzeProduct: (@Sendable (ScanInput, UserContext, ScanContext?) async -> Void)?
+        var onAnalyzeStructuredScan: (@Sendable (ScanInput, UserProfile, [ScanEvent], [CheckInEvent], ScanContext?) async -> Void)?
         private(set) var analyzeStructuredScanCalls = 0
+        private(set) var analyzeProductCalls = 0
         private(set) var completedOnboardingCalls = 0
         private(set) var completedOnboardingProfile: UserProfile?
         private(set) var completedOnboardingGoals: [ActiveGoal] = []
         private(set) var completedOnboardingPlan: FirstWeekPlan?
+        private(set) var lastAnalyzeProductScanContext: ScanContext?
+        private(set) var lastAnalyzeStructuredScanScanContext: ScanContext?
 
         init(structuredAnalysisResult: Result<AnalysisEnvelope, Error>) {
             self.structuredAnalysisResult = structuredAnalysisResult
@@ -197,17 +277,27 @@ final class WellnessLensTests: XCTestCase {
             )
         }
 
-        func analyzeProduct(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis {
-            throw MockError.structuredUnavailable
+        func analyzeProduct(input: ScanInput, userContext: UserContext, scanContext: ScanContext?) async throws -> ScanAnalysis {
+            analyzeProductCalls += 1
+            lastAnalyzeProductScanContext = scanContext
+            if let onAnalyzeProduct {
+                await onAnalyzeProduct(input, userContext, scanContext)
+            }
+            return try analyzeProductResult.get()
         }
 
         func analyzeStructuredScan(
             input: ScanInput,
             profile: UserProfile,
             recentScans: [ScanEvent],
-            recentCheckIns: [CheckInEvent]
+            recentCheckIns: [CheckInEvent],
+            scanContext: ScanContext?
         ) async throws -> AnalysisEnvelope {
             analyzeStructuredScanCalls += 1
+            lastAnalyzeStructuredScanScanContext = scanContext
+            if let onAnalyzeStructuredScan {
+                await onAnalyzeStructuredScan(input, profile, recentScans, recentCheckIns, scanContext)
+            }
             return try structuredAnalysisResult.get()
         }
 
@@ -308,12 +398,14 @@ final class WellnessLensTests: XCTestCase {
     private func makeAnalysis(
         barcode: String,
         source: ScanSource = .manualBarcode,
-        confidence: ConfidenceLevel = .high
+        confidence: ConfidenceLevel = .high,
+        scanContext: ScanContext? = nil
     ) -> ScanAnalysis {
         let product = SampleCatalog.products.first(where: { $0.barcode == barcode }) ?? SampleCatalog.products[0]
         return AnalysisEngine().analyze(
             product: product,
             userContext: .starter,
+            scanContext: scanContext,
             source: source,
             confidence: confidence,
             catalog: SampleCatalog.products
@@ -474,7 +566,8 @@ final class WellnessLensTests: XCTestCase {
 
     private func makeScanEvent(
         analysis: ScanAnalysis,
-        input: ScanInput
+        input: ScanInput,
+        scanContext: ScanContext? = nil
     ) -> ScanEvent {
         RootOrchestrator().composeScanEvent(
             input: input,
@@ -483,8 +576,17 @@ final class WellnessLensTests: XCTestCase {
             localProfileID: "local-test-user",
             recentScans: [],
             recentCheckIns: [],
+            scanContext: scanContext,
             latencyMs: 90
         )
+    }
+
+    private func overallScore(for analysis: ScanAnalysis) -> Int {
+        Int(Double(analysis.lensScores.map(\.score).reduce(0, +)) / Double(max(analysis.lensScores.count, 1)))
+    }
+
+    private func lensScore(_ lens: WellnessLensKind, in analysis: ScanAnalysis) -> Int {
+        analysis.lensScores.first(where: { $0.lens == lens })?.score ?? 0
     }
 
     private func makeRemoteScanVerdictRequest(source: ScanSource = .manualBarcode) -> ScanVerdictRequest {
@@ -770,6 +872,8 @@ final class WellnessLensTests: XCTestCase {
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(json["productName"] as? String, "Balanced Protein Yogurt")
             XCTAssertEqual(json["source"] as? String, "barcode")
+            XCTAssertNil(json["scanContext"])
+            XCTAssertNil(json["scan_context"])
 
             let resolvedProduct = try XCTUnwrap(json["resolved_product"] as? [String: Any])
             XCTAssertEqual(resolvedProduct["source"] as? String, "openFoodFacts")
@@ -994,6 +1098,198 @@ final class WellnessLensTests: XCTestCase {
         let glowScore = result.lensScores.first(where: { $0.lens == .glowSkin })?.score ?? 0
         XCTAssertGreaterThan(glowScore, 80)
         XCTAssertTrue(result.topReasons.contains(where: { $0.impact == .positive }))
+    }
+
+    func testNutrientEngineScoresProviderBackedProteinFiberFoodStrongly() {
+        var product = SampleCatalog.products[0]
+        product.resolution = ProductResolution(
+            canonicalProductID: "off:850000001",
+            source: .openFoodFacts,
+            confidence: 0.92,
+            nutritionSnapshot: product.resolution?.nutritionSnapshot,
+            isDirectional: false
+        )
+        product.resolutionSemantics = [.canonical, .providerBacked]
+
+        let analysis = AnalysisEngine().analyze(
+            product: product,
+            userContext: .starter,
+            source: .manualBarcode,
+            confidence: .high,
+            catalog: SampleCatalog.products
+        )
+
+        XCTAssertGreaterThanOrEqual(lensScore(.energyMood, in: analysis), 75)
+        XCTAssertGreaterThanOrEqual(lensScore(.gutComfort, in: analysis), 85)
+        XCTAssertGreaterThanOrEqual(lensScore(.bodyCompositionStrength, in: analysis), 70)
+        XCTAssertGreaterThanOrEqual(overallScore(for: analysis), 70)
+    }
+
+    func testNutrientEngineSoftensUltraProcessedSnack() {
+        let product = ProductCandidate(
+            id: "nova4-snack",
+            name: "Crunch Lab Snack",
+            brand: "Crunch Lab",
+            productType: .food,
+            barcode: "899900001",
+            headline: "Crispy snack with softer digestion and hormone support.",
+            ingredients: ["Corn flour", "Sunflower oil", "Natural flavors", "Maltodextrin"].map(Ingredient.init),
+            claims: ["Crunchy", "Snack pack"],
+            tags: [],
+            alternativeIDs: [],
+            notes: [],
+            lookupTokens: ["crunchy snack", "natural flavors", "maltodextrin"],
+            resolution: ProductResolution(
+                canonicalProductID: "off:899900001",
+                source: .openFoodFacts,
+                confidence: 0.9,
+                nutritionSnapshot: NutritionSnapshot(
+                    energyKcalPer100g: 470,
+                    proteinGPer100g: 4,
+                    carbsGPer100g: 56,
+                    fatGPer100g: 23,
+                    sugarsGPer100g: 6,
+                    fiberGPer100g: 2,
+                    sodiumMgPer100g: 420,
+                    caffeineMgPer100g: nil,
+                    novaGroup: 4
+                ),
+                isDirectional: false
+            ),
+            resolutionSemantics: [.canonical, .providerBacked]
+        )
+
+        let analysis = AnalysisEngine().analyze(
+            product: product,
+            userContext: .starter,
+            source: .manualBarcode,
+            confidence: .high,
+            catalog: SampleCatalog.products
+        )
+
+        XCTAssertLessThan(lensScore(.gutComfort, in: analysis), 60)
+        XCTAssertLessThan(lensScore(.hormoneBalance, in: analysis), 60)
+        XCTAssertLessThan(overallScore(for: analysis), 60)
+    }
+
+    func testNutrientEngineBoostsProteinAnchorDuringTrainingAndShortSleepContext() {
+        let baseline = makeAnalysis(barcode: "850000001")
+        let contextual = makeAnalysis(
+            barcode: "850000001",
+            scanContext: ScanContext(
+                cyclePhase: .menstrual,
+                isInAnabolicWindow: true,
+                sleepHours: 5.4,
+                hrvMilliseconds: 45,
+                restingHeartRate: 56,
+                wristTemperatureDeltaCelsius: nil
+            )
+        )
+
+        XCTAssertGreaterThan(lensScore(.energyMood, in: contextual), lensScore(.energyMood, in: baseline))
+        XCTAssertGreaterThan(lensScore(.bodyCompositionStrength, in: contextual), lensScore(.bodyCompositionStrength, in: baseline))
+        XCTAssertGreaterThan(overallScore(for: contextual), overallScore(for: baseline))
+    }
+
+    func testDirectionalMealReadStaysDirectionalWhileScoringConservatively() {
+        let product = ProductCandidate(
+            id: "directional:chicken-bowl",
+            name: "Chicken bowl read",
+            brand: "Directional meal",
+            productType: .food,
+            barcode: nil,
+            headline: "Meal snapshot with protein and greens cues.",
+            ingredients: ["Chicken", "Greens", "Beans"].map(Ingredient.init),
+            claims: [],
+            tags: [],
+            alternativeIDs: [],
+            notes: ["Directional meal inference only."],
+            lookupTokens: ["grilled chicken", "greens", "beans"],
+            resolution: ProductResolution(
+                canonicalProductID: nil,
+                source: .agentInferred,
+                confidence: 0.44,
+                nutritionSnapshot: nil,
+                isDirectional: true
+            ),
+            resolutionSemantics: [.provisional, .directional, .lowConfidence]
+        )
+
+        let analysis = AnalysisEngine().analyze(
+            product: product,
+            userContext: .starter,
+            source: .mealPhoto,
+            confidence: .low,
+            catalog: SampleCatalog.products
+        )
+
+        XCTAssertEqual(analysis.confidence, .low)
+        XCTAssertTrue(analysis.overallSummary.localizedCaseInsensitiveContains("directional read"))
+        XCTAssertGreaterThanOrEqual(lensScore(.energyMood, in: analysis), 60)
+        XCTAssertLessThan(overallScore(for: analysis), 85)
+    }
+
+    func testSupplementPathStaysConservativeEvenWithNutritionSnapshot() {
+        let product = ProductCandidate(
+            id: "supplement:steady-capsules",
+            name: "Steady Capsules",
+            brand: "Inner Balance",
+            productType: .supplement,
+            barcode: "888800001",
+            headline: "Provider-backed supplement that should keep the conservative tag path.",
+            ingredients: ["Lactobacillus blend", "Vegetable capsule"].map(Ingredient.init),
+            claims: ["Gut support"],
+            tags: [.probiotic],
+            alternativeIDs: [],
+            notes: [],
+            lookupTokens: ["probiotic", "capsules"],
+            resolution: ProductResolution(
+                canonicalProductID: "dsld:steady-capsules",
+                source: .nihDSLD,
+                confidence: 0.88,
+                nutritionSnapshot: NutritionSnapshot(
+                    energyKcalPer100g: 300,
+                    proteinGPer100g: 24,
+                    carbsGPer100g: 40,
+                    fatGPer100g: 8,
+                    sugarsGPer100g: 24,
+                    fiberGPer100g: 0,
+                    sodiumMgPer100g: 15,
+                    caffeineMgPer100g: 80,
+                    novaGroup: 4
+                ),
+                isDirectional: false
+            ),
+            resolutionSemantics: [.canonical, .providerBacked]
+        )
+        let scanContext = ScanContext(
+            cyclePhase: .luteal,
+            isInAnabolicWindow: true,
+            sleepHours: 5.1,
+            hrvMilliseconds: 28,
+            restingHeartRate: 74,
+            wristTemperatureDeltaCelsius: 0.4
+        )
+
+        let baseline = AnalysisEngine().analyze(
+            product: product,
+            userContext: .starter,
+            source: .manualBarcode,
+            confidence: .high,
+            catalog: SampleCatalog.products
+        )
+        let contextual = AnalysisEngine().analyze(
+            product: product,
+            userContext: .starter,
+            scanContext: scanContext,
+            source: .manualBarcode,
+            confidence: .high,
+            catalog: SampleCatalog.products
+        )
+
+        XCTAssertEqual(contextual.lensScores, baseline.lensScores)
+        XCTAssertGreaterThanOrEqual(lensScore(.gutComfort, in: contextual), 70)
+        XCTAssertLessThan(lensScore(.energyMood, in: contextual), 70)
     }
 
     func testSkincareLabelScenarioResolvesToGlowFriendlyRead() async throws {
@@ -2051,6 +2347,7 @@ final class WellnessLensTests: XCTestCase {
         var verdict = makeVerdict(fit: .unclear, source: .labelPhoto, watchoutCount: 1)
         verdict.resolvedProduct.name = "Directional label read"
         verdict.resolvedProduct.resolutionSource = .agentInferred
+        verdict.resolvedProduct.resolutionSemantics = [.provisional, .directional, .lowConfidence]
 
         let content = ScanVerdictSurfaceContent.build(verdict: verdict)
 
@@ -2160,7 +2457,9 @@ final class WellnessLensTests: XCTestCase {
         let stableAnalysis = makeRemoteReadyAnalysis()
         let unstableTarget = makeDirectionalAnalysis()
 
-        let sourceEvent = makeScanEvent(
+        let baseTimestamp = Date()
+
+        var sourceEvent = makeScanEvent(
             analysis: sourceAnalysis,
             input: ScanInput(
                 sourceType: .manualLabel,
@@ -2215,7 +2514,9 @@ final class WellnessLensTests: XCTestCase {
         let sourceAnalysis = makeDirectionalAnalysis()
         let stableAnalysis = makeRemoteReadyAnalysis()
 
-        let sourceEvent = makeScanEvent(
+        let baseTimestamp = Date()
+
+        var sourceEvent = makeScanEvent(
             analysis: sourceAnalysis,
             input: ScanInput(
                 sourceType: .manualLabel,
@@ -2255,6 +2556,95 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(context.analysis.resolvedProduct.resolutionSemantics, stableAnalysis.resolvedProduct.resolvedResolutionSemantics)
         XCTAssertEqual(context.structuredAnalysis?.resolvedProduct?.name, stableAnalysis.resolvedProduct.name)
         XCTAssertEqual(context.verdict.resolvedProduct.name, stableAnalysis.resolvedProduct.name)
+    }
+
+    @MainActor
+    func testManualCorrectionRehydratesStoredScanContextAfterRelaunch() {
+        let sourceAnalysis = makeDirectionalAnalysis()
+        let stableAnalysis = makeRemoteReadyAnalysis()
+        let scanContext = ScanContext(
+            cyclePhase: .menstrual,
+            isInAnabolicWindow: true,
+            sleepHours: 5.3,
+            hrvMilliseconds: 43,
+            restingHeartRate: 58,
+            wristTemperatureDeltaCelsius: nil
+        )
+
+        let baseTimestamp = Date()
+
+        var sourceEvent = makeScanEvent(
+            analysis: sourceAnalysis,
+            input: ScanInput(
+                sourceType: .manualLabel,
+                barcode: nil,
+                capturedImageRef: nil,
+                rawText: "collagen, vanilla",
+                productTypeHint: .food,
+                locale: "en_US"
+            ),
+            scanContext: scanContext
+        )
+        var stableEvent = makeScanEvent(
+            analysis: stableAnalysis,
+            input: ScanInput(
+                sourceType: .manualBarcode,
+                barcode: stableAnalysis.resolvedProduct.barcode,
+                capturedImageRef: nil,
+                rawText: nil,
+                productTypeHint: .food,
+                locale: "en_US"
+            )
+        )
+        sourceEvent.timestamp = baseTimestamp
+        sourceEvent.analysis.timestamp = baseTimestamp
+        stableEvent.timestamp = baseTimestamp.addingTimeInterval(-60)
+        stableEvent.analysis.timestamp = stableEvent.timestamp
+
+        let store = InMemoryStore(snapshot: .fresh())
+        store.snapshot.scanEvents = [sourceEvent, stableEvent]
+        store.snapshot.scanVerdicts = [
+            StoredScanVerdict(scanEventID: sourceEvent.id, verdict: sourceEvent.analysis.lilaVerdict(fallbackAnalysis: sourceAnalysis, context: UserContext.starter.lilaContext()), createdAt: sourceEvent.timestamp),
+            StoredScanVerdict(scanEventID: stableEvent.id, verdict: stableEvent.analysis.lilaVerdict(fallbackAnalysis: stableAnalysis, context: UserContext.starter.lilaContext()), createdAt: stableEvent.timestamp),
+        ]
+
+        let firstModel = AppModel(services: makeServices(store: store))
+        firstModel.applyManualCorrection(for: sourceAnalysis, targetScanEventID: stableEvent.id)
+
+        let relaunchedModel = AppModel(services: makeServices(store: store))
+        let corrected = relaunchedModel.presentedAnalysisContext(for: sourceAnalysis)
+        let expected = AnalysisEngine().analyze(
+            product: stableAnalysis.resolvedProduct,
+            userContext: .starter,
+            scanContext: scanContext,
+            source: sourceAnalysis.source,
+            confidence: stableAnalysis.confidence,
+            catalog: SampleCatalog.products
+        )
+
+        XCTAssertEqual(corrected.analysis.resolvedProduct.name, stableAnalysis.resolvedProduct.name)
+        XCTAssertEqual(corrected.analysis.lensScores, expected.lensScores)
+        XCTAssertEqual(corrected.verdict.trackPrompt?.triggerAfterHours, 2)
+        XCTAssertTrue(
+            corrected.verdict.lensScores
+                .first(where: { $0.lens == .hormoneBalance })?
+                .contextApplied
+                .contains(where: { $0.label == "Menstrual" }) == true
+        )
+        XCTAssertTrue(
+            corrected.verdict.lensScores
+                .first(where: { $0.lens == .bodyCompositionAndStrength })?
+                .contextApplied
+                .contains(where: { $0.label == "Post-workout window" }) == true
+        )
+        XCTAssertTrue(
+            corrected.verdict.lensScores
+                .first(where: { $0.lens == .energyAndMood })?
+                .contextApplied
+                .contains(where: { $0.label == "Short sleep" }) == true
+        )
+        XCTAssertEqual(relaunchedModel.latestVerdict?.resolvedProduct.name, stableAnalysis.resolvedProduct.name)
+        XCTAssertEqual(relaunchedModel.latestVerdict?.trackPrompt?.triggerAfterHours, 2)
     }
 
     @MainActor
@@ -2659,6 +3049,51 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(event.analysis.followUpPrompt, expectedEnvelope.followUpPrompt)
         XCTAssertEqual(event.analysis.overallScore, expectedEnvelope.overallScore)
         XCTAssertEqual(event.legacyAnalysis, legacyAnalysis)
+    }
+
+    @MainActor
+    func testAppModelFetchesBiometricsBeforeAnalysisAndPropagatesScanContext() async throws {
+        let biometrics = BiometricsSnapshot(
+            capturedAt: .now,
+            cycleState: .init(lastPeriodStart: .now.addingTimeInterval(-12 * 24 * 60 * 60), source: .manualEntry),
+            trainingLoad: .init(workoutsCount: 3, activeEnergyBurnedKcal: 510, durationMinutes: 120, lastWorkoutEndedAt: .now),
+            sleepHours: 5.2,
+            hrvMilliseconds: 30,
+            restingHeartRate: 71,
+            wristTemperatureDeltaCelsius: 0.35
+        )
+        let healthKit = SequencedHealthKitService(snapshot: biometrics)
+        let legacyAnalysis = makeAnalysis(barcode: "850000001")
+        let scanService = CapturingScanService(analysis: legacyAnalysis) { _, _, _ in
+            await healthKit.mark(.scanAnalyze)
+        }
+        var remoteEnvelope = makeEnvelope(verdict: .good, overallScore: 84)
+        remoteEnvelope.resolvedProduct = legacyAnalysis.resolvedProduct
+        let backend = MockBackendAPI(structuredAnalysisResult: .success(remoteEnvelope))
+        backend.onAnalyzeStructuredScan = { _, _, _, _, _ in
+            await healthKit.mark(.structuredAnalyze)
+        }
+
+        let model = AppModel(
+            services: makeServices(
+                scanService: scanService,
+                backendAPI: backend,
+                healthKitService: healthKit
+            )
+        )
+
+        await model.analyzeBarcode("850000001")
+
+        let expectedContext = try XCTUnwrap(model.scanEvents.first?.normalizedPayload.scanContext)
+        let localContext = try XCTUnwrap(scanService.receivedScanContexts.first ?? nil)
+        let recordedSteps = await healthKit.recordedSteps()
+
+        XCTAssertEqual(recordedSteps, [.requestedSnapshot, .scanAnalyze, .structuredAnalyze])
+        XCTAssertEqual(localContext, expectedContext)
+        XCTAssertEqual(backend.lastAnalyzeStructuredScanScanContext, expectedContext)
+        XCTAssertEqual(expectedContext.isInAnabolicWindow, true)
+        XCTAssertEqual(expectedContext.hasShortSleep, true)
+        XCTAssertEqual(expectedContext.hasRecoveryStrain, true)
     }
 
     @MainActor
