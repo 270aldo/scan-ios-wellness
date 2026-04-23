@@ -33,25 +33,35 @@
 	<string>public.app-category.healthcare-fitness</string>
 	<key>NSCameraUsageDescription</key>
 	<string>WellnessLens uses the camera to scan barcodes and read product labels.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>WellnessLens reads cycle, sleep, workout, and recovery data only when you opt in so each scan can reflect your current biology and training context.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>WellnessLens can write nutrition entries to Health only when you enable write-back for your scan history.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>WellnessLens uses your photo library so you can analyze ingredient labels from photos.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>WLAgentServiceBaseURL</key>
+	<string>$(WL_AGENT_SERVICE_BASE_URL)</string>
 	<key>WLBackendBaseURL</key>
-	<string></string>
+	<string>$(WL_BACKEND_BASE_URL)</string>
 	<key>WLFirebaseEnabled</key>
-	<false/>
+	<string>$(WL_FIREBASE_ENABLED)</string>
+	<key>WLFirebaseOptionsPlistName</key>
+	<string>$(WL_FIREBASE_OPTIONS_PLIST_NAME)</string>
+	<key>WLBackendDebugSurfaceEnabled</key>
+	<string>$(WL_BACKEND_DEBUG_SURFACE_ENABLED)</string>
 	<key>WLPlusProductID</key>
-	<string>com.aldoolivas.wellnesslens.plus</string>
+	<string>$(WL_PLUS_PRODUCT_ID)</string>
 	<key>WLProProductID</key>
-	<string>com.aldoolivas.wellnesslens.pro</string>
+	<string>$(WL_PRO_PRODUCT_ID)</string>
 	<key>WLStoreKitEnabled</key>
-	<false/>
+	<string>$(WL_STOREKIT_ENABLED)</string>
 	<key>WLUseAppCheckDebugProvider</key>
-	<true/>
+	<string>$(WL_USE_APP_CHECK_DEBUG_PROVIDER)</string>
 	<key>WLUseDemoData</key>
-	<true/>
+	<string>$(WL_USE_DEMO_DATA)</string>
 </dict>
 </plist>

@@ -2,54 +2,145 @@ import SwiftUI
 
 struct HomeView: View {
     @Environment(AppModel.self) private var model
+
+    @State private var strategistEntryPoint: StrategistEntryPoint?
+    @State private var showPantry = false
+    @State private var contextExpanded = false
     @State private var sampleReadsExpanded = false
 
-    private var featuredInsight: WeeklyInsight? {
-        model.weeklyInsights.first
+    private var payload: DailyHomePayload {
+        model.dailyHomePayload
     }
 
-    private var secondaryInsights: [WeeklyInsight] {
-        Array(model.weeklyInsights.dropFirst().prefix(2))
+    private var brief: DailyBrief {
+        model.dailyBrief
+    }
+
+    private var surfaceContract: DailyHomePayloadV2 {
+        model.dailyHomePayloadV2
+    }
+
+    private var latestVerdictSurface: ScanVerdictSurfaceContent? {
+        model.latestVerdict.map(ScanVerdictSurfaceContent.build)
     }
 
     var body: some View {
         WLScreen {
-            if let latestRecord = model.latestRecord {
-                HomeLatestReadHero(
-                    record: latestRecord,
-                    openProductRead: { model.latestAnalysis = latestRecord.analysis },
-                    scanAnotherProduct: openScan
+            HomeDailyHero(
+                payload: payload,
+                primaryGoal: model.activeGoals.first,
+                primaryAction: handleNextAction,
+                secondaryActionTitle: heroSecondaryActionTitle,
+                secondaryActionSystemImage: heroSecondaryActionSystemImage,
+                secondaryAction: handleHeroSecondaryAction
+            )
+
+            if model.isUsingLocalHomeFallback {
+                HomeFallbackStateCard(
+                    title: "Showing the local daily fallback",
+                    summary: "Home is using the deterministic local brief while the remote refresh catches up. Your goals, plan, gating, and saved memory are still applied."
                 )
+            }
 
-                HomeInsightsSection(
-                    featuredInsight: featuredInsight,
-                    secondaryInsights: secondaryInsights
+            if let latestVerdictSurface {
+                HomeLatestVerdictCard(
+                    content: latestVerdictSurface,
+                    openHistory: {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                            model.selectedTab = .history
+                        }
+                    },
+                    openScan: openScan
                 )
+            }
 
-                if !model.userContext.goals.isEmpty {
-                    HomePrioritiesSection(goals: model.userContext.goals)
-                }
+            HomeSignalSection(payload: payload, saveCheckIn: openCheckIn)
 
-                HomeSampleReadsSection(
-                    packs: model.demoScenarioPacks,
-                    isExpanded: $sampleReadsExpanded,
-                    runScenario: runScenario
+            if let primaryModule = surfaceContract.primaryModule {
+                moduleSection(primaryModule)
+            }
+
+            if !surfaceContract.secondaryModules.isEmpty {
+                HomeMoreContextCard(
+                    moduleTitles: surfaceContract.secondaryModules.map(\.title),
+                    whyNow: surfaceContract.hero.whyNow,
+                    deferredCount: surfaceContract.deferredModules.count,
+                    isExpanded: $contextExpanded
                 )
-            } else {
-                HomeWelcomeHero(openScan: openScan)
+            }
 
-                HomeSampleReadsSection(
-                    packs: model.demoScenarioPacks,
-                    isExpanded: $sampleReadsExpanded,
-                    runScenario: runScenario
-                )
-
-                if !model.userContext.goals.isEmpty {
-                    HomePrioritiesSection(goals: model.userContext.goals)
+            if contextExpanded {
+                ForEach(surfaceContract.secondaryModules) { module in
+                    moduleSection(module)
                 }
             }
         }
         .navigationTitle("Today")
+        .sheet(item: $strategistEntryPoint) { entryPoint in
+            StrategistChatView(entryPoint: entryPoint)
+        }
+        .sheet(isPresented: $showPantry) {
+            PantryView()
+        }
+    }
+
+    private var heroSecondaryActionTitle: String {
+        switch payload.nextAction.kind {
+        case .askStrategist:
+            "Open scan"
+        default:
+            "Ask strategist"
+        }
+    }
+
+    private var heroSecondaryActionSystemImage: String {
+        switch payload.nextAction.kind {
+        case .askStrategist:
+            "viewfinder"
+        default:
+            "message"
+        }
+    }
+
+    private func handleNextAction() {
+        switch payload.nextAction.kind {
+        case .scanStaple, .swapProduct:
+            openScan()
+        case .checkInNow:
+            openCheckIn()
+        case .askStrategist:
+            strategistEntryPoint = .home
+        case .repeatProduct:
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                model.selectedTab = .history
+            }
+        case .tidyRoutine:
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                model.selectedTab = .profile
+            }
+        }
+    }
+
+    private func handleDailyBriefAction() {
+        switch brief.cta.kind {
+        case .scanBreakfast, .scanSnack, .mealSnapshot:
+            openScan()
+        case .updateFeedback:
+            openCheckIn()
+        case .openHistory:
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                model.selectedTab = .history
+            }
+        }
+    }
+
+    private func handleHeroSecondaryAction() {
+        switch payload.nextAction.kind {
+        case .askStrategist:
+            openScan()
+        default:
+            strategistEntryPoint = .home
+        }
     }
 
     private func openScan() {
@@ -58,156 +149,360 @@ struct HomeView: View {
         }
     }
 
+    private func openCheckIn() {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+            model.selectedTab = .checkIn
+        }
+    }
+
     private func runScenario(_ scenario: DemoScenario) {
         Task {
             await model.runDemoScenario(scenario)
         }
     }
+
+    @ViewBuilder
+    private func moduleSection(_ module: HomeSurfaceModule) -> some View {
+        switch module {
+        case .firstWeekPlan:
+            if let firstWeekPlan = model.firstWeekPlan {
+                HomeFirstWeekPlanSection(firstWeekPlan: firstWeekPlan)
+            }
+        case .dailyBrief:
+            HomeDailyBriefCard(
+                brief: brief,
+                primaryAction: handleDailyBriefAction
+            )
+        case .activeGoals:
+            HomeGoalsSection(goals: model.activeGoals)
+        case .recommendedSwap:
+            if let recommendedSwap = payload.recommendedSwap {
+                HomeRecommendedSwapCard(
+                    suggestion: recommendedSwap,
+                    openScan: openScan,
+                    askStrategist: { strategistEntryPoint = .scan }
+                )
+            }
+        case .openLoops:
+            HomeOpenLoopsSection(
+                openLoops: payload.openLoops,
+                openCheckIn: openCheckIn,
+                openHistory: {
+                    withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                        model.selectedTab = .history
+                    }
+                }
+            )
+        case .recentWins:
+            HomeRecentWinsSection(recentWins: payload.recentWins)
+        case .strategistNote:
+            HomeStrategistNoteCard(
+                note: payload.strategistNote,
+                openStrategist: { strategistEntryPoint = .home }
+            )
+        case .routineMemory:
+            HomeRoutineSection(routines: model.routines)
+        case .pantry:
+            HomePantrySection(
+                items: Array(model.visiblePantryItems.prefix(3)),
+                suggestions: model.hasAccess(to: .pantrySuggestions) ? model.pantrySuggestions : [],
+                isUnlocked: model.hasAccess(to: .pantryMVP),
+                openPantry: {
+                    showPantry = true
+                }
+            )
+        case .sampleReads:
+            HomeSampleReadsSection(
+                packs: model.demoScenarioPacks,
+                isExpanded: $sampleReadsExpanded,
+                runScenario: runScenario
+            )
+        }
+    }
 }
 
-private struct HomeWelcomeHero: View {
-    let openScan: () -> Void
+private struct HomePantrySection: View {
+    let items: [PantryItem]
+    let suggestions: [PantrySuggestion]
+    let isUnlocked: Bool
+    let openPantry: () -> Void
 
     var body: some View {
-        WLHeroCard {
-                VStack(alignment: .leading, spacing: WLSpacing.l) {
-                WLStatusBadge(
-                    title: "Personal product reads",
-                    systemImage: "sparkles",
-                    tone: .accent,
-                    style: .heroGlass
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Pantry",
+                    subtitle: "Keep stronger defaults visible before convenience takes over.",
+                    systemImage: "shippingbox"
                 )
 
-                VStack(alignment: .leading, spacing: WLSpacing.s) {
-                    Text(WLProductCopy.Home.emptyTitle)
-                        .font(WLTypography.hero)
-                        .foregroundStyle(.white)
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text(item.title)
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
 
-                    Text(WLProductCopy.Home.emptySubtitle)
-                        .font(WLTypography.body)
-                        .foregroundStyle(Color.white.opacity(0.90))
+                        Text(item.summary)
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
                 }
+
+                let hasSuggestion = !suggestions.isEmpty
+
+                if isUnlocked, let suggestion = suggestions.first {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Next pantry move")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+
+                        Text(suggestion.summary)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                } else if let supportingMessage = PantryPresentationCopy.supportingMessage(
+                    isUnlocked: isUnlocked,
+                    hasSuggestion: hasSuggestion
+                ) {
+                    Text(supportingMessage)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                WLUtilityButton(
+                    title: isUnlocked ? "Open pantry" : "Preview pantry",
+                    systemImage: isUnlocked ? "arrow.up.right.circle" : "shippingbox"
+                ) {
+                    openPantry()
+                }
+            }
+        }
+    }
+}
+
+private struct HomeMoreContextCard: View {
+    let moduleTitles: [String]
+    let whyNow: String
+    let deferredCount: Int
+    @Binding var isExpanded: Bool
+
+    private var modulePreview: String {
+        let preview = Array(moduleTitles.prefix(3))
+        if preview.isEmpty {
+            return "Keep the extra context close, but not in the way."
+        }
+
+        let joined = preview.joined(separator: ", ")
+        if moduleTitles.count > 3 || deferredCount > 0 {
+            return "Queued now: \(joined), and a little more only if today's first decision changes."
+        }
+        return "Queued now: \(joined)."
+    }
+
+    var body: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "More for today",
+                    subtitle: whyNow,
+                    systemImage: "square.stack.3d.up"
+                )
+
+                Text(modulePreview)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                Button {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: WLSpacing.s) {
+                        Text(isExpanded ? "Hide extra context" : "Show extra context")
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Spacer(minLength: 0)
+
+                        WLIcon(
+                            systemName: isExpanded ? "chevron.up" : "chevron.down",
+                            color: WLPalette.rose,
+                            size: 14
+                        )
+                    }
+                    .padding(.vertical, 2)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private struct HomeDailyBriefCard: View {
+    let brief: DailyBrief
+    let primaryAction: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Daily Brief",
+                    subtitle: "What matters before the next real decision.",
+                    systemImage: "sunrise"
+                )
+
+                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                    Text(brief.headline)
+                        .font(WLTypography.title)
+                        .foregroundStyle(WLPalette.ink)
+
+                    Text(brief.riskHeadline)
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                HStack(spacing: WLSpacing.s) {
+                    WLPill(title: "Priority: \(brief.nutritionPriority)", tone: .neutral)
+                    WLStatusBadge(title: "Today", systemImage: "scope", tone: .accent)
+                }
+
+                Text(brief.cta.subtitle)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
 
                 WLPrimaryButton(
-                    title: "Scan your first product",
-                    systemImage: "viewfinder",
-                    chrome: .heroPrimary
+                    title: brief.cta.title,
+                    systemImage: "arrow.up.right.circle"
                 ) {
-                    openScan()
+                    primaryAction()
                 }
             }
         }
     }
 }
 
-private struct HomeLatestReadHero: View {
-    let record: ScanRecord
-    let openProductRead: () -> Void
-    let scanAnotherProduct: () -> Void
-
-    private var leadingLens: LensScore? {
-        record.analysis.lensScores.max(by: { $0.score < $1.score })
-    }
-
-    private var topOutcomes: [LensScore] {
-        Array(record.analysis.lensScores.sorted(by: { $0.score > $1.score }).prefix(2))
-    }
+private struct HomeDailyHero: View {
+    let payload: DailyHomePayload
+    let primaryGoal: ActiveGoal?
+    let primaryAction: () -> Void
+    let secondaryActionTitle: String
+    let secondaryActionSystemImage: String
+    let secondaryAction: () -> Void
 
     var body: some View {
-        WLHeroCard {
+        WLHeroSurface {
             VStack(alignment: .leading, spacing: WLSpacing.l) {
-                WLHeroGlassGroup {
-                    HStack(alignment: .center, spacing: WLSpacing.s) {
-                        WLStatusBadge(
-                            title: WLProductCopy.Home.latestReadTitle,
-                            systemImage: "sparkles",
-                            tone: .accent,
-                            style: .heroGlass
-                        )
-                        WLPill(
-                            title: record.analysis.productType.title,
-                            tone: .neutral,
-                            style: .heroGlass
-                        )
+                ViewThatFits(in: .vertical) {
+                    HStack(spacing: WLSpacing.s) {
+                        heroStatusBadges
+                    }
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        heroStatusBadges
                     }
                 }
 
                 VStack(alignment: .leading, spacing: WLSpacing.s) {
-                    Text(record.analysis.resolvedProduct.name)
+                    Text(payload.todayFocus.title)
                         .font(WLTypography.hero)
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(record.analysis.overallSummary)
+                    Text(payload.todayFocus.summary)
                         .font(WLTypography.body)
                         .foregroundStyle(Color.white.opacity(0.90))
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 WLHeroGlassGroup {
-                    HStack(spacing: WLSpacing.s) {
-                        ForEach(topOutcomes) { outcome in
-                            HomeOutcomeCard(score: outcome)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: WLSpacing.s) {
+                            metricCard(title: "Body signal", value: payload.bodySignal.title)
+                            metricCard(title: "Next action", value: payload.nextAction.title)
+                        }
+
+                        VStack(spacing: WLSpacing.s) {
+                            metricCard(title: "Body signal", value: payload.bodySignal.title)
+                            metricCard(title: "Next action", value: payload.nextAction.title)
                         }
                     }
                 }
 
-                WLHeroGlassGroup {
-                    HStack(spacing: WLSpacing.s) {
-                        WLPrimaryButton(
-                            title: "Open product read",
-                            systemImage: "chart.xyaxis.line",
-                            chrome: .heroPrimary
-                        ) {
-                            openProductRead()
-                        }
-
-                        WLSecondaryButton(
-                            title: "Scan another product",
-                            systemImage: "viewfinder",
-                            chrome: .heroSecondary
-                        ) {
-                            scanAnotherProduct()
-                        }
+                WLActionGroup {
+                    WLPrimaryButton(
+                        title: payload.nextAction.cta,
+                        systemImage: "arrow.up.right.circle",
+                        chrome: .heroPrimary
+                    ) {
+                        primaryAction()
                     }
-                }
 
-                if let leadingLens {
-                    Text("Leading lens: \(leadingLens.lens.title)")
-                        .font(WLTypography.captionStrong)
-                        .foregroundStyle(Color.white.opacity(0.82))
+                    WLSecondaryButton(
+                        title: secondaryActionTitle,
+                        systemImage: secondaryActionSystemImage,
+                        chrome: .heroSecondary
+                    ) {
+                        secondaryAction()
+                    }
                 }
             }
         }
     }
-}
 
-private struct HomeOutcomeCard: View {
-    let score: LensScore
+    @ViewBuilder
+    private var heroStatusBadges: some View {
+        WLStatusBadge(
+            title: payload.state.title,
+            systemImage: stateSymbol,
+            tone: stateTone,
+            style: .heroGlass
+        )
 
-    var body: some View {
+        if let primaryGoal {
+            WLPill(title: primaryGoal.focusMetric, tone: .neutral, style: .heroGlass)
+        }
+    }
+
+    private var stateTone: WLStatusBadge.Tone {
+        switch payload.state {
+        case .active:
+            .success
+        case .drifting, .reengagement:
+            .caution
+        case .unonboarded, .calibrating:
+            .accent
+        }
+    }
+
+    private var stateSymbol: String {
+        switch payload.state {
+        case .active:
+            "sparkles"
+        case .drifting:
+            "arrow.clockwise"
+        case .reengagement:
+            "bolt.heart"
+        case .unonboarded, .calibrating:
+            "scope"
+        }
+    }
+
+    private func metricCard(title: String, value: String) -> some View {
         WLAdaptiveGlassSurface(
             shape: .roundedRect(WLCorner.m),
-            tint: Color.white.opacity(0.16),
-            fallbackFill: Color.white.opacity(0.12),
-            fallbackStroke: Color.white.opacity(0.10)
+            tint: Color.black.opacity(0.16),
+            fallbackFill: Color.black.opacity(0.20),
+            fallbackStroke: Color.white.opacity(0.08)
         ) {
             VStack(alignment: .leading, spacing: WLSpacing.xs) {
-                HStack(spacing: WLSpacing.xs) {
-                    WLIcon(systemName: score.lens.icon, color: .white, size: 13)
-                    Text(score.lens.title)
-                        .font(WLTypography.captionStrong)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                }
+                Text(title.uppercased())
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.80))
 
-                Text("\(score.score)")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                Text(value)
+                    .font(WLTypography.captionStrong)
                     .foregroundStyle(.white)
-
-                Text(score.score >= 82 ? "Strong fit" : "Solid fit")
-                    .font(WLTypography.caption)
-                    .foregroundStyle(Color.white.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, WLSpacing.m)
@@ -216,73 +511,399 @@ private struct HomeOutcomeCard: View {
     }
 }
 
-private struct HomePrioritiesSection: View {
-    let goals: [UserGoal]
+private struct HomeFallbackStateCard: View {
+    let title: String
+    let summary: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: WLSpacing.m) {
-            WLSectionHeader(
-                title: WLProductCopy.Home.prioritiesTitle,
-                subtitle: WLProductCopy.Home.prioritiesSubtitle,
-                systemImage: "line.3.horizontal.decrease.circle"
-            )
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                WLStatusBadge(title: "Fallback active", systemImage: "icloud.slash", tone: .caution)
 
-            WLPrimaryCard {
-                ScrollView(.horizontal, showsIndicators: false) {
+                Text(title)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(summary)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+            }
+        }
+    }
+}
+
+private struct HomeLatestVerdictCard: View {
+    let content: ScanVerdictSurfaceContent
+    let openHistory: () -> Void
+    let openScan: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: WLProductCopy.Home.latestReadTitle,
+                    subtitle: WLProductCopy.Home.latestReadSubtitle,
+                    systemImage: "sparkles.rectangle.stack"
+                )
+
+                ViewThatFits(in: .horizontal) {
                     HStack(spacing: WLSpacing.s) {
-                        ForEach(goals) { goal in
-                            WLPill(title: goal.title, tone: .accent)
-                        }
+                        WLStatusBadge(
+                            title: content.fitTitle,
+                            systemImage: content.fit.symbol,
+                            tone: content.fit.badgeTone
+                        )
+
+                        WLPill(title: content.productName, tone: .soft)
                     }
-                    .padding(.vertical, 2)
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLStatusBadge(
+                            title: content.fitTitle,
+                            systemImage: content.fit.symbol,
+                            tone: content.fit.badgeTone
+                        )
+
+                        WLPill(title: content.productName, tone: .soft)
+                    }
+                }
+
+                Text(content.headline)
+                    .font(WLTypography.bodyEmphasis)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(content.primaryReason)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                Text(content.metadataSummary)
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                if let betterSwapTitle = content.betterSwapTitle,
+                   let betterSwapReason = content.betterSwapReason {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Better swap")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text("\(betterSwapTitle) looks softer because \(betterSwapReason)")
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                } else if let followUpPrompt = content.followUpPrompt {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Track later")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+
+                        Text(followUpPrompt)
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                }
+
+                WLActionGroup {
+                    WLPrimaryButton(title: "Scan again", systemImage: "viewfinder") {
+                        openScan()
+                    }
+
+                    WLUtilityButton(title: "Open history", systemImage: "clock.arrow.circlepath") {
+                        openHistory()
+                    }
                 }
             }
         }
     }
 }
 
-private struct HomeInsightsSection: View {
-    let featuredInsight: WeeklyInsight?
-    let secondaryInsights: [WeeklyInsight]
+private struct HomeSignalSection: View {
+    let payload: DailyHomePayload
+    let saveCheckIn: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Body signal",
+                    subtitle: "Use today's body signal as the lens for the next decision.",
+                    systemImage: "waveform.path.ecg"
+                )
+
+                WLStatusBadge(
+                    title: payload.bodySignal.title,
+                    systemImage: "heart.text.square",
+                    tone: tone
+                )
+
+                Text(payload.bodySignal.summary)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                WLUtilityButton(title: "Update check-in", systemImage: "heart.text.square") {
+                    saveCheckIn()
+                }
+            }
+        }
+    }
+
+    private var tone: WLStatusBadge.Tone {
+        switch payload.bodySignal.tone {
+        case .supportive:
+            .success
+        case .caution:
+            .caution
+        case .neutral:
+            .accent
+        }
+    }
+}
+
+private struct HomeFirstWeekPlanSection: View {
+    let firstWeekPlan: FirstWeekPlan
 
     var body: some View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
             WLSectionHeader(
-                title: WLProductCopy.Home.weeklySignalsTitle,
-                subtitle: WLProductCopy.Home.weeklySignalsSubtitle,
-                systemImage: "waveform.path.ecg"
+                title: firstWeekPlan.title,
+                subtitle: firstWeekPlan.summary,
+                systemImage: "calendar"
             )
 
-            if let featuredInsight {
-                WLPrimaryCard {
-                    VStack(alignment: .leading, spacing: WLSpacing.m) {
-                        WLStatusBadge(title: "Leading signal", systemImage: "waveform.path.ecg", tone: .accent)
+            ForEach(firstWeekPlan.steps) { step in
+                WLCompactCard {
+                    HStack(alignment: .top, spacing: WLSpacing.s) {
+                        WLIcon(
+                            systemName: step.isComplete ? "checkmark.circle.fill" : "circle.dashed",
+                            color: step.isComplete ? WLPalette.success : WLPalette.rose,
+                            size: 18
+                        )
 
-                        Text(featuredInsight.title)
-                            .font(WLTypography.title)
+                        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                            Text(step.title)
+                                .font(WLTypography.bodyEmphasis)
+                                .foregroundStyle(WLPalette.ink)
+
+                            Text(step.detail)
+                                .font(WLTypography.body)
+                                .foregroundStyle(WLPalette.inkSoft)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct HomeGoalsSection: View {
+    let goals: [ActiveGoal]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Active goals",
+                subtitle: "These goals should steer Home, scans, and strategist.",
+                systemImage: "target"
+            )
+
+            ForEach(goals) { goal in
+                WLCompactCard {
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        HStack(spacing: WLSpacing.s) {
+                            WLStatusBadge(
+                                title: goal.status == .active ? "Active" : goal.status.rawValue.capitalized,
+                                systemImage: "sparkles",
+                                tone: goal.status == .active ? .accent : .success
+                            )
+
+                            WLPill(title: goal.focusMetric, tone: .soft)
+                        }
+
+                        Text(goal.title)
+                            .font(WLTypography.bodyEmphasis)
                             .foregroundStyle(WLPalette.ink)
 
-                        Text(featuredInsight.summary)
+                        Text(goal.summary)
                             .font(WLTypography.body)
                             .foregroundStyle(WLPalette.inkSoft)
 
-                        Text(featuredInsight.callToAction)
-                            .font(WLTypography.bodyEmphasis)
+                        Text(goal.milestone.title)
+                            .font(WLTypography.captionStrong)
                             .foregroundStyle(WLPalette.rose)
+
+                        Text(goal.milestone.detail)
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct HomeRecommendedSwapCard: View {
+    let suggestion: AlternativeSuggestion
+    let openScan: () -> Void
+    let askStrategist: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Recommended swap",
+                    subtitle: "The app found a softer alternative worth keeping in view.",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+
+                Text(suggestion.productName)
+                    .font(WLTypography.title)
+                    .foregroundStyle(WLPalette.ink)
+
+                Text(suggestion.whyBetter)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: WLSpacing.s) {
+                        ForEach(suggestion.improvedLenses, id: \.self) { lens in
+                            WLPill(title: lens.title, tone: .accent)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+
+                WLActionGroup {
+                    WLPrimaryButton(title: "Scan another product", systemImage: "viewfinder") {
+                        openScan()
+                    }
+
+                    WLUtilityButton(title: "Ask why this fits", systemImage: "message") {
+                        askStrategist()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct HomeOpenLoopsSection: View {
+    let openLoops: [OpenLoop]
+    let openCheckIn: () -> Void
+    let openHistory: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Open loops",
+                subtitle: "The fastest way to close these is a quick check-in or one cleaner retest.",
+                systemImage: "ellipsis.circle"
+            )
+
+            ForEach(openLoops) { loop in
+                WLCompactCard {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text(loop.title)
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(loop.summary)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
                     }
                 }
             }
 
-            ForEach(secondaryInsights) { insight in
+            WLActionGroup {
+                WLPrimaryButton(title: "Update check-in", systemImage: "heart.text.square") {
+                    openCheckIn()
+                }
+
+                WLUtilityButton(title: "Open history", systemImage: "clock.arrow.circlepath") {
+                    openHistory()
+                }
+            }
+        }
+    }
+}
+
+private struct HomeRecentWinsSection: View {
+    let recentWins: [RecentWin]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Recent wins",
+                subtitle: "Proof that the system is remembering what already helps.",
+                systemImage: "checkmark.seal"
+            )
+
+            ForEach(recentWins) { win in
                 WLCompactCard {
-                    VStack(alignment: .leading, spacing: WLSpacing.s) {
-                        Text(insight.title)
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text(win.title)
                             .font(WLTypography.bodyEmphasis)
                             .foregroundStyle(WLPalette.ink)
 
-                        Text(insight.summary)
+                        Text(win.summary)
                             .font(WLTypography.body)
                             .foregroundStyle(WLPalette.inkSoft)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct HomeStrategistNoteCard: View {
+    let note: StrategistNote
+    let openStrategist: () -> Void
+
+    var body: some View {
+        WLPrimaryCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: note.title,
+                    subtitle: "A contextual read, not a generic app tip.",
+                    systemImage: "sparkles"
+                )
+
+                Text(note.summary)
+                    .font(WLTypography.body)
+                    .foregroundStyle(WLPalette.ink)
+
+                WLUtilityButton(title: "Open strategist", systemImage: "message") {
+                    openStrategist()
+                }
+            }
+        }
+    }
+}
+
+private struct HomeRoutineSection: View {
+    let routines: [RoutineItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Routine memory",
+                subtitle: "Choices already promoted from one-off read to repeat default.",
+                systemImage: "tray.full"
+            )
+
+            ForEach(routines.prefix(3)) { routine in
+                WLCompactCard {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text(routine.productName)
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(routine.note)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+
+                        Text(routine.cadenceSummary)
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
                     }
                 }
             }
@@ -295,98 +916,86 @@ private struct HomeSampleReadsSection: View {
     @Binding var isExpanded: Bool
     let runScenario: (DemoScenario) -> Void
 
+    private var visiblePacks: [DemoScenarioPack] {
+        isExpanded ? packs : Array(packs.prefix(2))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
+            WLSectionHeader(
+                title: "Sample reads",
+                subtitle: "Demo reads stay available, but only as a secondary learning path.",
+                systemImage: "sparkles.rectangle.stack"
+            )
+
+            if visiblePacks.indices.contains(0) {
+                packCard(visiblePacks[0])
+            }
+
+            if visiblePacks.indices.contains(1) {
+                packCard(visiblePacks[1])
+            }
+
+            if visiblePacks.indices.contains(2) {
+                packCard(visiblePacks[2])
+            }
+
             Button {
-                withAnimation(.spring(response: 0.30, dampingFraction: 0.88)) {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack(alignment: .center, spacing: WLSpacing.s) {
-                    WLSectionHeader(
-                        title: WLProductCopy.Home.sampleReadsTitle,
-                        subtitle: WLProductCopy.Home.sampleReadsSubtitle,
-                        systemImage: "sparkles"
-                    )
-
-                    Spacer()
-
-                    WLIcon(
-                        systemName: isExpanded ? "chevron.up" : "chevron.down",
-                        color: WLPalette.inkSoft,
-                        size: 14
-                    )
-                }
+                Text(isExpanded ? "Show fewer sample reads" : "Show all sample reads")
+                    .font(WLTypography.captionStrong)
+                    .foregroundStyle(WLPalette.rose)
             }
             .buttonStyle(.plain)
-
-            if isExpanded {
-                ForEach(packs) { pack in
-                    HomeSampleReadPackCard(
-                        pack: pack,
-                        runScenario: runScenario
-                    )
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
         }
     }
-}
 
-private struct HomeSampleReadPackCard: View {
-    let pack: DemoScenarioPack
-    let runScenario: (DemoScenario) -> Void
-
-    var body: some View {
+    private func packCard(_ pack: DemoScenarioPack) -> some View {
         WLCompactCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
-                Label(pack.title, systemImage: pack.icon)
-                    .font(WLTypography.bodyEmphasis)
-                    .foregroundStyle(WLPalette.ink)
+                HStack {
+                    Text(pack.title)
+                        .font(WLTypography.bodyEmphasis)
+                        .foregroundStyle(WLPalette.ink)
+
+                    Spacer(minLength: 0)
+
+                    WLPill(title: pack.kind.title, tone: .soft)
+                }
 
                 Text(pack.subtitle)
-                    .font(WLTypography.caption)
+                    .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: WLSpacing.s) {
-                        ForEach(pack.scenarios) { scenario in
-                            Button(action: { runScenario(scenario) }) {
-                                VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        ForEach(Array(pack.scenarios.enumerated()), id: \.element.id) { _, scenario in
+                            Button {
+                                runScenario(scenario)
+                            } label: {
+                                VStack(alignment: .leading, spacing: WLSpacing.xs) {
                                     Text(scenario.title)
-                                        .font(WLTypography.bodyEmphasis)
+                                        .font(WLTypography.captionStrong)
                                         .foregroundStyle(WLPalette.ink)
-                                        .multilineTextAlignment(.leading)
 
                                     Text(scenario.subtitle)
                                         .font(WLTypography.caption)
                                         .foregroundStyle(WLPalette.inkSoft)
-                                        .multilineTextAlignment(.leading)
-
-                                    Spacer(minLength: 0)
-
-                                    WLStatusBadge(
-                                        title: scenario.expectedLensBias.title,
-                                        systemImage: scenario.expectedLensBias.icon,
-                                        tone: .accent
-                                    )
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
-                                .frame(width: 212)
-                                .frame(minHeight: 160, alignment: .leading)
                                 .padding(WLSpacing.m)
-                                .background(
-                                    RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [Color.white.opacity(0.98), WLPalette.canvasWarm],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
-                                        .stroke(WLPalette.stroke)
+                                .frame(width: 240, alignment: .leading)
+                                .wlCardSurface(
+                                    fill: LinearGradient(
+                                        colors: [Color.white.opacity(0.98), WLPalette.canvasWarm],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    shadowColor: WLElevation.shadow.opacity(0.25),
+                                    radius: WLCorner.m
                                 )
                             }
                             .buttonStyle(.plain)
@@ -396,12 +1005,5 @@ private struct HomeSampleReadPackCard: View {
                 }
             }
         }
-    }
-}
-
-#Preview("Home") {
-    NavigationStack {
-        HomeView()
-            .environment(AppModel())
     }
 }

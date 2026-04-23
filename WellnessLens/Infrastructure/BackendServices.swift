@@ -19,6 +19,18 @@ struct AnalyzeProductResponse: Codable {
     let analysis: ScanAnalysis
 }
 
+struct AnalyzeStructuredScanRequest: Codable {
+    let input: ScanInput
+    let profile: UserProfile
+    let recentScans: [ScanEvent]
+    let recentCheckIns: [CheckInEvent]
+    let installID: String
+}
+
+struct AnalyzeStructuredScanResponse: Codable {
+    let analysis: AnalysisEnvelope
+}
+
 struct ResolveScanRequest: Codable {
     let input: ScanInput
     let installID: String
@@ -41,6 +53,11 @@ struct SaveCheckInRequest: Codable {
     let installID: String
 }
 
+struct SaveCheckInEventRequest: Codable {
+    let event: CheckInEvent
+    let installID: String
+}
+
 struct WeeklyInsightsRequest: Codable {
     let userContext: UserContext
     let installID: String
@@ -48,6 +65,58 @@ struct WeeklyInsightsRequest: Codable {
 
 struct WeeklyInsightsResponse: Codable {
     let insights: [WeeklyInsight]
+}
+
+struct CompleteOnboardingRequest: Codable {
+    let profile: UserProfile
+    let activeGoals: [ActiveGoal]
+    let firstWeekPlan: FirstWeekPlan?
+    let installID: String
+}
+
+struct SaveScanDecisionRequest: Codable {
+    let decision: ScanDecision
+    let installID: String
+}
+
+struct UpsertMemoryRequest: Codable {
+    let memoryItems: [MemoryItem]
+    let installID: String
+}
+
+struct DailyHomeRequest: Codable {
+    let profile: UserProfile
+    let activeGoals: [ActiveGoal]
+    let installID: String
+}
+
+struct DailyHomeResponse: Codable {
+    let payload: DailyHomePayload
+    let payloadV2: DailyHomePayloadV2?
+}
+
+struct ClientKillSwitches: Codable {
+    let scanDisabled: Bool
+    let strategistDisabled: Bool
+    let homeDisabled: Bool
+}
+
+struct ClientConfigResponse: Codable {
+    let environment: String
+    let minimumSupportedVersion: String
+    let minimumSupportedBuild: Int
+    let copyVersion: String
+    let persistenceMode: String
+    let firebaseAuthEnforced: Bool
+    let appCheckEnforced: Bool
+    let agentProviderMode: String
+    let flags: WellnessFeatureFlags
+    let killSwitches: ClientKillSwitches
+    let updatedAt: Date
+}
+
+struct DailyBriefResponse: Codable {
+    let brief: DailyBrief
 }
 
 struct AlternativesRequest: Codable {
@@ -58,6 +127,36 @@ struct AlternativesRequest: Codable {
 
 struct AlternativesResponse: Codable {
     let alternatives: [AlternativeSuggestion]
+}
+
+struct HistoryEventsResponse: Codable {
+    let scans: [ScanEvent]
+    let checkIns: [CheckInEvent]
+    let favorites: [FavoriteItem]
+}
+
+struct HistorySyncRequest: Codable {
+    let installID: String
+    let scans: [ScanEvent]
+    let checkIns: [CheckInEvent]
+    let favorites: [FavoriteItem]
+    let memoryItems: [MemoryItem]
+    let scanDecisions: [ScanDecision]
+}
+
+struct HistorySyncResponse: Codable {
+    let installID: String
+    let scans: [ScanEvent]
+    let checkIns: [CheckInEvent]
+    let favorites: [FavoriteItem]
+    let memoryItems: [MemoryItem]
+    let scanDecisions: [ScanDecision]
+    let serverTimestamp: Date
+}
+
+struct SaveFavoriteItemRequest: Codable {
+    let favorite: FavoriteItem
+    let installID: String
 }
 
 protocol IdentityProviding: Sendable {
@@ -71,27 +170,71 @@ protocol AppCheckTokenProviding: Sendable {
 }
 
 protocol WellnessBackendAPI: Sendable {
+    func fetchClientConfig() async throws -> ClientConfigResponse
     func analyzeProduct(input: ScanInput, userContext: UserContext) async throws -> ScanAnalysis
+    func analyzeStructuredScan(input: ScanInput, profile: UserProfile, recentScans: [ScanEvent], recentCheckIns: [CheckInEvent]) async throws -> AnalysisEnvelope
     func resolveScan(input: ScanInput) async throws -> ResolveScanResponse
     func compareProducts(left: ScanAnalysis, right: ScanAnalysis) async throws -> ProductComparison
     func saveCheckIn(_ checkIn: CheckInEntry, userContext: UserContext) async throws
+    func saveCheckInEvent(_ event: CheckInEvent) async throws
+    func completeOnboarding(profile: UserProfile, activeGoals: [ActiveGoal], firstWeekPlan: FirstWeekPlan?) async throws
     func getWeeklyInsights(userContext: UserContext) async throws -> [WeeklyInsight]
+    func fetchDailyHome(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyHomeResponse
+    func fetchDailyBrief(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyBrief
+    func fetchHistoryEvents() async throws -> HistoryEventsResponse
+    func syncHistory(
+        scans: [ScanEvent],
+        checkIns: [CheckInEvent],
+        favorites: [FavoriteItem],
+        memoryItems: [MemoryItem],
+        scanDecisions: [ScanDecision]
+    ) async throws -> HistorySyncResponse
     func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion]
+    func saveScanDecision(_ decision: ScanDecision) async throws
+    func saveFavoriteItem(_ favorite: FavoriteItem) async throws
+    func upsertMemoryItems(_ memoryItems: [MemoryItem]) async throws
 }
 
 enum BackendClientError: LocalizedError {
     case missingBaseURL
     case invalidResponse
-    case httpError(Int)
+    case httpError(statusCode: Int, detail: String?)
+    case transportError(description: String)
+    case decodingError(description: String)
+
+    var diagnosticSummary: String {
+        switch self {
+        case .missingBaseURL:
+            return "missing-base-url"
+        case .invalidResponse:
+            return "invalid-response"
+        case let .httpError(statusCode, detail):
+            guard let detail, !detail.isEmpty else {
+                return "http-\(statusCode)"
+            }
+            return "http-\(statusCode): \(detail)"
+        case let .transportError(description):
+            return "transport: \(description)"
+        case let .decodingError(description):
+            return "decode: \(description)"
+        }
+    }
 
     var errorDescription: String? {
         switch self {
         case .missingBaseURL:
-            "A backend base URL is required for cloud mode."
+            return "A backend base URL is required for cloud mode."
         case .invalidResponse:
-            "The backend returned an unexpected payload."
-        case let .httpError(code):
-            "The backend request failed with status code \(code)."
+            return "The backend returned an unexpected payload."
+        case let .httpError(statusCode, detail):
+            if let detail, !detail.isEmpty {
+                return "The backend request failed with status code \(statusCode): \(detail)"
+            }
+            return "The backend request failed with status code \(statusCode)."
+        case let .transportError(description):
+            return "The backend request could not be completed: \(description)"
+        case let .decodingError(description):
+            return "The backend returned an unreadable payload: \(description)"
         }
     }
 }
@@ -193,6 +336,31 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         return response.analysis
     }
 
+    func fetchClientConfig() async throws -> ClientConfigResponse {
+        try await send(path: "v1/client-config", method: "GET")
+    }
+
+    func analyzeStructuredScan(
+        input: ScanInput,
+        profile: UserProfile,
+        recentScans: [ScanEvent],
+        recentCheckIns: [CheckInEvent]
+    ) async throws -> AnalysisEnvelope {
+        let installID = await identityProvider.installID()
+        let response: AnalyzeStructuredScanResponse = try await send(
+            path: "v1/scan/analyze",
+            method: "POST",
+            body: AnalyzeStructuredScanRequest(
+                input: input,
+                profile: profile,
+                recentScans: recentScans,
+                recentCheckIns: recentCheckIns,
+                installID: installID
+            )
+        )
+        return response.analysis
+    }
+
     func resolveScan(input: ScanInput) async throws -> ResolveScanResponse {
         let installID = await identityProvider.installID()
         return try await send(path: "resolveScan", method: "POST", body: ResolveScanRequest(input: input, installID: installID))
@@ -217,24 +385,131 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         )
     }
 
+    func saveCheckInEvent(_ event: CheckInEvent) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/scan/feedback",
+            method: "POST",
+            body: SaveCheckInEventRequest(event: event, installID: installID)
+        )
+    }
+
     func getWeeklyInsights(userContext: UserContext) async throws -> [WeeklyInsight] {
         let installID = await identityProvider.installID()
         let response: WeeklyInsightsResponse = try await send(
-            path: "getWeeklyInsights",
+            path: "v1/home/weekly-insights",
             method: "POST",
             body: WeeklyInsightsRequest(userContext: userContext, installID: installID)
         )
         return response.insights
     }
 
+    func completeOnboarding(
+        profile: UserProfile,
+        activeGoals: [ActiveGoal],
+        firstWeekPlan: FirstWeekPlan?
+    ) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/onboarding/complete",
+            method: "POST",
+            body: CompleteOnboardingRequest(
+                profile: profile,
+                activeGoals: activeGoals,
+                firstWeekPlan: firstWeekPlan,
+                installID: installID
+            )
+        )
+    }
+
+    func fetchDailyHome(
+        profile: UserProfile,
+        activeGoals: [ActiveGoal]
+    ) async throws -> DailyHomeResponse {
+        let installID = await identityProvider.installID()
+        return try await send(
+            path: "v1/home",
+            method: "POST",
+            body: DailyHomeRequest(profile: profile, activeGoals: activeGoals, installID: installID)
+        )
+    }
+
+    func fetchDailyBrief(profile: UserProfile, activeGoals: [ActiveGoal]) async throws -> DailyBrief {
+        let installID = await identityProvider.installID()
+        let response: DailyBriefResponse = try await send(
+            path: "v1/daily-brief",
+            method: "POST",
+            body: DailyHomeRequest(profile: profile, activeGoals: activeGoals, installID: installID)
+        )
+        return response.brief
+    }
+
+    func fetchHistoryEvents() async throws -> HistoryEventsResponse {
+        let installID = await identityProvider.installID()
+        return try await send(
+            path: "v1/history",
+            method: "POST",
+            body: ["installID": installID]
+        )
+    }
+
+    func syncHistory(
+        scans: [ScanEvent],
+        checkIns: [CheckInEvent],
+        favorites: [FavoriteItem],
+        memoryItems: [MemoryItem],
+        scanDecisions: [ScanDecision]
+    ) async throws -> HistorySyncResponse {
+        let installID = await identityProvider.installID()
+        return try await send(
+            path: "v1/history/sync",
+            method: "POST",
+            body: HistorySyncRequest(
+                installID: installID,
+                scans: scans,
+                checkIns: checkIns,
+                favorites: favorites,
+                memoryItems: memoryItems,
+                scanDecisions: scanDecisions
+            )
+        )
+    }
+
     func listAlternatives(for analysis: ScanAnalysis, userContext: UserContext) async throws -> [AlternativeSuggestion] {
         let installID = await identityProvider.installID()
         let response: AlternativesResponse = try await send(
-            path: "listAlternatives",
+            path: "v1/scans/alternatives",
             method: "POST",
             body: AlternativesRequest(analysis: analysis, userContext: userContext, installID: installID)
         )
         return response.alternatives
+    }
+
+    func saveScanDecision(_ decision: ScanDecision) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/scans/decision",
+            method: "POST",
+            body: SaveScanDecisionRequest(decision: decision, installID: installID)
+        )
+    }
+
+    func saveFavoriteItem(_ favorite: FavoriteItem) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/favorites",
+            method: "POST",
+            body: SaveFavoriteItemRequest(favorite: favorite, installID: installID)
+        )
+    }
+
+    func upsertMemoryItems(_ memoryItems: [MemoryItem]) async throws {
+        let installID = await identityProvider.installID()
+        let _: EmptyResponse = try await send(
+            path: "v1/memory/upsert",
+            method: "POST",
+            body: UpsertMemoryRequest(memoryItems: memoryItems, installID: installID)
+        )
     }
 
     private func send<RequestBody: Encodable, ResponseBody: Decodable>(
@@ -242,10 +517,23 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         method: String,
         body: RequestBody
     ) async throws -> ResponseBody {
+        var request = await makeRequest(path: path, method: method)
+        request.httpBody = try encoder.encode(body)
+        return try await execute(request)
+    }
+
+    private func send<ResponseBody: Decodable>(
+        path: String,
+        method: String
+    ) async throws -> ResponseBody {
+        let request = await makeRequest(path: path, method: method)
+        return try await execute(request)
+    }
+
+    private func makeRequest(path: String, method: String) async -> URLRequest {
         var request = URLRequest(url: baseURL.appending(path: path))
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(body)
 
         if let authHeader = await identityProvider.authorizationHeader() {
             request.setValue(authHeader, forHTTPHeaderField: "Authorization")
@@ -256,15 +544,54 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         if let appCheckToken = await appCheckProvider.token() {
             request.setValue(appCheckToken, forHTTPHeaderField: "X-Firebase-AppCheck")
         }
+        return request
+    }
 
-        let (data, response) = try await urlSession.data(for: request)
+    private func execute<ResponseBody: Decodable>(_ request: URLRequest) async throws -> ResponseBody {
+        let data: Data
+        let response: URLResponse
+
+        do {
+            (data, response) = try await urlSession.data(for: request)
+        } catch {
+            throw BackendClientError.transportError(description: error.localizedDescription)
+        }
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw BackendClientError.invalidResponse
         }
         guard 200..<300 ~= httpResponse.statusCode else {
-            throw BackendClientError.httpError(httpResponse.statusCode)
+            throw BackendClientError.httpError(
+                statusCode: httpResponse.statusCode,
+                detail: responseDetail(from: data)
+            )
         }
-        return try decoder.decode(ResponseBody.self, from: data)
+
+        do {
+            return try decoder.decode(ResponseBody.self, from: data)
+        } catch {
+            throw BackendClientError.decodingError(description: error.localizedDescription)
+        }
+    }
+
+    private func responseDetail(from data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+
+        if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let detail = jsonObject["detail"] as? String {
+            let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        guard let raw = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !raw.isEmpty else {
+            return nil
+        }
+        if raw.count <= 160 {
+            return raw
+        }
+        return String(raw.prefix(157)) + "..."
     }
 }
 

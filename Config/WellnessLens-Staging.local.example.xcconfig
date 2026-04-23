@@ -1,0 +1,2 @@
+WL_BACKEND_BASE_URL = https://staging-backend.example.com/
+WL_AGENT_SERVICE_BASE_URL = https://staging-agent.example.com/

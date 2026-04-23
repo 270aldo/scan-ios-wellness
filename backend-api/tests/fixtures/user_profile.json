@@ -1,0 +1,41 @@
+{
+  "ageRange": "30-39",
+  "consentFlags": {
+    "aiProcessing": true,
+    "analytics": false,
+    "healthDataProcessing": true,
+    "notifications": false
+  },
+  "createdAt": 777777777.0,
+  "eatingRhythm": "flexible",
+  "frictions": [
+    "energyCrash",
+    "bloating"
+  ],
+  "guidanceStyle": "calmAndDirect",
+  "memoryEnabled": true,
+  "nutritionPriorities": [
+    "energy",
+    "digestion",
+    "skin"
+  ],
+  "restaurantFrequency": "balanced",
+  "supplementStyle": "simple",
+  "userContext": {
+    "dietStyle": "flexitarian",
+    "goals": [
+      "clearSkin",
+      "steadyEnergy",
+      "gutCalm"
+    ],
+    "lifeStage": "everyDay",
+    "optInCycleAware": false,
+    "sensitivities": [
+      "fragranceSensitive"
+    ],
+    "skinConcerns": [
+      "blemishes",
+      "dryness"
+    ]
+  }
+}

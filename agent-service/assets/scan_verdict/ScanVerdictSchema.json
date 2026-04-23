@@ -1,0 +1,328 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ScanVerdict",
+  "description": "Structured output de LILA. Mapea directo a ScanVerdict.swift en el domain layer.",
+  "type": "object",
+  "required": [
+    "fit",
+    "confidence",
+    "headline",
+    "primaryReason",
+    "lensScores",
+    "watchouts",
+    "evidenceTier",
+    "reasoningBreakdown",
+    "disclaimer"
+  ],
+  "properties": {
+    "fit": {
+      "type": "string",
+      "enum": ["greatFit", "goodFit", "occasional", "skip", "unclear"],
+      "description": "El veredicto top-of-card. Decisión en <10 segundos."
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low", "insufficient"],
+      "description": "Qué tan seguro está LILA de este análisis dada la calidad del input."
+    },
+    "headline": {
+      "type": "string",
+      "maxLength": 90,
+      "description": "Una frase que condensa el veredicto. Sin exclamación final. Máximo 90 caracteres."
+    },
+    "primaryReason": {
+      "type": "string",
+      "maxLength": 280,
+      "description": "1-2 frases que explican la razón principal del veredicto. Específica al producto y al UserContext."
+    },
+    "lensScores": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "description": "Los 5 lenses con scores 0-100. Siempre los 5, aunque algunos sean neutros.",
+      "items": {
+        "type": "object",
+        "required": ["lens", "score", "trend", "summary"],
+        "properties": {
+          "lens": {
+            "type": "string",
+            "enum": [
+              "glowAndSkin",
+              "hormoneBalance",
+              "gutComfort",
+              "energyAndMood",
+              "bodyCompositionAndStrength"
+            ]
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "trend": {
+            "type": "string",
+            "enum": ["rising", "neutral", "falling"],
+            "description": "Comparación con baseline personal de la usuaria si hay historial suficiente."
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 140,
+            "description": "Una frase específica. Sin moralismo."
+          },
+          "contextApplied": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "Factores del UserContext que cambiaron este score ≥5 puntos. Solo incluir los relevantes.",
+            "items": {
+              "type": "object",
+              "required": ["label", "direction", "explanation"],
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "description": "Etiqueta corta. Ej: 'Tu fase lútea', 'Tu sensibilidad a cafeína'."
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": ["boost", "reduce", "neutral"]
+                },
+                "explanation": {
+                  "type": "string",
+                  "maxLength": 160,
+                  "description": "Por qué este contexto modifica el score. Honesto, no sobreexplicado."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "watchouts": {
+      "type": "array",
+      "maxItems": 2,
+      "description": "Máximo 2. Si hay más señales, elige las más relevantes para esta usuaria.",
+      "items": {
+        "type": "object",
+        "required": ["title", "detail", "severity", "personalRelevance"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["gentle", "moderate", "important"]
+          },
+          "personalRelevance": {
+            "type": "string",
+            "enum": ["general", "personal", "clinical"]
+          }
+        }
+      }
+    },
+    "betterSwap": {
+      "type": ["object", "null"],
+      "description": "Alternativa mejor específica. null si no hay una buena recomendación.",
+      "properties": {
+        "productName": {
+          "type": "string"
+        },
+        "productID": {
+          "type": ["string", "null"]
+        },
+        "brand": {
+          "type": ["string", "null"]
+        },
+        "whyBetter": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "improvedLenses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "glowAndSkin",
+              "hormoneBalance",
+              "gutComfort",
+              "energyAndMood",
+              "bodyCompositionAndStrength"
+            ]
+          }
+        },
+        "expectedLensDeltas": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "lens": {
+                "type": "string",
+                "enum": [
+                  "glowAndSkin",
+                  "hormoneBalance",
+                  "gutComfort",
+                  "energyAndMood",
+                  "bodyCompositionAndStrength"
+                ]
+              },
+              "estimatedChange": {
+                "type": "integer",
+                "minimum": -100,
+                "maximum": 100
+              }
+            }
+          }
+        }
+      }
+    },
+    "trackPrompt": {
+      "type": ["object", "null"],
+      "description": "Follow-up event-linked. null si el producto no tiene efecto observable <4h.",
+      "properties": {
+        "triggerAfterHours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24
+        },
+        "questionText": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "targetLens": {
+          "type": "string",
+          "enum": [
+            "glowAndSkin",
+            "hormoneBalance",
+            "gutComfort",
+            "energyAndMood",
+            "bodyCompositionAndStrength"
+          ]
+        },
+        "expectedResponseType": {
+          "type": "string",
+          "enum": ["intensityScale", "symptomsChecklist", "openText"]
+        }
+      }
+    },
+    "evidenceTier": {
+      "type": "string",
+      "enum": ["high", "emerging", "personalPattern"],
+      "description": "El tier de evidencia del verdict. Honestidad epistémica obligatoria."
+    },
+    "reasoningBreakdown": {
+      "type": "object",
+      "required": ["deterministicFactors", "agentInsights", "userHistoryFactors", "totalAdjustments"],
+      "description": "Transparencia total sobre qué fue rule-based vs LLM vs historial personal.",
+      "properties": {
+        "deterministicFactors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["rule", "delta", "affectedLens"],
+            "properties": {
+              "rule": {
+                "type": "string",
+                "description": "Ej: 'Alto en proteína + objetivo fuerza magra'."
+              },
+              "delta": {
+                "type": "integer",
+                "minimum": -50,
+                "maximum": 50
+              },
+              "affectedLens": {
+                "type": "string",
+                "enum": [
+                  "glowAndSkin",
+                  "hormoneBalance",
+                  "gutComfort",
+                  "energyAndMood",
+                  "bodyCompositionAndStrength"
+                ]
+              }
+            }
+          }
+        },
+        "agentInsights": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "required": ["insight", "modelUsed", "confidenceScore"],
+            "properties": {
+              "insight": {
+                "type": "string",
+                "maxLength": 280
+              },
+              "modelUsed": {
+                "type": "string",
+                "description": "Identifier del modelo. Ej: 'gemini-2.5-pro', 'gpt-4o'."
+              },
+              "confidenceScore": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          }
+        },
+        "userHistoryFactors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["pattern", "scansReferenced"],
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "maxLength": 280
+              },
+              "scansReferenced": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "totalAdjustments": {
+          "type": "integer",
+          "description": "Número total de ajustes aplicados al scoring."
+        }
+      }
+    },
+    "disclaimer": {
+      "type": "string",
+      "description": "Siempre incluye: 'Nácar ofrece guía direccional de wellness, no diagnóstico ni tratamiento médico.' + guardrails específicos si aplican."
+    },
+    "sources": {
+      "type": "array",
+      "maxItems": 3,
+      "description": "Fuentes citadas si el verdict tiene claims tier .high. Opcional.",
+      "items": {
+        "type": "object",
+        "required": ["title", "organization", "tier"],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "organization": {
+            "type": "string",
+            "description": "Ej: 'ACOG', 'WHO', 'Harvard T.H. Chan'."
+          },
+          "url": {
+            "type": ["string", "null"],
+            "format": "uri"
+          },
+          "publishedYear": {
+            "type": ["integer", "null"]
+          },
+          "tier": {
+            "type": "string",
+            "enum": ["high", "emerging", "personalPattern"]
+          }
+        }
+      }
+    }
+  }
+}

@@ -7,6 +7,8 @@ enum WLPalette {
     static let surface = Color.white.opacity(0.94)
     static let surfaceElevated = Color.white.opacity(0.985)
     static let surfaceMuted = Color(red: 0.973, green: 0.963, blue: 0.979)
+    static let surfaceQuiet = Color.white.opacity(0.90)
+    static let surfaceSoft = Color(red: 0.982, green: 0.971, blue: 0.983)
     static let ink = Color(red: 0.135, green: 0.104, blue: 0.173)
     static let inkSoft = Color(red: 0.453, green: 0.415, blue: 0.490)
     static let stroke = Color.black.opacity(0.055)
@@ -32,6 +34,7 @@ enum WLSpacing {
 enum WLCorner {
     static let pill: CGFloat = 18
     static let m: CGFloat = 20
+    static let secondary: CGFloat = 24
     static let l: CGFloat = 28
     static let xl: CGFloat = 34
 }
@@ -97,6 +100,77 @@ struct WLLiquidGlassPolicy {
 enum WLElevation {
     static let shadow = Color(red: 0.498, green: 0.328, blue: 0.492).opacity(0.12)
     static let heroShadow = Color(red: 0.524, green: 0.338, blue: 0.594).opacity(0.24)
+    static let quietShadow = Color(red: 0.498, green: 0.328, blue: 0.492).opacity(0.07)
+    static let emphasisShadow = Color(red: 0.524, green: 0.338, blue: 0.594).opacity(0.16)
+}
+
+enum WLSurfaceStyle {
+    case primary
+    case secondary
+    case quiet
+    case emphasis
+    case caution
+
+    var fill: AnyShapeStyle {
+        switch self {
+        case .primary:
+            AnyShapeStyle(WLGradient.blushSurface)
+        case .secondary:
+            AnyShapeStyle(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.985), WLPalette.surfaceMuted.opacity(0.96)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .quiet:
+            AnyShapeStyle(
+                LinearGradient(
+                    colors: [WLPalette.surfaceQuiet, WLPalette.surfaceSoft],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .emphasis:
+            AnyShapeStyle(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.99), WLPalette.blush.opacity(0.18), WLPalette.canvasWarm],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        case .caution:
+            AnyShapeStyle(
+                LinearGradient(
+                    colors: [WLPalette.caution.opacity(0.12), Color.white.opacity(0.98)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        }
+    }
+
+    var stroke: Color {
+        switch self {
+        case .primary, .secondary, .quiet:
+            WLPalette.stroke
+        case .emphasis:
+            WLPalette.rose.opacity(0.14)
+        case .caution:
+            WLPalette.caution.opacity(0.18)
+        }
+    }
+
+    var shadowColor: Color {
+        switch self {
+        case .primary, .secondary:
+            WLElevation.shadow
+        case .quiet:
+            WLElevation.quietShadow
+        case .emphasis, .caution:
+            WLElevation.emphasisShadow
+        }
+    }
 }
 
 enum WLProductCopy {
@@ -164,6 +238,7 @@ enum WLProductCopy {
     enum Profile {
         static let yourLensTitle = "Your lens"
         static let yourLensSubtitle = "This is the context WellnessLens uses to decide what to favor, soften, and watch more closely."
+        static let goalsSubtitle = "Goals, frictions, and sensitivities should stay consistent everywhere the app speaks."
         static let membershipTitle = "Membership"
         static let howItWorksTitle = "How WellnessLens works"
         static let howItWorksSubtitle = "A simple explanation of what shapes your reads and why the guidance feels personal."
@@ -172,12 +247,62 @@ enum WLProductCopy {
     enum Onboarding {
         static let heroTitle = "WellnessLens learns how to read for you."
         static let heroSubtitle = "A short calibration so your first product read already feels clear, personal, and calm."
-        static let stepOneTitle = "What should your reads optimize for?"
-        static let stepOneSubtitle = "Choose the outcomes WellnessLens should favor first when it interprets food, supplements, and skincare."
+        static let stepOneTitle = "What should WellnessLens optimize first?"
+        static let stepOneSubtitle = "Choose the outcomes that should shape your first reads. Goals are the only required signal here."
+        static let stepOneSectionTitle = "Goals"
+        static let stepOneContextTitle = "What happens next"
+        static let stepOneContextBody = "WellnessLens uses your goals to build `ActiveGoal`, seed the first-week plan, and tune Home before the first scan lands."
+
         static let stepTwoTitle = "Where should WellnessLens be gentler?"
-        static let stepTwoSubtitle = "Tell the app which sensitivities deserve extra caution before you ever scan."
-        static let stepThreeTitle = "What context makes a read feel personal?"
-        static let stepThreeSubtitle = "Add just enough framing so your first week feels tailored without turning this into a long profile setup."
+        static let stepTwoSubtitle = "Shape the first read around the friction that matters most. You can tighten the rest later from Profile."
+        static let stepTwoPrimaryTitle = "Current frictions"
+        static let stepTwoPrimarySubtitle = "Choose the real-life problems that should stay visible in recommendations."
+        static let stepTwoSensitivitiesTitle = "Sensitivities"
+        static let stepTwoSensitivitiesSubtitle = "Bias the app toward caution when these are in play."
+        static let stepTwoSkinConcernsTitle = "Skin concerns"
+        static let stepTwoSkinConcernsSubtitle = "Optional, but useful when nutrition, supplement, and topical reads begin to overlap."
+
+        static let stepThreeTitle = "How does your routine actually work?"
+        static let stepThreeSubtitle = "Keep it realistic. This step tunes your daily rhythm without turning setup into a long form."
+        static let stepFourTitle = "What should matter most day to day?"
+        static let stepFourSubtitle = "Daily priorities sharpen the Daily Brief and help the app choose which tradeoff to explain first."
+        static let stepFourSectionTitle = "Daily priorities"
+        static let stepFourContextTitle = "Default if skipped"
+        static let stepFourContextBody = "WellnessLens keeps `Energy` as the fallback anchor so the product never lands on an empty priority state."
+
+        static let stepFiveTitle = "How should the product personalize?"
+        static let stepFiveSubtitle = "Consent and tone are part of the experience. Keep what helps and skip the rest of the noise."
+        static let stepFiveGuidanceTitle = "Guidance style"
+        static let stepFiveMemoryTitle = "What memory means here"
+        static let stepFiveMemoryBody = "It stores goals, routines, product decisions, body-signal notes, and strategist takeaways so Home feels more contextual over time."
+
+        static let summaryTitle = "You’re calibrated enough to start from a real point of view."
+        static let summarySubtitle = "Review the setup, edit anything quickly, and land on the first useful action instead of a dead end."
+        static let summaryHeroBadge = "Primary focus"
+        static let summaryGoalsTitle = "Goals and sensitivities"
+        static let summaryGoalsEyebrow = "Priority profile"
+        static let summaryRoutineTitle = "Routine context"
+        static let summaryRoutineEyebrow = "Daily shape"
+        static let summaryPrioritiesTitle = "Daily priorities"
+        static let summaryPrioritiesEyebrow = "Always favor"
+        static let summaryConsentTitle = "Personalization and consent"
+        static let summaryConsentEyebrow = "Guardrails"
+        static let summaryLoopTitle = "Your first-week loop"
+    }
+
+    enum ProfileEditor {
+        static let goalsTitle = "Goals"
+        static let goalsSubtitle = "The outcomes Home and the strategist should favor first."
+        static let frictionsTitle = "Current frictions"
+        static let frictionsSubtitle = "The friction that should stay visible in recommendations and follow-ups."
+        static let sensitivitiesTitle = "Sensitivities"
+        static let sensitivitiesSubtitle = "Bias the app toward caution when these are in play."
+        static let routineTitle = "Routine and guidance"
+        static let routineSubtitle = "Tune how the strategist should reason about your day-to-day reality."
+        static let prioritiesTitle = "Daily priorities"
+        static let prioritiesSubtitle = "These should sharpen the Daily Brief and the assistant voice."
+        static let skinConcernsTitle = "Skin concerns"
+        static let skinConcernsSubtitle = "Optional, but useful when nutrition-first decisions extend into topical choices."
     }
 }
 
@@ -257,6 +382,20 @@ extension View {
                 fill: AnyShapeStyle(fill),
                 stroke: stroke,
                 shadowColor: shadowColor,
+                radius: radius
+            )
+        )
+    }
+
+    func wlCardSurface(
+        style: WLSurfaceStyle,
+        radius: CGFloat = WLCorner.l
+    ) -> some View {
+        modifier(
+            WLCardModifier(
+                fill: style.fill,
+                stroke: style.stroke,
+                shadowColor: style.shadowColor,
                 radius: radius
             )
         )

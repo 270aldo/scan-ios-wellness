@@ -1,0 +1,49 @@
+{
+  "payload": {
+    "bodySignal": {
+      "id": "00cacd57-4315-5f0b-a734-04ac1414668e",
+      "summary": "Add one signal to tighten the next recommendation.",
+      "title": "No fresh body signal yet",
+      "tone": "neutral"
+    },
+    "nextAction": {
+      "cta": "Open scan",
+      "id": "next-action-RecommendationKind.scanStaple",
+      "kind": "scanStaple",
+      "relatedGoal": "steadyEnergy",
+      "relatedProductID": null,
+      "summary": "Start with a real product, meal, or menu choice.",
+      "title": "Scan your first real choice"
+    },
+    "openLoops": [],
+    "recentWins": [],
+    "recommendedSwap": null,
+    "state": "calibrating",
+    "strategistNote": {
+      "summary": "The backend is returning a deterministic home contract while scan, sync, and premium signals accumulate.",
+      "title": "Production home is active"
+    },
+    "todayFocus": {
+      "summary": "Protect a calmer first decision so the rest of the day feels easier to steer.",
+      "title": "Steadier energy"
+    }
+  },
+  "payloadV2": {
+    "ctaPriority": "scanStaple",
+    "deferredModules": [
+      "strategistNote"
+    ],
+    "hero": {
+      "emphasis": "onboarding",
+      "whyNow": "The backend is prioritizing the shortest path to the next meaningful signal."
+    },
+    "primaryModule": "firstWeekPlan",
+    "schemaVersion": 2,
+    "secondaryModules": [
+      "activeGoals",
+      "openLoops",
+      "recentWins"
+    ],
+    "suppressedModules": []
+  }
+}

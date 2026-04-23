@@ -1,0 +1,9 @@
+#include "WellnessLens-Shared.xcconfig"
+#include? "WellnessLens-Staging.local.xcconfig"
+
+WL_FIREBASE_ENABLED = YES
+WL_USE_DEMO_DATA = NO
+WL_USE_APP_CHECK_DEBUG_PROVIDER = YES
+WL_FIREBASE_OPTIONS_PLIST_NAME = GoogleService-Info-Staging
+WL_BACKEND_DEBUG_SURFACE_ENABLED = YES
+WL_APP_ATTEST_ENVIRONMENT = development

@@ -30,7 +30,7 @@ struct RootView: View {
             if model.hasCompletedOnboarding {
                 MainTabView()
             } else {
-                OnboardingFlowView()
+                OnboardingFlowView(draft: model.onboardingDraft ?? OnboardingDraft())
             }
         }
         .task {
@@ -61,6 +61,9 @@ struct MainTabView: View {
                 model.dismissAnalysis()
             }) { analysis in
                 AnalysisView(analysis: analysis)
+            }
+            .sheet(item: $model.activePaywall) { context in
+                PhaseTwoPaywallSheet(context: context)
             }
     }
 
@@ -125,251 +128,113 @@ struct MainTabView: View {
     }
 }
 
-struct OnboardingFlowView: View {
+private struct PhaseTwoPaywallSheet: View {
+    let context: PaywallContext
+
     @Environment(AppModel.self) private var model
-
-    @State private var step = 0
-    @State private var selectedGoals = Set<UserGoal>([.clearSkin, .steadyEnergy])
-    @State private var selectedSensitivities = Set<SensitivityFlag>([.fragranceSensitive])
-    @State private var selectedSkinConcerns = Set<SkinConcern>([.dryness])
-    @State private var dietStyle: DietStyle = .flexitarian
-    @State private var lifeStage: LifeStage = .everyDay
-
-    private let columns = [GridItem(.adaptive(minimum: 148), spacing: WLSpacing.s)]
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        ZStack {
-            WLScreenBackground()
+        NavigationStack {
+            WLScreen {
+                WLPrimaryCard {
+                    VStack(alignment: .leading, spacing: WLSpacing.m) {
+                        WLStatusBadge(title: context.title, systemImage: "sparkles", tone: .accent)
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: WLSpacing.xl) {
-                    WLHeroSurface {
-                        VStack(alignment: .leading, spacing: WLSpacing.m) {
-                            WLStatusBadge(title: "WellnessLens", systemImage: "sparkles")
+                        Text(context.feature.title)
+                            .font(WLTypography.title)
+                            .foregroundStyle(WLPalette.ink)
 
-                            Text(WLProductCopy.Onboarding.heroTitle)
-                                .font(WLTypography.hero)
-                                .foregroundStyle(.white)
+                        Text(context.message)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
 
-                            Text(WLProductCopy.Onboarding.heroSubtitle)
-                                .font(WLTypography.body)
-                                .foregroundStyle(Color.white.opacity(0.90))
+                        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                            Text("Preview")
+                                .font(WLTypography.captionStrong)
+                                .foregroundStyle(WLPalette.ink)
 
-                            OnboardingProgress(step: step)
+                            ForEach(context.previewLines, id: \.self) { line in
+                                Text("• \(line)")
+                                    .font(WLTypography.body)
+                                    .foregroundStyle(WLPalette.inkSoft)
+                            }
                         }
-                    }
 
-                    WLSurfaceCard {
-                        VStack(alignment: .leading, spacing: WLSpacing.l) {
-                            stepContent
+                        if !model.activeEntitlements.isEmpty {
+                            VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                                Text("Already unlocked")
+                                    .font(WLTypography.captionStrong)
+                                    .foregroundStyle(WLPalette.ink)
 
-                            HStack(spacing: WLSpacing.s) {
-                                if step > 0 {
-                                    WLSecondaryButton(title: "Back") {
-                                        withAnimation(.spring(response: 0.38, dampingFraction: 0.88)) {
-                                            step -= 1
-                                        }
+                                Text(model.activeEntitlements.map(\.title).joined(separator: ", "))
+                                    .font(WLTypography.caption)
+                                    .foregroundStyle(WLPalette.inkSoft)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: WLSpacing.s) {
+                            WLPrimaryButton(
+                                title: context.targetTier == .pro ? "Unlock Pro" : "Unlock Plus",
+                                systemImage: "arrow.up.right.circle"
+                            ) {
+                                Task {
+                                    await model.purchase(from: context)
+                                    if model.activePaywall == nil {
+                                        dismiss()
                                     }
                                 }
+                            }
 
-                                WLPrimaryButton(title: step == 2 ? "Start your first scan" : "Continue") {
-                                    advance()
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: WLSpacing.s) {
+                                    paywallSupportingActions
                                 }
-                                .disabled(step == 0 && selectedGoals.isEmpty)
+
+                                VStack(alignment: .leading, spacing: WLSpacing.s) {
+                                    paywallSupportingActions
+                                }
                             }
                         }
                     }
                 }
-                .padding(.horizontal, WLSpacing.l)
-                .padding(.vertical, WLSpacing.l)
+            }
+            .navigationTitle("Premium")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close") {
+                        model.dismissPaywall()
+                        dismiss()
+                    }
+                    .font(WLTypography.captionStrong)
+                }
             }
         }
     }
 
     @ViewBuilder
-    private var stepContent: some View {
-        switch step {
-        case 0:
-            onboardingSection(
-                title: WLProductCopy.Onboarding.stepOneTitle,
-                subtitle: WLProductCopy.Onboarding.stepOneSubtitle
-            ) {
-                LazyVGrid(columns: columns, spacing: WLSpacing.s) {
-                    ForEach(UserGoal.allCases) { goal in
-                        SelectionChip(
-                            title: goal.title,
-                            isSelected: selectedGoals.contains(goal)
-                        ) {
-                            toggle(goal, in: &selectedGoals)
-                        }
-                    }
-                }
-            }
-        case 1:
-            onboardingSection(
-                title: WLProductCopy.Onboarding.stepTwoTitle,
-                subtitle: WLProductCopy.Onboarding.stepTwoSubtitle
-            ) {
-                LazyVGrid(columns: columns, spacing: WLSpacing.s) {
-                    ForEach(SensitivityFlag.allCases) { flag in
-                        SelectionChip(
-                            title: flag.title,
-                            isSelected: selectedSensitivities.contains(flag)
-                        ) {
-                            toggle(flag, in: &selectedSensitivities)
-                        }
-                    }
-                }
-            }
-        default:
-            onboardingSection(
-                title: WLProductCopy.Onboarding.stepThreeTitle,
-                subtitle: WLProductCopy.Onboarding.stepThreeSubtitle
-            ) {
-                VStack(alignment: .leading, spacing: WLSpacing.l) {
-                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
-                        Text("Diet style")
-                            .font(WLTypography.captionStrong)
-                            .foregroundStyle(WLPalette.inkSoft)
-                        Picker("Diet style", selection: $dietStyle) {
-                            ForEach(DietStyle.allCases) { style in
-                                Text(style.title).tag(style)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-
-                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
-                        Text("Life stage")
-                            .font(WLTypography.captionStrong)
-                            .foregroundStyle(WLPalette.inkSoft)
-                        Picker("Life stage", selection: $lifeStage) {
-                            ForEach(LifeStage.allCases) { stage in
-                                Text(stage.title).tag(stage)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-
-                    VStack(alignment: .leading, spacing: WLSpacing.s) {
-                        Text("Skin concerns")
-                            .font(WLTypography.captionStrong)
-                            .foregroundStyle(WLPalette.inkSoft)
-
-                        LazyVGrid(columns: columns, spacing: WLSpacing.s) {
-                            ForEach(SkinConcern.allCases) { concern in
-                                SelectionChip(
-                                    title: concern.title,
-                                    isSelected: selectedSkinConcerns.contains(concern)
-                                ) {
-                                    toggle(concern, in: &selectedSkinConcerns)
-                                }
-                            }
-                        }
+    private var paywallSupportingActions: some View {
+        if context.targetTier == .plus {
+            WLSecondaryButton(title: "Unlock Pro", systemImage: "sparkles.rectangle.stack") {
+                Task {
+                    await model.purchase(.pro)
+                    if model.hasAccess(to: context.feature) {
+                        model.dismissPaywall()
+                        dismiss()
                     }
                 }
             }
         }
-    }
 
-    private func onboardingSection<Content: View>(
-        title: String,
-        subtitle: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: WLSpacing.l) {
-            WLSectionHeader(title: title, subtitle: subtitle)
-            content()
-        }
-    }
-
-    private func advance() {
-        if step < 2 {
-            withAnimation(.spring(response: 0.40, dampingFraction: 0.88)) {
-                step += 1
-            }
-            return
-        }
-
-        let context = UserContext(
-            goals: Array(selectedGoals),
-            sensitivities: Array(selectedSensitivities),
-            dietStyle: dietStyle,
-            skinConcerns: Array(selectedSkinConcerns),
-            lifeStage: lifeStage,
-            optInCycleAware: false
-        )
-        model.completeOnboarding(with: context)
-    }
-
-    private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
-        if set.contains(value) {
-            set.remove(value)
-        } else {
-            set.insert(value)
-        }
-    }
-}
-
-private struct OnboardingProgress: View {
-    let step: Int
-
-    var body: some View {
-        HStack(spacing: WLSpacing.xs) {
-            ForEach(0..<3, id: \.self) { index in
-                Capsule(style: .continuous)
-                    .fill(index <= step ? Color.white : Color.white.opacity(0.26))
-                    .frame(width: index == step ? 42 : 24, height: 6)
-                    .animation(.spring(response: 0.26, dampingFraction: 0.88), value: step)
+        WLUtilityButton(title: "Restore purchases", systemImage: "arrow.clockwise") {
+            Task {
+                await model.restorePurchases()
+                if model.hasAccess(to: context.feature) {
+                    model.dismissPaywall()
+                    dismiss()
+                }
             }
         }
-    }
-}
-
-struct SelectionChip: View {
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: WLSpacing.s) {
-                Text(title)
-                    .font(WLTypography.bodyEmphasis)
-                    .foregroundStyle(isSelected ? WLPalette.rose : WLPalette.ink)
-                    .multilineTextAlignment(.leading)
-
-                Spacer(minLength: 0)
-
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18, weight: .semibold, design: .rounded))
-                    .foregroundStyle(isSelected ? WLPalette.rose : WLPalette.strokeStrong)
-            }
-            .padding(.horizontal, WLSpacing.m)
-            .padding(.vertical, 15)
-            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
-                    .fill(
-                        isSelected
-                            ? LinearGradient(
-                                colors: [WLPalette.rose.opacity(0.12), WLPalette.lavender.opacity(0.18)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                            : LinearGradient(
-                                colors: [Color.white.opacity(0.94), WLPalette.canvasWarm],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: WLCorner.m, style: .continuous)
-                    .stroke(isSelected ? WLPalette.rose.opacity(0.18) : WLPalette.stroke)
-            )
-        }
-        .buttonStyle(.plain)
     }
 }
 

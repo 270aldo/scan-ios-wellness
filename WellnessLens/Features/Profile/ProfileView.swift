@@ -2,46 +2,133 @@ import SwiftUI
 
 struct ProfileView: View {
     @Environment(AppModel.self) private var model
-    @State private var showContextEditor = false
+
+    @State private var showProfileEditor = false
+    @State private var strategistEntryPoint: StrategistEntryPoint?
+    @State private var showPantry = false
+    @State private var showBackendAdmin = false
 
     var body: some View {
         WLScreen {
-            contextCard
+            strategistIdentityCard
+            goalsCard
+            memoryCard
+            if model.hasBackendDebugSurface {
+                backendCard
+            }
             subscriptionCard
-            howItWorksCard
+            if model.featureFlags.pantryMVP {
+                pantryCard
+            }
         }
         .navigationTitle("Profile")
-        .sheet(isPresented: $showContextEditor) {
-            ProfileContextEditor(
-                context: model.userContext,
-                onSave: { model.updateUserContext($0) }
+        .sheet(isPresented: $showProfileEditor) {
+            ProfileStrategistEditor(
+                profile: model.userProfile,
+                onSave: { model.updateUserProfile($0) }
             )
+        }
+        .sheet(item: $strategistEntryPoint) { entryPoint in
+            StrategistChatView(entryPoint: entryPoint)
+        }
+        .sheet(isPresented: $showPantry) {
+            PantryView()
+        }
+        .sheet(isPresented: $showBackendAdmin) {
+            BackendAdminView()
         }
     }
 
-    private var contextCard: some View {
+    private var strategistIdentityCard: some View {
         WLPrimaryCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
-                HStack(alignment: .top) {
-                    WLSectionHeader(
-                        title: WLProductCopy.Profile.yourLensTitle,
-                        subtitle: WLProductCopy.Profile.yourLensSubtitle,
-                        systemImage: "line.3.horizontal.decrease.circle"
-                    )
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: WLSpacing.s) {
+                        WLSectionHeader(
+                            title: "Your strategist profile",
+                            subtitle: "The context behind Home, scans, memory, and recommendations.",
+                            systemImage: "person.text.rectangle"
+                        )
 
-                    Spacer()
+                        Spacer(minLength: WLSpacing.s)
 
-                    WLSecondaryButton(title: "Edit") {
-                        showContextEditor = true
+                        WLUtilityButton(title: "Edit", systemImage: "slider.horizontal.3") {
+                            showProfileEditor = true
+                        }
                     }
-                    .frame(maxWidth: 96)
+
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        WLSectionHeader(
+                            title: "Your strategist profile",
+                            subtitle: "The context behind Home, scans, memory, and recommendations.",
+                            systemImage: "person.text.rectangle"
+                        )
+
+                        WLUtilityButton(title: "Edit", systemImage: "slider.horizontal.3") {
+                            showProfileEditor = true
+                        }
+                    }
                 }
 
-                profileRow(label: "Goals", value: model.userContext.goals.map(\.title).joined(separator: ", "))
-                profileRow(label: "Sensitivities", value: model.userContext.sensitivities.map(\.title).joined(separator: ", "))
+                profileRow(label: "Guidance style", value: model.userProfile.guidanceStyle.title)
+                profileRow(label: "Age range", value: model.userProfile.ageRange.title)
+                profileRow(label: "Eating rhythm", value: model.userProfile.eatingRhythm.title)
+                profileRow(label: "Restaurant rhythm", value: model.userProfile.restaurantFrequency.title)
+                profileRow(label: "Supplement routine", value: model.userProfile.supplementStyle.title)
                 profileRow(label: "Diet style", value: model.userContext.dietStyle.title)
-                profileRow(label: "Skin concerns", value: model.userContext.skinConcerns.map(\.title).joined(separator: ", "))
                 profileRow(label: "Life stage", value: model.userContext.lifeStage.title)
+                profileRow(label: "Memory", value: model.userProfile.memoryEnabled ? "Enabled" : "Limited")
+
+                WLActionGroup {
+                    WLPrimaryButton(title: "Open strategist", systemImage: "message") {
+                        strategistEntryPoint = .profile
+                    }
+
+                    WLUtilityButton(title: "Back to Home", systemImage: "house") {
+                        withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                            model.selectedTab = .home
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var goalsCard: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "What you’re optimizing",
+                    subtitle: WLProductCopy.Profile.goalsSubtitle,
+                    systemImage: "target"
+                )
+
+                profileRow(label: "Goals", value: model.userContext.goals.map(\.title).joined(separator: ", "))
+                profileRow(label: "Daily priorities", value: model.userProfile.nutritionPriorities.map(\.title).joined(separator: ", "))
+                profileRow(label: "Frictions", value: model.userProfile.frictions.map(\.title).joined(separator: ", "))
+                profileRow(label: "Sensitivities", value: model.userContext.sensitivities.map(\.title).joined(separator: ", "))
+                profileRow(label: "Skin concerns", value: model.userContext.skinConcerns.map(\.title).joined(separator: ", "))
+            }
+        }
+    }
+
+    private var memoryCard: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Memory and routine",
+                    subtitle: "The app should feel more personal because it remembers the right things.",
+                    systemImage: "brain.head.profile"
+                )
+
+                profileRow(label: "Memory items", value: "\(model.memoryItems.count)")
+                profileRow(label: "Routine items", value: "\(model.routines.count)")
+                profileRow(label: "Open experiments", value: "\(model.experiments.filter { $0.status == .active }.count)")
+                profileRow(label: "Strategist threads", value: "\(model.conversationThreads.count)")
+
+                if let latestMemory = model.memoryItems.first {
+                    profileRow(label: "Latest memory", value: "\(latestMemory.title) — \(latestMemory.summary)")
+                }
             }
         }
     }
@@ -55,71 +142,179 @@ struct ProfileView: View {
                     .font(WLTypography.title)
                     .foregroundStyle(WLPalette.ink)
 
-                Text("Unlock richer product reads, more refined framing, and a more premium ongoing ritual as pricing becomes available.")
+                Text("Premium unlocks history-based pattern reads, weekly narrative guidance, menu scanning, and pantry actions without replacing the deterministic fallback.")
                     .font(WLTypography.body)
                     .foregroundStyle(WLPalette.inkSoft)
 
-                HStack(spacing: WLSpacing.s) {
-                    WLSecondaryButton(title: "Unlock Plus") {
-                        Task {
-                            await model.purchase(.plus)
-                        }
-                    }
+                VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                    Text("Unlocked now")
+                        .font(WLTypography.captionStrong)
+                        .foregroundStyle(WLPalette.ink)
 
-                    WLPrimaryButton(title: "Unlock Pro") {
-                        Task {
-                            await model.purchase(.pro)
+                    Text(
+                        model.activeEntitlements.isEmpty
+                            ? "Core phase 1 flows only."
+                            : model.activeEntitlements.map(\.title).joined(separator: ", ")
+                    )
+                    .font(WLTypography.caption)
+                    .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                if !model.subscriptionStatus.upgradeTargets.isEmpty {
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        if let primaryTarget = subscriptionPrimaryTarget {
+                            subscriptionPrimaryButton(for: primaryTarget)
+                        }
+
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: WLSpacing.s) {
+                                subscriptionSupportingButtons
+                            }
+
+                            VStack(alignment: .leading, spacing: WLSpacing.s) {
+                                subscriptionSupportingButtons
+                            }
                         }
                     }
                 }
-
-                Button("Restore purchases") {
-                    Task {
-                        await model.restorePurchases()
-                    }
-                }
-                .font(WLTypography.captionStrong)
-                .foregroundStyle(WLPalette.rose)
             }
         }
     }
 
-    private var howItWorksCard: some View {
+    private var backendCard: some View {
         WLCompactCard {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
-                    title: WLProductCopy.Profile.howItWorksTitle,
-                    subtitle: WLProductCopy.Profile.howItWorksSubtitle,
-                    systemImage: "sparkles"
+                    title: "Backend and sync",
+                    subtitle: "See whether Home, scans, and sync are live, falling back, or waiting to retry.",
+                    systemImage: "server.rack"
                 )
 
-                profileRow(
-                    label: "What shapes a read",
-                    value: "Your goals, sensitivities, life context, product type, and available label detail all influence the framing."
+                if let homeStatus = model.backendStatuses[.home] {
+                    backendRow(label: "Home", status: homeStatus)
+                }
+
+                if let insightsStatus = model.backendStatuses[.insights] {
+                    backendRow(label: "Weekly insights", status: insightsStatus)
+                }
+
+                if let scanStatus = model.backendStatuses[.structuredScan] {
+                    backendRow(label: "Structured scan", status: scanStatus)
+                }
+
+                WLUtilityButton(title: "Open backend admin", systemImage: "ladybug") {
+                    showBackendAdmin = true
+                }
+            }
+        }
+    }
+
+    private var subscriptionPrimaryTarget: SubscriptionStatus? {
+        if model.subscriptionStatus.upgradeTargets.contains(.pro) {
+            return .pro
+        }
+
+        return model.subscriptionStatus.upgradeTargets.first
+    }
+
+    @ViewBuilder
+    private func subscriptionPrimaryButton(for target: SubscriptionStatus) -> some View {
+        if target == .pro {
+            WLPrimaryButton(title: "Unlock Pro", systemImage: "sparkles") {
+                Task {
+                    await model.purchase(.pro)
+                }
+            }
+        } else {
+            WLPrimaryButton(title: "Unlock Plus", systemImage: "arrow.up.right.circle") {
+                Task {
+                    await model.purchase(.plus)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var subscriptionSupportingButtons: some View {
+        if model.subscriptionStatus.upgradeTargets.contains(.plus) && subscriptionPrimaryTarget != .plus {
+            WLSecondaryButton(title: "Unlock Plus", systemImage: "arrow.up.right.circle") {
+                Task {
+                    await model.purchase(.plus)
+                }
+            }
+        }
+
+        WLUtilityButton(title: "Restore purchases", systemImage: "arrow.clockwise") {
+            Task {
+                await model.restorePurchases()
+            }
+        }
+    }
+
+    private var pantryCard: some View {
+        WLCompactCard {
+            VStack(alignment: .leading, spacing: WLSpacing.m) {
+                WLSectionHeader(
+                    title: "Pantry",
+                    subtitle: "A minimal saved-default system seeded from scans, favorites, and routines.",
+                    systemImage: "shippingbox"
                 )
 
-                profileRow(
-                    label: "What becomes smarter over time",
-                    value: "Saved reads and check-ins help signals become more coherent and more personal."
-                )
+                if model.visiblePantryItems.isEmpty {
+                    Text("Run a few stronger scans or save one repeat choice. Pantry will seed itself from what already looks reusable.")
+                        .font(WLTypography.body)
+                        .foregroundStyle(WLPalette.inkSoft)
+                } else {
+                    ForEach(Array(model.visiblePantryItems.prefix(2))) { item in
+                        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                            Text(item.title)
+                                .font(WLTypography.bodyEmphasis)
+                                .foregroundStyle(WLPalette.ink)
 
-                profileRow(
-                    label: "How capture works today",
-                    value: model.services.configuration.useDemoData
-                        ? "You can explore guided sample reads alongside live barcode, OCR, and manual fallback paths."
-                        : "Barcode, label OCR, and manual text all feed the same personal read flow."
-                )
+                            Text(item.summary)
+                                .font(WLTypography.caption)
+                                .foregroundStyle(WLPalette.inkSoft)
 
-                if model.services.configuration.isFirebaseEnabled || model.services.configuration.isStoreKitEnabled {
-                    profileRow(
-                        label: "Connected services",
-                        value: [
-                            model.services.configuration.isFirebaseEnabled ? "Firebase" : nil,
-                            model.services.configuration.isStoreKitEnabled ? "StoreKit" : nil
-                        ]
-                        .compactMap { $0 }
-                        .joined(separator: " · ")
-                    )
+                            Text(item.sourceKind.title)
+                                .font(WLTypography.captionStrong)
+                                .foregroundStyle(WLPalette.rose)
+                        }
+                    }
+                }
+
+                let hasSuggestion = model.hasAccess(to: .pantrySuggestions) && !model.pantrySuggestions.isEmpty
+
+                if hasSuggestion, let suggestion = model.pantrySuggestions.first {
+                    VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                        Text("Suggestion")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.rose)
+
+                        Text(suggestion.title)
+                            .font(WLTypography.bodyEmphasis)
+                            .foregroundStyle(WLPalette.ink)
+
+                        Text(suggestion.summary)
+                            .font(WLTypography.body)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                } else if let supportingMessage = PantryPresentationCopy.supportingMessage(
+                    isUnlocked: model.hasAccess(to: .pantryMVP),
+                    hasSuggestion: hasSuggestion
+                ) {
+                    Text(supportingMessage)
+                        .font(WLTypography.caption)
+                        .foregroundStyle(WLPalette.inkSoft)
+                }
+
+                if model.hasAccess(to: .pantryMVP) {
+                    WLUtilityButton(title: "Open pantry", systemImage: "shippingbox") {
+                        showPantry = true
+                    }
+                } else {
+                    WLUtilityButton(title: "Preview pantry", systemImage: "shippingbox") {
+                        showPantry = true
+                    }
                 }
             }
         }
@@ -134,110 +329,193 @@ struct ProfileView: View {
             Text(value.isEmpty ? "Not set" : value)
                 .font(WLTypography.body)
                 .foregroundStyle(WLPalette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func backendRow(label: String, status: BackendSurfaceStatus) -> some View {
+        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+            HStack(spacing: WLSpacing.s) {
+                Text(label)
+                    .font(WLTypography.captionStrong)
+                    .foregroundStyle(WLPalette.inkSoft)
+
+                WLStatusBadge(
+                    title: status.state.title,
+                    systemImage: backendStatusSystemImage(status.state),
+                    tone: backendStatusTone(status.state)
+                )
+            }
+
+            Text(status.detail)
+                .font(WLTypography.caption)
+                .foregroundStyle(WLPalette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func backendStatusTone(_ state: BackendSurfaceState) -> WLStatusBadge.Tone {
+        switch state {
+        case .live:
+            .success
+        case .fallback, .retryableError:
+            .caution
+        case .unavailable, .idle, .syncPending:
+            .accent
+        }
+    }
+
+    private func backendStatusSystemImage(_ state: BackendSurfaceState) -> String {
+        switch state {
+        case .unavailable:
+            "icloud.slash"
+        case .idle:
+            "pause.circle"
+        case .syncPending:
+            "arrow.trianglehead.2.clockwise"
+        case .live:
+            "checkmark.circle"
+        case .fallback:
+            "arrow.uturn.backward.circle"
+        case .retryableError:
+            "exclamationmark.triangle"
         }
     }
 }
 
-private struct ProfileContextEditor: View {
-    let onSave: (UserContext) -> Void
+private struct ProfileStrategistEditor: View {
+    let onSave: (UserProfile) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
-    @State private var selectedGoals: Set<UserGoal>
-    @State private var selectedSensitivities: Set<SensitivityFlag>
-    @State private var selectedSkinConcerns: Set<SkinConcern>
-    @State private var dietStyle: DietStyle
-    @State private var lifeStage: LifeStage
-    @State private var optInCycleAware: Bool
+    @State private var formData: StrategistProfileFormData
 
     private let columns = [GridItem(.adaptive(minimum: 148), spacing: WLSpacing.s)]
+    private let createdAt: Date
 
-    init(context: UserContext, onSave: @escaping (UserContext) -> Void) {
+    init(profile: UserProfile, onSave: @escaping (UserProfile) -> Void) {
         self.onSave = onSave
-        _selectedGoals = State(initialValue: Set(context.goals))
-        _selectedSensitivities = State(initialValue: Set(context.sensitivities))
-        _selectedSkinConcerns = State(initialValue: Set(context.skinConcerns))
-        _dietStyle = State(initialValue: context.dietStyle)
-        _lifeStage = State(initialValue: context.lifeStage)
-        _optInCycleAware = State(initialValue: context.optInCycleAware)
+        self.createdAt = profile.createdAt
+        _formData = State(initialValue: StrategistProfileFormData(profile: profile))
     }
 
     var body: some View {
         NavigationStack {
             WLScreen {
                 editorSection(
-                    title: "Goals",
-                    subtitle: "The outcomes WellnessLens should favor first when it builds a read."
+                    title: WLProductCopy.ProfileEditor.goalsTitle,
+                    subtitle: WLProductCopy.ProfileEditor.goalsSubtitle
                 ) {
-                    LazyVGrid(columns: columns, spacing: WLSpacing.s) {
-                        ForEach(UserGoal.allCases) { goal in
-                            SelectionChip(
-                                title: goal.title,
-                                isSelected: selectedGoals.contains(goal)
-                            ) {
-                                toggle(goal, in: &selectedGoals)
-                            }
-                        }
+                    selectionGrid(
+                        title: "Goals",
+                        values: UserGoal.allCases,
+                        selection: formData.goals,
+                        titleFor: \.title
+                    ) { goal in
+                        toggle(goal, in: &formData.goals)
                     }
                 }
 
                 editorSection(
-                    title: "Sensitivities",
-                    subtitle: "The places where you want a softer or more cautious read by default."
+                    title: WLProductCopy.ProfileEditor.frictionsTitle,
+                    subtitle: WLProductCopy.ProfileEditor.frictionsSubtitle
                 ) {
-                    LazyVGrid(columns: columns, spacing: WLSpacing.s) {
-                        ForEach(SensitivityFlag.allCases) { sensitivity in
-                            SelectionChip(
-                                title: sensitivity.title,
-                                isSelected: selectedSensitivities.contains(sensitivity)
-                            ) {
-                                toggle(sensitivity, in: &selectedSensitivities)
-                            }
-                        }
+                    selectionGrid(
+                        title: "Frictions",
+                        values: UserFriction.allCases,
+                        selection: formData.frictions,
+                        titleFor: \.title
+                    ) { friction in
+                        toggle(friction, in: &formData.frictions)
                     }
                 }
 
                 editorSection(
-                    title: "Skin concerns",
-                    subtitle: "Optional vanity context that helps topical reads feel more personal."
+                    title: WLProductCopy.ProfileEditor.sensitivitiesTitle,
+                    subtitle: WLProductCopy.ProfileEditor.sensitivitiesSubtitle
                 ) {
-                    LazyVGrid(columns: columns, spacing: WLSpacing.s) {
-                        ForEach(SkinConcern.allCases) { concern in
-                            SelectionChip(
-                                title: concern.title,
-                                isSelected: selectedSkinConcerns.contains(concern)
-                            ) {
-                                toggle(concern, in: &selectedSkinConcerns)
-                            }
-                        }
+                    selectionGrid(
+                        title: "Sensitivities",
+                        values: SensitivityFlag.allCases,
+                        selection: formData.sensitivities,
+                        titleFor: \.title
+                    ) { sensitivity in
+                        toggle(sensitivity, in: &formData.sensitivities)
                     }
                 }
 
                 editorSection(
-                    title: "Context",
-                    subtitle: "A little framing that makes each read feel more tailored without becoming clinical."
+                    title: WLProductCopy.ProfileEditor.routineTitle,
+                    subtitle: WLProductCopy.ProfileEditor.routineSubtitle
                 ) {
                     VStack(alignment: .leading, spacing: WLSpacing.l) {
-                        Picker("Diet style", selection: $dietStyle) {
-                            ForEach(DietStyle.allCases) { style in
-                                Text(style.title).tag(style)
-                            }
-                        }
-                        .pickerStyle(.menu)
+                        menuPicker("Guidance style", selection: $formData.guidanceStyle, titleFor: \.title)
+                        menuPicker("Eating rhythm", selection: $formData.eatingRhythm, titleFor: \.title)
+                        menuPicker("Supplement routine", selection: $formData.supplementStyle, titleFor: \.title)
+                        menuPicker("Diet style", selection: $formData.dietStyle, titleFor: \.title)
+                        menuPicker("Age range", selection: $formData.ageRange, titleFor: \.title)
 
-                        Picker("Life stage", selection: $lifeStage) {
-                            ForEach(LifeStage.allCases) { stage in
-                                Text(stage.title).tag(stage)
-                            }
-                        }
-                        .pickerStyle(.menu)
+                        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+                            Text("Restaurant rhythm")
+                                .font(WLTypography.captionStrong)
+                                .foregroundStyle(WLPalette.inkSoft)
 
-                        Toggle("Include cycle-aware framing when available", isOn: $optInCycleAware)
+                            Picker("Restaurant rhythm", selection: $formData.restaurantFrequency) {
+                                ForEach(RestaurantFrequency.allCases) { frequency in
+                                    Text(frequency.title).tag(frequency)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+
+                        menuPicker("Life stage", selection: $formData.lifeStage, titleFor: \.title)
+
+                        Toggle("Use memory to personalize future guidance", isOn: $formData.memoryEnabled)
+                            .tint(WLPalette.tint)
+
+                        Toggle("Use cycle-aware framing when relevant", isOn: $formData.optInCycleAware)
+                            .tint(WLPalette.tint)
+
+                        Toggle("Allow AI processing", isOn: $formData.aiProcessingConsent)
+                            .tint(WLPalette.tint)
+
+                        Toggle("Allow analytics", isOn: $formData.analyticsConsent)
+                            .tint(WLPalette.tint)
+
+                        Toggle("Allow notifications", isOn: $formData.notificationsConsent)
                             .tint(WLPalette.tint)
                     }
                 }
+
+                editorSection(
+                    title: WLProductCopy.ProfileEditor.prioritiesTitle,
+                    subtitle: WLProductCopy.ProfileEditor.prioritiesSubtitle
+                ) {
+                    selectionGrid(
+                        title: "Daily priorities",
+                        values: DailyNutritionPriority.allCases,
+                        selection: formData.nutritionPriorities,
+                        titleFor: \.title
+                    ) { priority in
+                        toggle(priority, in: &formData.nutritionPriorities)
+                    }
+                }
+
+                editorSection(
+                    title: WLProductCopy.ProfileEditor.skinConcernsTitle,
+                    subtitle: WLProductCopy.ProfileEditor.skinConcernsSubtitle
+                ) {
+                    selectionGrid(
+                        title: "Skin concerns",
+                        values: SkinConcern.allCases,
+                        selection: formData.skinConcerns,
+                        titleFor: \.title
+                    ) { concern in
+                        toggle(concern, in: &formData.skinConcerns)
+                    }
+                }
             }
-            .navigationTitle("Edit your lens")
+            .navigationTitle("Edit strategist profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -248,20 +526,11 @@ private struct ProfileContextEditor: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
-                        onSave(
-                            UserContext(
-                                goals: Array(selectedGoals),
-                                sensitivities: Array(selectedSensitivities),
-                                dietStyle: dietStyle,
-                                skinConcerns: Array(selectedSkinConcerns),
-                                lifeStage: lifeStage,
-                                optInCycleAware: optInCycleAware
-                            )
-                        )
+                        onSave(formData.makeProfile(createdAt: createdAt))
                         dismiss()
                     }
                     .font(WLTypography.captionStrong)
-                    .disabled(selectedGoals.isEmpty)
+                    .disabled(formData.goals.isEmpty)
                 }
             }
         }
@@ -280,12 +549,60 @@ private struct ProfileContextEditor: View {
         }
     }
 
-    private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
-        if set.contains(value) {
-            set.remove(value)
-        } else {
-            set.insert(value)
+    private func selectionGrid<T: CaseIterable & Hashable & Identifiable>(
+        title: String,
+        values: T.AllCases,
+        selection: [T],
+        titleFor: KeyPath<T, String>,
+        action: @escaping (T) -> Void
+    ) -> some View where T.AllCases: Collection, T.AllCases.Element == T {
+        VStack(alignment: .leading, spacing: WLSpacing.s) {
+            Text(title)
+                .font(WLTypography.captionStrong)
+                .foregroundStyle(WLPalette.inkSoft)
+
+            LazyVGrid(columns: columns, spacing: WLSpacing.s) {
+                ForEach(Array(values)) { value in
+                    WLSelectionChip(
+                        title: value[keyPath: titleFor],
+                        isSelected: selection.contains(value)
+                    ) {
+                        action(value)
+                    }
+                }
+            }
         }
+    }
+
+    private func menuPicker<T: CaseIterable & Hashable & Identifiable>(
+        _ title: String,
+        selection: Binding<T>,
+        titleFor: KeyPath<T, String>
+    ) -> some View where T.AllCases: Collection, T.AllCases.Element == T {
+        VStack(alignment: .leading, spacing: WLSpacing.xs) {
+            Text(title)
+                .font(WLTypography.captionStrong)
+                .foregroundStyle(WLPalette.inkSoft)
+
+            Picker(title, selection: selection) {
+                ForEach(Array(T.allCases)) { value in
+                    Text(value[keyPath: titleFor]).tag(value)
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
+    private func toggle<T: CaseIterable & Hashable>(_ value: T, in values: inout [T])
+    where T.AllCases: Collection, T.AllCases.Element == T {
+        if let index = values.firstIndex(of: value) {
+            values.remove(at: index)
+        } else {
+            values.append(value)
+        }
+
+        let selected = Set(values)
+        values = Array(T.allCases).filter { selected.contains($0) }
     }
 }
 

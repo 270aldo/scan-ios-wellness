@@ -4,5 +4,12 @@ build/
 *.xcuserstate
 xcuserdata/
 .DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
 GoogleService-Info.plist
 WellnessLens/Support/GoogleService-Info.plist
+WellnessLens/Support/GoogleService-Info-Staging.plist
+WellnessLens/Support/GoogleService-Info-Prod.plist
+Config/*.local.xcconfig
+artifacts/

@@ -1,0 +1,8 @@
+#include "WellnessLens-Shared.xcconfig"
+#include? "WellnessLens-Debug.local.xcconfig"
+
+WL_FIREBASE_ENABLED = NO
+WL_USE_DEMO_DATA = YES
+WL_USE_APP_CHECK_DEBUG_PROVIDER = NO
+WL_FIREBASE_OPTIONS_PLIST_NAME =
+WL_APP_ATTEST_ENVIRONMENT = development

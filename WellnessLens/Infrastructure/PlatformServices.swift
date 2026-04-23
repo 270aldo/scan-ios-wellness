@@ -5,22 +5,324 @@ import SwiftUI
 import UIKit
 @preconcurrency import Vision
 
+struct ScanProductCorrection: Codable, Hashable, Identifiable {
+    var id: String { scanEventID }
+    var scanEventID: String
+    var targetScanEventID: String
+    var targetProductID: String
+    var targetProductName: String
+    var createdAt: Date
+    var updatedAt: Date
+}
+
 struct StoredAppState: Codable {
+    var schemaVersion: Int
+    var localProfileID: String
     var hasCompletedOnboarding: Bool
+    var onboardingDraft: OnboardingDraft?
     var userContext: UserContext
     var history: [ScanRecord]
     var checkIns: [CheckInEntry]
+    var scanEvents: [ScanEvent]
+    var scanVerdicts: [StoredScanVerdict]
+    var scanProductCorrections: [ScanProductCorrection]
+    var checkInEvents: [CheckInEvent]
+    var favoriteItems: [FavoriteItem]
+    var consentRecords: [ConsentRecord]
     var subscriptionStatus: SubscriptionStatus
     var lastDemoScenarioID: String?
+    var userProfile: UserProfile?
+    var activeGoals: [ActiveGoal]
+    var firstWeekPlan: FirstWeekPlan?
+    var routines: [RoutineItem]
+    var memoryItems: [MemoryItem]
+    var scanDecisions: [ScanDecision]
+    var experiments: [Experiment]
+    var conversationThreads: [ConversationThread]
+    var patternInsights: [PatternInsight]
+    var weeklyNarrative: WeeklyInsightNarrative?
+    var pantryItems: [PantryItem]
+    var entitlementSnapshot: EntitlementSnapshot
 
-    static let `default` = StoredAppState(
-        hasCompletedOnboarding: false,
-        userContext: .starter,
-        history: [],
-        checkIns: [],
-        subscriptionStatus: .free,
-        lastDemoScenarioID: nil
-    )
+    static func fresh() -> StoredAppState {
+        StoredAppState(
+            schemaVersion: 7,
+            localProfileID: UUID().uuidString,
+            hasCompletedOnboarding: false,
+            onboardingDraft: nil,
+            userContext: .starter,
+            history: [],
+            checkIns: [],
+            scanEvents: [],
+            scanVerdicts: [],
+            scanProductCorrections: [],
+            checkInEvents: [],
+            favoriteItems: [],
+            consentRecords: [],
+            subscriptionStatus: .free,
+            lastDemoScenarioID: nil,
+            userProfile: nil,
+            activeGoals: [],
+            firstWeekPlan: nil,
+            routines: [],
+            memoryItems: [],
+            scanDecisions: [],
+            experiments: [],
+            conversationThreads: [],
+            patternInsights: [],
+            weeklyNarrative: nil,
+            pantryItems: [],
+            entitlementSnapshot: AccessPolicy().snapshot(
+                subscriptionStatus: .free,
+                billingMode: .demo,
+                now: .distantPast
+            )
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case localProfileID
+        case hasCompletedOnboarding
+        case onboardingDraft
+        case userContext
+        case history
+        case checkIns
+        case scanEvents
+        case scanVerdicts
+        case scanProductCorrections
+        case checkInEvents
+        case favoriteItems
+        case consentRecords
+        case subscriptionStatus
+        case lastDemoScenarioID
+        case userProfile
+        case activeGoals
+        case firstWeekPlan
+        case routines
+        case memoryItems
+        case scanDecisions
+        case experiments
+        case conversationThreads
+        case patternInsights
+        case weeklyNarrative
+        case pantryItems
+        case entitlementSnapshot
+    }
+
+    init(
+        schemaVersion: Int,
+        localProfileID: String,
+        hasCompletedOnboarding: Bool,
+        onboardingDraft: OnboardingDraft?,
+        userContext: UserContext,
+        history: [ScanRecord],
+        checkIns: [CheckInEntry],
+        scanEvents: [ScanEvent],
+        scanVerdicts: [StoredScanVerdict],
+        scanProductCorrections: [ScanProductCorrection],
+        checkInEvents: [CheckInEvent],
+        favoriteItems: [FavoriteItem],
+        consentRecords: [ConsentRecord],
+        subscriptionStatus: SubscriptionStatus,
+        lastDemoScenarioID: String?,
+        userProfile: UserProfile?,
+        activeGoals: [ActiveGoal],
+        firstWeekPlan: FirstWeekPlan?,
+        routines: [RoutineItem],
+        memoryItems: [MemoryItem],
+        scanDecisions: [ScanDecision],
+        experiments: [Experiment],
+        conversationThreads: [ConversationThread],
+        patternInsights: [PatternInsight],
+        weeklyNarrative: WeeklyInsightNarrative?,
+        pantryItems: [PantryItem],
+        entitlementSnapshot: EntitlementSnapshot
+    ) {
+        self.schemaVersion = schemaVersion
+        self.localProfileID = localProfileID
+        self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.onboardingDraft = onboardingDraft
+        self.userContext = userContext
+        self.history = history
+        self.checkIns = checkIns
+        self.scanEvents = scanEvents
+        self.scanVerdicts = scanVerdicts
+        self.scanProductCorrections = scanProductCorrections
+        self.checkInEvents = checkInEvents
+        self.favoriteItems = favoriteItems
+        self.consentRecords = consentRecords
+        self.subscriptionStatus = subscriptionStatus
+        self.lastDemoScenarioID = lastDemoScenarioID
+        self.userProfile = userProfile
+        self.activeGoals = activeGoals
+        self.firstWeekPlan = firstWeekPlan
+        self.routines = routines
+        self.memoryItems = memoryItems
+        self.scanDecisions = scanDecisions
+        self.experiments = experiments
+        self.conversationThreads = conversationThreads
+        self.patternInsights = patternInsights
+        self.weeklyNarrative = weeklyNarrative
+        self.pantryItems = pantryItems
+        self.entitlementSnapshot = entitlementSnapshot
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        let decodedLocalProfileID = try container.decodeIfPresent(String.self, forKey: .localProfileID) ?? UUID().uuidString
+        localProfileID = decodedLocalProfileID
+        hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
+        onboardingDraft = try container.decodeIfPresent(OnboardingDraft.self, forKey: .onboardingDraft)
+        userContext = try container.decodeIfPresent(UserContext.self, forKey: .userContext) ?? .starter
+        let decodedHistory = try container.decodeIfPresent([ScanRecord].self, forKey: .history) ?? []
+        let decodedCheckIns = try container.decodeIfPresent([CheckInEntry].self, forKey: .checkIns) ?? []
+        history = decodedHistory
+        checkIns = decodedCheckIns
+        let decodedScanEvents = try container.decodeIfPresent([ScanEvent].self, forKey: .scanEvents) ?? []
+        let decodedScanVerdicts = try container.decodeIfPresent([StoredScanVerdict].self, forKey: .scanVerdicts) ?? []
+        scanProductCorrections = try container.decodeIfPresent([ScanProductCorrection].self, forKey: .scanProductCorrections) ?? []
+        let decodedCheckInEvents = try container.decodeIfPresent([CheckInEvent].self, forKey: .checkInEvents) ?? []
+        favoriteItems = try container.decodeIfPresent([FavoriteItem].self, forKey: .favoriteItems) ?? []
+        consentRecords = try container.decodeIfPresent([ConsentRecord].self, forKey: .consentRecords) ?? []
+        subscriptionStatus = try container.decodeIfPresent(SubscriptionStatus.self, forKey: .subscriptionStatus) ?? .free
+        lastDemoScenarioID = try container.decodeIfPresent(String.self, forKey: .lastDemoScenarioID)
+        userProfile = try container.decodeIfPresent(UserProfile.self, forKey: .userProfile)
+        let profileForVerdicts = userProfile ?? UserProfile.migrated(from: userContext)
+        activeGoals = try container.decodeIfPresent([ActiveGoal].self, forKey: .activeGoals) ?? []
+        firstWeekPlan = try container.decodeIfPresent(FirstWeekPlan.self, forKey: .firstWeekPlan)
+        routines = try container.decodeIfPresent([RoutineItem].self, forKey: .routines) ?? []
+        memoryItems = try container.decodeIfPresent([MemoryItem].self, forKey: .memoryItems) ?? []
+        scanDecisions = try container.decodeIfPresent([ScanDecision].self, forKey: .scanDecisions) ?? []
+        experiments = try container.decodeIfPresent([Experiment].self, forKey: .experiments) ?? []
+        conversationThreads = try container.decodeIfPresent([ConversationThread].self, forKey: .conversationThreads) ?? []
+        patternInsights = try container.decodeIfPresent([PatternInsight].self, forKey: .patternInsights) ?? []
+        weeklyNarrative = try container.decodeIfPresent(WeeklyInsightNarrative.self, forKey: .weeklyNarrative)
+        pantryItems = try container.decodeIfPresent([PantryItem].self, forKey: .pantryItems) ?? []
+        entitlementSnapshot = try container.decodeIfPresent(EntitlementSnapshot.self, forKey: .entitlementSnapshot)
+            ?? AccessPolicy().snapshot(subscriptionStatus: subscriptionStatus, billingMode: .demo, now: .distantPast)
+
+        if decodedScanEvents.isEmpty {
+            scanEvents = decodedHistory.map { record in
+                let input = ScanInput(
+                    sourceType: record.analysis.source,
+                    barcode: record.analysis.resolvedProduct.barcode,
+                    capturedImageRef: nil,
+                    rawText: record.analysis.resolvedProduct.ingredients.map(\.name).joined(separator: ", "),
+                    productTypeHint: record.analysis.productType,
+                    locale: Locale.current.identifier
+                )
+                let envelope = record.analysis.makeEnvelope(input: input, recentScans: [], recentCheckIns: [])
+                let normalizedPayload = NormalizedScanPayload(
+                    source: record.analysis.source.analysisInputType,
+                    entityName: record.analysis.resolvedProduct.name,
+                    brand: record.analysis.resolvedProduct.brand,
+                    productType: record.analysis.productType,
+                    ingredients: record.analysis.resolvedProduct.ingredients.map(\.name),
+                    claims: record.analysis.resolvedProduct.claims,
+                    extractedText: input.rawText,
+                    inferredTags: record.analysis.resolvedProduct.tags.map(\.rawValue)
+                )
+                return ScanEvent(
+                    id: record.id.uuidString,
+                    timestamp: record.createdAt,
+                    localProfileID: decodedLocalProfileID,
+                    inputType: record.analysis.source.analysisInputType,
+                    normalizedPayload: normalizedPayload,
+                    analysis: envelope,
+                    legacyAnalysis: record.analysis,
+                    sourceAgents: ["DeterministicScoringEngine", "MigrationBootstrap"],
+                    latencyMs: 0
+                )
+            }
+        } else {
+            scanEvents = decodedScanEvents
+        }
+
+        if decodedScanVerdicts.isEmpty {
+            let context = profileForVerdicts.lilaContext()
+            scanVerdicts = scanEvents.map { event in
+                let verdict = event.analysis.lilaVerdict(
+                    fallbackAnalysis: event.legacyAnalysis,
+                    context: context
+                )
+                return StoredScanVerdict(
+                    scanEventID: event.id,
+                    verdict: verdict,
+                    createdAt: event.timestamp
+                )
+            }
+        } else {
+            scanVerdicts = decodedScanVerdicts
+        }
+
+        if decodedCheckInEvents.isEmpty {
+            checkInEvents = decodedCheckIns.map { entry in
+                entry.makeEvent(localProfileID: decodedLocalProfileID, linkedScanIDs: [], readHelpful: nil, satiety: 3)
+            }
+        } else {
+            checkInEvents = decodedCheckInEvents
+        }
+
+        if favoriteItems.isEmpty {
+            favoriteItems = history.filter(\.isFavorite).map {
+                FavoriteItem(
+                    id: UUID().uuidString,
+                    scanEventID: $0.id.uuidString,
+                    createdAt: $0.createdAt,
+                    title: $0.analysis.resolvedProduct.name,
+                    summary: $0.analysis.overallSummary
+                )
+            }
+        }
+
+        if consentRecords.isEmpty, let userProfile {
+            consentRecords = [
+                ConsentRecord(
+                    localProfileID: decodedLocalProfileID,
+                    policyVersion: "phase1-v1",
+                    flags: userProfile.consentFlags,
+                    createdAt: userProfile.createdAt
+                )
+            ]
+        }
+
+        if hasCompletedOnboarding {
+            onboardingDraft = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(localProfileID, forKey: .localProfileID)
+        try container.encode(hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
+        try container.encodeIfPresent(onboardingDraft, forKey: .onboardingDraft)
+        try container.encode(userContext, forKey: .userContext)
+        try container.encode(history, forKey: .history)
+        try container.encode(checkIns, forKey: .checkIns)
+        try container.encode(scanEvents, forKey: .scanEvents)
+        try container.encode(scanVerdicts, forKey: .scanVerdicts)
+        try container.encode(scanProductCorrections, forKey: .scanProductCorrections)
+        try container.encode(checkInEvents, forKey: .checkInEvents)
+        try container.encode(favoriteItems, forKey: .favoriteItems)
+        try container.encode(consentRecords, forKey: .consentRecords)
+        try container.encode(subscriptionStatus, forKey: .subscriptionStatus)
+        try container.encode(lastDemoScenarioID, forKey: .lastDemoScenarioID)
+        try container.encode(userProfile, forKey: .userProfile)
+        try container.encode(activeGoals, forKey: .activeGoals)
+        try container.encode(firstWeekPlan, forKey: .firstWeekPlan)
+        try container.encode(routines, forKey: .routines)
+        try container.encode(memoryItems, forKey: .memoryItems)
+        try container.encode(scanDecisions, forKey: .scanDecisions)
+        try container.encode(experiments, forKey: .experiments)
+        try container.encode(conversationThreads, forKey: .conversationThreads)
+        try container.encode(patternInsights, forKey: .patternInsights)
+        try container.encode(weeklyNarrative, forKey: .weeklyNarrative)
+        try container.encode(pantryItems, forKey: .pantryItems)
+        try container.encode(entitlementSnapshot, forKey: .entitlementSnapshot)
+    }
 }
 
 protocol AppDataStore {
@@ -47,9 +349,9 @@ enum ScanServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .emptyInput:
-            "Add a barcode, ingredient label, or demo product before analyzing."
+            "Add a barcode, ingredient label, meal snapshot, or demo product before analyzing."
         case .unresolvedScan:
-            "We could not confidently resolve this product yet. Try a cleaner label photo or a barcode."
+            "We could not confidently resolve this item yet. Try a cleaner label photo, a meal note, or a barcode."
         }
     }
 }
@@ -69,9 +371,9 @@ final class LocalAppDataStore: AppDataStore {
 
     func load() -> StoredAppState {
         guard let data = try? Data(contentsOf: fileURL) else {
-            return .default
+            return .fresh()
         }
-        return (try? decoder.decode(StoredAppState.self, from: data)) ?? .default
+        return (try? decoder.decode(StoredAppState.self, from: data)) ?? .fresh()
     }
 
     func save(_ state: StoredAppState) {
@@ -152,20 +454,47 @@ final class DemoScanService: ScanService, @unchecked Sendable {
 
             let inferredTags = inferTags(from: rawText)
             if !inferredTags.isEmpty {
-                let inferredProduct = ProductCandidate(
-                    id: "custom-\(UUID().uuidString)",
-                    name: "Custom Label Scan",
-                    brand: "Manual analysis",
-                    productType: input.productTypeHint ?? .food,
-                    barcode: nil,
-                    headline: "Resolved from your label text. Best used as a directional read.",
-                    ingredients: rawText.split(separator: ",").prefix(5).map { Ingredient(name: $0.trimmingCharacters(in: .whitespacesAndNewlines).capitalized) },
-                    claims: ["Resolved from OCR / manual label input"],
-                    tags: inferredTags,
-                    alternativeIDs: [],
-                    notes: ["This product was inferred from text, so keep the confidence lower."],
-                    lookupTokens: []
-                )
+            let inferredProduct = ProductCandidate(
+                id: "custom-\(UUID().uuidString)",
+                name: {
+                    switch input.sourceType {
+                    case .mealPhoto:
+                        "Meal Snapshot"
+                    case .menuPhoto:
+                        "Menu Choice"
+                    default:
+                        "Custom Label Scan"
+                    }
+                }(),
+                brand: "Manual analysis",
+                productType: input.productTypeHint ?? .food,
+                barcode: nil,
+                headline: {
+                    switch input.sourceType {
+                    case .mealPhoto:
+                        "Resolved from a meal snapshot. Best used as a directional wellness read."
+                    case .menuPhoto:
+                        "Resolved from a menu photo. Best used as a directional restaurant read."
+                    default:
+                        "Resolved from your label text. Best used as a directional read."
+                    }
+                }(),
+                ingredients: rawText.split(separator: ",").prefix(5).map { Ingredient(name: $0.trimmingCharacters(in: .whitespacesAndNewlines).capitalized) },
+                claims: [{
+                    switch input.sourceType {
+                    case .mealPhoto:
+                        "Resolved from meal snapshot"
+                    case .menuPhoto:
+                        "Resolved from menu photo"
+                    default:
+                        "Resolved from OCR / manual label input"
+                    }
+                }()],
+                tags: inferredTags,
+                alternativeIDs: [],
+                notes: ["This product was inferred from text, so keep the confidence lower."],
+                lookupTokens: []
+            )
                 return (inferredProduct, .low)
             }
         }
@@ -195,7 +524,18 @@ final class DemoScanService: ScanService, @unchecked Sendable {
             ("zinc oxide", .mineralSPF),
             ("green tea", .antioxidantBlend),
             ("polysorbate", .emulsifierHeavy),
-            ("erythritol", .sugarAlcohol)
+            ("erythritol", .sugarAlcohol),
+            ("salmon", .proteinDense),
+            ("chicken", .proteinDense),
+            ("egg", .proteinDense),
+            ("lentil", .fiberSupport),
+            ("beans", .fiberSupport),
+            ("rice", .sugarSpike),
+            ("fries", .ultraProcessed),
+            ("burger", .ultraProcessed),
+            ("soda", .sugarSpike),
+            ("salad", .fiberSupport),
+            ("avocado", .omegaSupport)
         ]
 
         for (keyword, tag) in mappings where rawText.contains(keyword) {
@@ -205,25 +545,48 @@ final class DemoScanService: ScanService, @unchecked Sendable {
     }
 }
 
+struct WellnessFeatureFlags: Codable, Hashable {
+    var newOnboarding = true
+    var newHome = true
+    var homeSurfaceV2 = true
+    var strategist = true
+    var dailyBrief = true
+    var structuredAnalysis = true
+    var mealSnapshot = true
+    var safetyGuard = true
+    var patternAgent = true
+    var weeklyInsightV2 = true
+    var menuScanner = true
+    var pantryMVP = true
+    var contextualPaywall = true
+    var entitlementsV2 = true
+}
+
 struct AppServices {
     var configuration: RuntimeConfiguration
+    var firebaseBootstrapState: FirebaseBootstrap.State = .disabled
+    var featureFlags: WellnessFeatureFlags
     var store: AppDataStore
     var scanService: ScanService
     var subscription: SubscriptionClient
     var labelOCRService: LabelOCRService
     var backendAPI: WellnessBackendAPI?
     var identityProvider: IdentityProviding
+    var scanVerdictAgent: ScanVerdictServing = DeterministicScanVerdictAgent()
+    var coachAgent: any CoachAgentServing = DeterministicCoachAgent()
+    var healthKitService: HealthKitServicing = NoopHealthKitService()
 
     @MainActor
     static func makePreviewServices() -> AppServices {
         let configuration = RuntimeConfiguration.load()
-        FirebaseBootstrap.configureIfNeeded(using: configuration)
+        let firebaseBootstrapState = FirebaseBootstrap.configureIfNeeded(using: configuration)
+        let firebaseRuntimeReady = firebaseBootstrapState == .configured
 
         let store = LocalAppDataStore()
         let snapshot = store.load()
         let identityProvider: IdentityProviding = {
             #if canImport(FirebaseAuth)
-            if configuration.isFirebaseEnabled {
+            if configuration.isFirebaseEnabled, firebaseRuntimeReady {
                 return FirebaseIdentityProvider()
             }
             #endif
@@ -232,7 +595,7 @@ struct AppServices {
 
         let appCheckProvider: AppCheckTokenProviding = {
             #if canImport(FirebaseAppCheck)
-            if configuration.isFirebaseEnabled {
+            if configuration.isFirebaseEnabled, firebaseRuntimeReady {
                 return FirebaseAppCheckTokenProvider()
             }
             #endif
@@ -261,14 +624,41 @@ struct AppServices {
             subscription = DemoSubscriptionController(status: snapshot.subscriptionStatus)
         }
 
+        let scanVerdictAgent: ScanVerdictServing = configuration.agentServiceBaseURL.map {
+            RemoteScanVerdictAgent(
+                endpoint: $0.appending(path: "v1/scan/verdict"),
+                identityProvider: identityProvider,
+                appCheckProvider: appCheckProvider
+            )
+        } ?? DeterministicScanVerdictAgent()
+
+        let coachAgent: any CoachAgentServing = configuration.agentServiceBaseURL.map {
+            RemoteCoachAgent(
+                endpoint: $0.appending(path: "v1/coach/reply"),
+                identityProvider: identityProvider,
+                appCheckProvider: appCheckProvider
+            )
+        } ?? DeterministicCoachAgent()
+
         return AppServices(
             configuration: configuration,
+            firebaseBootstrapState: firebaseBootstrapState,
+            featureFlags: WellnessFeatureFlags(),
             store: store,
             scanService: scanService,
             subscription: subscription,
             labelOCRService: LabelOCRService(),
             backendAPI: backendAPI,
-            identityProvider: identityProvider
+            identityProvider: identityProvider,
+            scanVerdictAgent: scanVerdictAgent,
+            coachAgent: coachAgent,
+            healthKitService: {
+                #if canImport(HealthKit)
+                return HealthKitService()
+                #else
+                return NoopHealthKitService()
+                #endif
+            }()
         )
     }
 }
@@ -424,9 +814,9 @@ enum ScannerPermissionState: Equatable {
         case .unknown, .ready:
             ""
         case .cameraDenied:
-            "Use a demo scenario, manual barcode, or text label instead of live camera scanning."
+            "Use a label photo or enter a barcode manually instead of live camera scanning."
         case .photoLibraryDenied:
-            "Use manual label text or enable photo access to simulate OCR from a saved label."
+            "Type label text or analyze a barcode manually until photo access is available."
         case let .unavailable(message):
             message
         }
@@ -448,14 +838,16 @@ enum ScannerPermissionState: Equatable {
 
 struct BarcodeScannerView: UIViewControllerRepresentable {
     let onCodeScanned: @MainActor (String) -> Void
+    let onUnavailable: @MainActor (String) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onCodeScanned: onCodeScanned)
+        Coordinator(onCodeScanned: onCodeScanned, onUnavailable: onUnavailable)
     }
 
     func makeUIViewController(context: Context) -> ScannerViewController {
         let controller = ScannerViewController()
         controller.metadataDelegate = context.coordinator
+        controller.onUnavailable = context.coordinator.reportUnavailable
         return controller
     }
 
@@ -463,9 +855,14 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
 
     final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
         private let onCodeScanned: @MainActor (String) -> Void
+        private let onUnavailable: @MainActor (String) -> Void
 
-        init(onCodeScanned: @escaping @MainActor (String) -> Void) {
+        init(
+            onCodeScanned: @escaping @MainActor (String) -> Void,
+            onUnavailable: @escaping @MainActor (String) -> Void
+        ) {
             self.onCodeScanned = onCodeScanned
+            self.onUnavailable = onUnavailable
         }
 
         func metadataOutput(
@@ -483,11 +880,19 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
                 onCodeScanned(code)
             }
         }
+
+        func reportUnavailable(_ message: String) {
+            let onUnavailable = self.onUnavailable
+            Task { @MainActor in
+                onUnavailable(message)
+            }
+        }
     }
 }
 
 final class ScannerViewController: UIViewController {
     var metadataDelegate: AVCaptureMetadataOutputObjectsDelegate?
+    var onUnavailable: ((String) -> Void)?
 
     private let session = AVCaptureSession()
     private var previewLayer: AVCaptureVideoPreviewLayer?
@@ -519,18 +924,18 @@ final class ScannerViewController: UIViewController {
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 DispatchQueue.main.async {
-                    granted ? self?.setupSession() : self?.showMessage("Camera access is needed for live barcode scanning.")
+                    granted ? self?.setupSession() : self?.reportUnavailable("Camera access is needed for live barcode scanning.")
                 }
             }
         default:
-            showMessage("Camera access is unavailable here. Use manual barcode entry or a label photo.")
+            reportUnavailable("Camera access is unavailable here. Use manual barcode entry or a label photo.")
         }
     }
 
     private func setupSession() {
         guard let captureDevice = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: captureDevice) else {
-            showMessage("Live camera scanning is unavailable on this device.")
+            reportUnavailable("Live camera scanning is unavailable on this device.")
             return
         }
 
@@ -566,5 +971,13 @@ final class ScannerViewController: UIViewController {
             messageLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             messageLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)
         ])
+    }
+
+    private func reportUnavailable(_ message: String) {
+        if let onUnavailable {
+            onUnavailable(message)
+        } else {
+            showMessage(message)
+        }
     }
 }
