@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.contracts import (
     ConfidenceLevel,
     Ingredient,
+    MexicoWarningLabel,
     ProductCandidate,
     ProductResolution,
     ProductResolutionSemantic,
@@ -1322,6 +1323,56 @@ def test_product_resolver_label_search_falls_back_to_directional_without_exact_m
     assert result.identity_source == ProductResolutionSource.agentInferred
     assert result.fact_sources == (ProductResolutionSource.agentInferred,)
     assert result.fallback_reason in {"off_search_unranked", "off_search_low_confidence"}
+
+
+def test_product_resolver_mexico_seed_catalog_adds_nom_signals(monkeypatch):
+    resolver = ProductResolver(Settings())
+
+    monkeypatch.setattr(resolver, "_get_json", lambda url: {"products": []})
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.labelPhoto,
+            rawText="Bebida energetica con azucar EXCESO AZUCARES CONTIENE CAFEINA EVITAR EN NINOS",
+            productTypeHint=ProductType.food,
+            locale="es_MX",
+        )
+    )
+
+    assert result.is_directional is False
+    assert result.identity_source == ProductResolutionSource.localCatalog
+    assert result.product.mexicoNutritionSignals is not None
+    assert MexicoWarningLabel.excessSugars in result.product.mexicoNutritionSignals.warningLabels
+    assert result.product.mexicoNutritionSignals.containsCaffeineWarning is True
+
+    analysis = build_scan_analysis(
+        input=ScanInput(sourceType=ScanSource.labelPhoto, rawText="bebida energetica", locale="es_MX"),
+        user_context=starter_user_context(),
+        resolution=result,
+    )
+    assert any(reason.title == "Mexico label signal" for reason in analysis.topReasons)
+    assert any("Senales de etiqueta Mexico" in warning for warning in analysis.warnings)
+
+
+def test_product_resolver_partial_mexico_label_stays_directional_with_signals(monkeypatch):
+    resolver = ProductResolver(Settings())
+
+    monkeypatch.setattr(resolver, "_get_json", lambda url: {"products": []})
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.labelPhoto,
+            rawText="Gomitas aciduladas EXCESO SODIO CONTIENE EDULCORANTES sucralosa",
+            productTypeHint=ProductType.food,
+            locale="es_MX",
+        )
+    )
+
+    assert result.is_directional is True
+    assert result.identity_source == ProductResolutionSource.agentInferred
+    assert result.product.mexicoNutritionSignals is not None
+    assert MexicoWarningLabel.excessSodium in result.product.mexicoNutritionSignals.warningLabels
+    assert result.product.mexicoNutritionSignals.containsSweetenerWarning is True
 
 
 def test_product_resolver_enriches_nutrients_with_usda_only_for_strong_match(monkeypatch):

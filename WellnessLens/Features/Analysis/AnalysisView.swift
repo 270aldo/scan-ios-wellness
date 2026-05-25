@@ -266,6 +266,7 @@ struct AnalysisResolutionTrustContent: Equatable {
     let readStateTitle: String
     let provenanceTitle: String
     let semanticTitles: [String]
+    let mexicoSignalTitles: [String]
     let correctionNote: String?
 
     static func build(
@@ -319,6 +320,7 @@ struct AnalysisResolutionTrustContent: Equatable {
             readStateTitle: readStateTitle,
             provenanceTitle: provenanceTitle,
             semanticTitles: semantics.map(\.surfaceTitle),
+            mexicoSignalTitles: analysis.resolvedProduct.mexicoNutritionSignals?.titles ?? [],
             correctionNote: correction.map { "Local correction is using \($0.targetProductName)." }
         )
     }
@@ -1093,6 +1095,20 @@ private struct AnalysisResolutionTrustCard: View {
 
                     ForEach(content.semanticTitles, id: \.self) { title in
                         WLPill(title: title, tone: .soft)
+                    }
+                }
+
+                if !content.mexicoSignalTitles.isEmpty {
+                    VStack(alignment: .leading, spacing: WLSpacing.s) {
+                        Text("Etiqueta Mexico")
+                            .font(WLTypography.captionStrong)
+                            .foregroundStyle(WLPalette.ink)
+
+                        FlowLayout(spacing: WLSpacing.xs) {
+                            ForEach(content.mexicoSignalTitles.prefix(5), id: \.self) { title in
+                                WLPill(title: title, tone: .accent)
+                            }
+                        }
                     }
                 }
 

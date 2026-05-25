@@ -6,9 +6,10 @@ Structured strategist service for the WellnessLens production stack.
 
 - Exposes a dedicated API for cloud strategist replies.
 - Exposes a dedicated API for structured scan verdicts.
+- Exposes a dedicated API for nutrition label/menu extraction.
 - Keeps the strategist off the synchronous scan path.
 - Uses repo-stored runtime assets for the scan verdict prompt, schema, and golden examples.
-- Supports a deterministic local provider and a Vertex path with schema validation plus local fallback.
+- Supports a deterministic local provider and a Vertex path with schema validation plus local safety fallback.
 - Returns only structured outputs so iOS can keep a strict contract boundary.
 
 ## Endpoints
@@ -16,6 +17,8 @@ Structured strategist service for the WellnessLens production stack.
 - `GET /healthz`
 - `POST /v1/strategist/reply`
 - `POST /v1/scan/verdict`
+- `POST /v1/nutrition/extract`
+- `POST /v1/coach/reply`
 
 ## Local Run
 

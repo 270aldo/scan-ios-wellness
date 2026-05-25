@@ -169,6 +169,7 @@ private struct RemoteResolvedProductWire: Encodable {
     let confidence: Double?
     let ingredients: [String]
     let nutritionSnapshot: NutritionSnapshot?
+    let mexicoNutritionSignals: MexicoNutritionSignals?
     let isDirectional: Bool
 
     init(from product: ProductCandidate) {
@@ -181,6 +182,7 @@ private struct RemoteResolvedProductWire: Encodable {
         confidence = product.resolution?.confidence
         ingredients = product.ingredients.map(\.name)
         nutritionSnapshot = product.resolution?.nutritionSnapshot
+        mexicoNutritionSignals = product.mexicoNutritionSignals
         isDirectional = product.resolution?.isDirectional ?? false
     }
 
@@ -194,6 +196,7 @@ private struct RemoteResolvedProductWire: Encodable {
         case confidence
         case ingredients
         case nutritionSnapshot = "nutrition_snapshot"
+        case mexicoNutritionSignals = "mexico_nutrition_signals"
         case isDirectional = "is_directional"
     }
 }

@@ -1,10 +1,10 @@
 {
-  "id": "6ad423d3-5c48-543d-b156-a0115adfa904",
   "createdAt": 777778077.0,
-  "productID": "balanced-protein-yogurt",
-  "productName": "Balanced Protein Yogurt",
+  "id": "6ad423d3-5c48-543d-b156-a0115adfa904",
   "kind": "saveToRoutine",
   "note": "Save as an easy repeat anchor.",
+  "productID": "balanced-protein-yogurt",
+  "productName": "Balanced Protein Yogurt",
   "relatedGoal": "steadyEnergy",
   "resolvedAt": null
 }

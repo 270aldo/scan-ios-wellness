@@ -86,7 +86,7 @@ enum ScanFeedback: Equatable {
         case .emptyInput:
             "Use a barcode, label photo, meal snapshot, or menu text before analyzing."
         case .unresolved:
-            "Try a brighter label photo, a cleaner barcode, or enough text to make the fallback read directional."
+            "Try a brighter label photo, a cleaner barcode, or enough text to make the read directional."
         case .ocrEmpty:
             "The selected image did not return enough readable text. Try a tighter, brighter crop."
         case .ocrFailed:

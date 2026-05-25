@@ -38,6 +38,7 @@ from app.contracts import (
     MedicalSafety,
     MemoryItem,
     MemoryItemKind,
+    MexicoWarningLabel,
     OpenLoop,
     PatternContext,
     ProductCandidate,
@@ -80,6 +81,7 @@ from app.contracts import (
     fixture_payload,
 )
 from app.date_utils import apple_timestamp_now
+from app.mexico_nutrition import mexico_signal_titles
 from app.product_resolver import ProductResolver, ResolverResult
 from app.product_resolution_semantics import (
     ensure_product_resolution_semantics,
@@ -536,10 +538,21 @@ class DerivedFeatures:
     sugars_g_per_100g: float | None
     caffeine_mg_per_100g: float | None
     nova_group: int | None
+    mexico_warning_labels: set[MexicoWarningLabel]
+    mexico_contains_caffeine_warning: bool
+    mexico_contains_sweetener_warning: bool
     conservative_inferred_mode: bool
 
     def contains(self, tag: IngredientTag) -> bool:
         return tag in self.effective_tags
+
+    @property
+    def has_mexico_signal(self) -> bool:
+        return bool(
+            self.mexico_warning_labels
+            or self.mexico_contains_caffeine_warning
+            or self.mexico_contains_sweetener_warning
+        )
 
 
 def build_lens_scores(
@@ -587,6 +600,8 @@ def derive_features(product: ProductCandidate, source: ScanSource) -> DerivedFea
     conservative_inferred_mode = should_use_conservative_inference(product, source)
     snapshot = None if conservative_inferred_mode else (product.resolution.nutritionSnapshot if product.resolution else None)
     joined_text = searchable_text(product)
+    mexico_signals = product.mexicoNutritionSignals
+    mexico_warning_labels = set(mexico_signals.warningLabels if mexico_signals else [])
     effective_tags = {
         tag for tag in product.tags
         if product.productType != ProductType.food or tag not in CORE_FOOD_TAGS
@@ -600,8 +615,20 @@ def derive_features(product: ProductCandidate, source: ScanSource) -> DerivedFea
             sugars_g_per_100g=snapshot.sugarsGPer100g if snapshot else None,
             caffeine_mg_per_100g=snapshot.caffeineMgPer100g if snapshot else None,
             nova_group=snapshot.novaGroup if snapshot else None,
+            mexico_warning_labels=mexico_warning_labels,
+            mexico_contains_caffeine_warning=bool(mexico_signals and mexico_signals.containsCaffeineWarning),
+            mexico_contains_sweetener_warning=bool(mexico_signals and mexico_signals.containsSweetenerWarning),
             conservative_inferred_mode=conservative_inferred_mode,
         )
+
+    if MexicoWarningLabel.excessSugars in mexico_warning_labels:
+        effective_tags.add(IngredientTag.sugarSpike)
+    if MexicoWarningLabel.excessCalories in mexico_warning_labels:
+        effective_tags.add(IngredientTag.ultraProcessed)
+    if mexico_signals and mexico_signals.containsCaffeineWarning:
+        effective_tags.add(IngredientTag.stimulant)
+    if mexico_signals and mexico_signals.containsSweetenerWarning:
+        effective_tags.add(IngredientTag.sugarAlcohol)
 
     if has_protein_support(snapshot, product, joined_text):
         effective_tags.add(IngredientTag.proteinDense)
@@ -625,6 +652,9 @@ def derive_features(product: ProductCandidate, source: ScanSource) -> DerivedFea
         sugars_g_per_100g=snapshot.sugarsGPer100g if snapshot else None,
         caffeine_mg_per_100g=snapshot.caffeineMgPer100g if snapshot else None,
         nova_group=snapshot.novaGroup if snapshot else None,
+        mexico_warning_labels=mexico_warning_labels,
+        mexico_contains_caffeine_warning=bool(mexico_signals and mexico_signals.containsCaffeineWarning),
+        mexico_contains_sweetener_warning=bool(mexico_signals and mexico_signals.containsSweetenerWarning),
         conservative_inferred_mode=conservative_inferred_mode,
     )
 
@@ -848,6 +878,20 @@ def build_reasons(
                 impact=ReasonImpact.positive,
             )
         )
+    if features.has_mexico_signal:
+        signal_titles = mexico_signal_titles(product.mexicoNutritionSignals)
+        reasons.append(
+            ReasonItem(
+                id=_stable_id("reason", "mexico-label-signal"),
+                title="Mexico label signal",
+                detail=(
+                    "Etiqueta mexicana detectada: "
+                    + ", ".join(signal_titles[:3])
+                    + ". La lectura lo usa como contexto de wellness, no como diagnostico."
+                ),
+                impact=ReasonImpact.caution,
+            )
+        )
     if scan_context and scan_context.isInAnabolicWindow and features.contains(IngredientTag.proteinDense):
         reasons.append(
             ReasonItem(
@@ -904,6 +948,9 @@ def build_warnings(
         warnings.append("No exact packaged-food match yet. Treat this as directional guidance until you rescan a clearer barcode or label.")
     if features.contains(IngredientTag.sugarSpike):
         warnings.append("Higher sugar or heavier-processing cues may soften the fit.")
+    if features.has_mexico_signal:
+        titles = mexico_signal_titles(product.mexicoNutritionSignals)
+        warnings.append(f"Senales de etiqueta Mexico detectadas: {', '.join(titles[:3])}. Conviene leer porcion y frecuencia.")
     if scan_context and has_short_sleep(scan_context) and features.contains(IngredientTag.stimulant):
         warnings.append("Short sleep raises the bar for caffeine-forward products to feel steady.")
     if scan_context and scan_context.cyclePhase == "luteal" and features.contains(IngredientTag.sugarSpike):

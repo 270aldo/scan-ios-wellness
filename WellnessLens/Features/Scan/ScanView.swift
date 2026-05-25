@@ -708,7 +708,7 @@ private struct ScanSampleReadsTeaserCard: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: WLProductCopy.Scan.sampleReadsTitle,
-                    subtitle: "You already have real scan signal. Open this only if you want a demo reference.",
+                    subtitle: "You already have real scan signal. Open this only if you want a sample reference.",
                     systemImage: "sparkles"
                 )
 

@@ -133,6 +133,63 @@ def test_scan_verdict_directional_resolution_downgrades_confidence_and_adds_watc
     assert any(item["title"] == "Producto no resuelto del todo" for item in payload["watchouts"])
 
 
+def test_nutrition_extraction_contract_detects_mexico_warnings():
+    response = client.post(
+        "/v1/nutrition/extract",
+        json={
+            "source": "label_text",
+            "locale": "es-MX",
+            "text": (
+                "Bebida energetica\n"
+                "Marca: Prueba\n"
+                "EXCESO AZUCARES\n"
+                "CONTIENE CAFEINA EVITAR EN NINOS\n"
+                "Ingredientes: agua carbonatada, azucar, cafeina, saborizantes"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["extraction"]
+    assert payload["productName"] == "Bebida energetica"
+    assert "excess_sugars" in payload["warning_labels"]
+    assert payload["contains_caffeine_warning"] is True
+    assert "agua carbonatada" in payload["ingredients"]
+    assert payload["confidence"] >= 0.5
+
+
+def test_nutrition_extraction_vertex_provider_falls_back_to_local(monkeypatch):
+    monkeypatch.setenv("WELLNESSLENS_AGENT_PROVIDER", "vertex")
+    monkeypatch.setenv("WELLNESSLENS_AGENT_VERTEX_PROJECT", "demo-project")
+    get_settings.cache_clear()
+
+    def fail_provider(self, request):
+        raise RuntimeError("simulated vertex extraction outage")
+
+    monkeypatch.setattr(StrategistService, "_vertex_nutrition_extraction", fail_provider)
+    app.state.strategist_service = StrategistService(settings=get_settings())
+
+    response = client.post(
+        "/v1/nutrition/extract",
+        json={
+            "source": "label_text",
+            "locale": "es-MX",
+            "text": "EXCESO SODIO CONTIENE EDULCORANTES Ingredientes: agua, sucralosa",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["extraction"]
+    assert "excess_sodium" in payload["warning_labels"]
+    assert payload["contains_sweetener_warning"] is True
+    assert payload["source"] == "deterministic-local/provider-fallback"
+
+    monkeypatch.delenv("WELLNESSLENS_AGENT_PROVIDER", raising=False)
+    monkeypatch.delenv("WELLNESSLENS_AGENT_VERTEX_PROJECT", raising=False)
+    get_settings.cache_clear()
+    app.state.strategist_service = StrategistService(settings=get_settings())
+
+
 def test_scan_verdict_assets_load_and_validate_golden_examples():
     assets = get_scan_verdict_assets()
     assert assets.version
@@ -211,6 +268,14 @@ def test_scan_verdict_vertex_provider_falls_back_to_local(monkeypatch):
             {
                 "userMessage": "Hola",
                 "userContextSummary": "User is testing auth.",
+            },
+        ),
+        (
+            "/v1/nutrition/extract",
+            {
+                "source": "label_text",
+                "locale": "es-MX",
+                "text": "EXCESO AZUCARES Ingredientes: agua, azucar",
             },
         ),
     ],

@@ -251,7 +251,7 @@ private struct PhaseTwoPaywallSheet: View {
                     .foregroundStyle(WLPalette.ink)
                 Spacer()
                 if plan.isDemo {
-                    Text("Demo build")
+                    Text("Local testing")
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
                 } else if !plan.displayPrice.isEmpty {

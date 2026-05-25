@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-04-21
+Last updated: 2026-05-25
 
 ## Executive summary
 
@@ -15,6 +15,8 @@ The current state is:
 - PRD 2 is implemented in `agent-service`
 - PRD 3 coach replies are implemented end-to-end across `agent-service` and iOS
 - PRD 4 is now in progress on the real repo, with product identity foundation and shared resolution semantics already implemented
+- PRD 5 nutrient intelligence foundation is partially present through provider-backed nutrient snapshots and deterministic food signals
+- the Mexico launch track is now active: NOM-051 signals, a Mexico seed catalog, and a structured nutrition extraction endpoint are being wired without redesigning the app
 - `StrategistChatView` stays visually unchanged while `AppModel.sendStrategistMessage(...)` routes through `coachAgent`
 - fallback behavior remains available when remote provider output is missing or invalid
 
@@ -95,9 +97,43 @@ The repo should be treated as an incremental migration, not a rewrite candidate.
   - `WellnessLens/Domain/ProductResolutionSemantics.swift`
 - `ProductCandidate` / `ResolvedProduct` now carry `resolution_semantics` as an additive field
 - compatibility with `ScanAnalysis` and `AnalysisEnvelope` remains intact
-- no new UI was introduced for manual correction or rich confidence display in this slice
+- manual correction and richer resolution/provenance presentation now exist on the Analysis surface
+
+### Mexico Launch / NOM-051 Slice
+
+- backend contracts now carry additive `MexicoNutritionSignals` on `ProductCandidate`
+- iOS contracts now decode and encode the same Mexico signal payload
+- `backend-api/app/mexico_nutrition.py` adds deterministic detection for visible NOM-051 phrases and basic nutrient-threshold signals
+- the resolver now tries provider data first, then a Mexico seed catalog, then directional guidance
+- Analysis shows compact Mexico label pills without changing the current visual system
+- `agent-service` now exposes `POST /v1/nutrition/extract` for structured label/menu extraction, with deterministic local behavior when provider AI is unavailable
 
 ## Verification status
+
+Current Mexico launch slice verification started on 2026-05-25:
+
+```bash
+python3 -m compileall backend-api/app agent-service/app
+pytest backend-api/tests/test_api.py -q -k "mexico_seed_catalog or partial_mexico_label"
+pytest agent-service/tests/test_agent_api.py -q -k "nutrition_extraction"
+pytest backend-api/tests/
+pytest agent-service/tests/
+xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' build CODE_SIGNING_ALLOWED=NO
+xcodebuild -project /Users/aldoolivas/IOS_ngx-silver/WellnessLens.xcodeproj -scheme WellnessLens -destination 'platform=iOS Simulator,name=iPhone 17' test CODE_SIGNING_ALLOWED=NO
+```
+
+Observed result:
+
+- Python compile: passed
+- targeted backend Mexico tests: passed
+- targeted agent-service extraction tests: passed
+- full backend tests: passed
+- full agent-service tests: passed
+- iOS build/test: blocked in this environment because `xcode-select` points to `/Library/Developer/CommandLineTools`, not full Xcode
+
+iOS simulator verification is still required on a Mac with full Xcode selected.
+
+Previous PRD 4 verification:
 
 The following commands were run successfully after the PRD 4 shared-resolution-semantics slice:
 
@@ -132,10 +168,11 @@ Observed result:
 ## What is still not done
 
 - PRD 4 is not fully closed yet:
-  - manual correction UX is not implemented
-  - richer confidence / provenance UI is not implemented
-  - provider expansion beyond the current OFF / USDA path is still pending
-- nutrient intelligence engine that replaces demo heuristics
+  - broader provider expansion beyond the current OFF / USDA / DSLD path is still pending
+  - Mexico seed coverage is intentionally small and needs launch data
+- PRD 5 is not fully closed yet:
+  - nutrient scoring is stronger than the original tag-only heuristic, but still not a full auditable vector engine
+  - Mexico/NOM-051 thresholds need continued validation against real products
 - broader staging validation of the Vertex provider path with real credentials
 
 ## Notes about runtime assets

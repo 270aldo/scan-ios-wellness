@@ -170,6 +170,26 @@ class NutritionSnapshot(ContractModel):
     novaGroup: int | None = Field(default=None, alias="nova_group")
 
 
+class MexicoWarningLabel(str, Enum):
+    excessCalories = "excess_calories"
+    excessSugars = "excess_sugars"
+    excessSodium = "excess_sodium"
+    excessSaturatedFat = "excess_saturated_fat"
+    excessTransFat = "excess_trans_fat"
+
+
+class MexicoNutritionSignals(ContractModel):
+    warningLabels: list[MexicoWarningLabel] = Field(default_factory=list, alias="warning_labels")
+    containsCaffeineWarning: bool = Field(default=False, alias="contains_caffeine_warning")
+    containsSweetenerWarning: bool = Field(default=False, alias="contains_sweetener_warning")
+    detectedPhrases: list[str] = Field(default_factory=list, alias="detected_phrases")
+    source: str = "deterministic"
+
+    @property
+    def has_signal(self) -> bool:
+        return bool(self.warningLabels or self.containsCaffeineWarning or self.containsSweetenerWarning or self.detectedPhrases)
+
+
 class ProductResolution(ContractModel):
     canonicalProductID: str | None = Field(default=None, alias="canonical_product_id")
     source: ProductResolutionSource
@@ -193,6 +213,7 @@ class ProductCandidate(ContractModel):
     lookupTokens: list[str]
     resolution: ProductResolution | None = None
     resolutionSemantics: list[ProductResolutionSemantic] | None = Field(default=None, alias="resolution_semantics")
+    mexicoNutritionSignals: MexicoNutritionSignals | None = Field(default=None, alias="mexico_nutrition_signals")
 
 
 class LensScore(ContractModel):

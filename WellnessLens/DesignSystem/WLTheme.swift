@@ -204,7 +204,7 @@ enum WLProductCopy {
         static let primaryTitle = "Primary path"
         static let primarySubtitle = "Use the camera or a sharp label photo when you want the clearest read fastest."
         static let otherWaysTitle = "Other ways to scan"
-        static let otherWaysSubtitle = "Fallbacks for when the product is not nearby, the barcode does not resolve, or the label needs manual help."
+        static let otherWaysSubtitle = "Other ways to scan when the product is not nearby, the barcode does not resolve, or the label needs manual help."
         static let sampleReadsTitle = "Sample reads"
         static let sampleReadsSubtitle = "Examples that show how WellnessLens interprets food, supplements, and skincare."
     }
@@ -268,7 +268,7 @@ enum WLProductCopy {
         static let stepFourSubtitle = "Daily priorities sharpen the Daily Brief and help the app choose which tradeoff to explain first."
         static let stepFourSectionTitle = "Daily priorities"
         static let stepFourContextTitle = "Default if skipped"
-        static let stepFourContextBody = "WellnessLens keeps `Energy` as the fallback anchor so the product never lands on an empty priority state."
+        static let stepFourContextBody = "WellnessLens keeps `Energy` as the default anchor so the product never lands on an empty priority state."
 
         static let stepFiveTitle = "How should the product personalize?"
         static let stepFiveSubtitle = "Consent and tone are part of the experience. Keep what helps and skip the rest of the noise."

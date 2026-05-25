@@ -1,41 +1,41 @@
 {
-  "userContext": {
-    "goals": [
-      "clearSkin",
-      "steadyEnergy",
-      "gutCalm"
-    ],
-    "sensitivities": [
-      "fragranceSensitive"
-    ],
-    "dietStyle": "flexitarian",
-    "skinConcerns": [
-      "blemishes",
-      "dryness"
-    ],
-    "lifeStage": "everyDay",
-    "optInCycleAware": false
+  "ageRange": "30-39",
+  "consentFlags": {
+    "aiProcessing": true,
+    "analytics": false,
+    "healthDataProcessing": true,
+    "notifications": false
   },
+  "createdAt": 777777777.0,
+  "eatingRhythm": "flexible",
   "frictions": [
     "energyCrash",
     "bloating"
   ],
   "guidanceStyle": "calmAndDirect",
-  "eatingRhythm": "flexible",
-  "supplementStyle": "simple",
   "memoryEnabled": true,
-  "ageRange": "30-39",
-  "restaurantFrequency": "balanced",
   "nutritionPriorities": [
     "energy",
     "digestion",
     "skin"
   ],
-  "consentFlags": {
-    "aiProcessing": true,
-    "analytics": false,
-    "notifications": false,
-    "healthDataProcessing": true
-  },
-  "createdAt": 777777777.0
+  "restaurantFrequency": "balanced",
+  "supplementStyle": "simple",
+  "userContext": {
+    "dietStyle": "flexitarian",
+    "goals": [
+      "clearSkin",
+      "steadyEnergy",
+      "gutCalm"
+    ],
+    "lifeStage": "everyDay",
+    "optInCycleAware": false,
+    "sensitivities": [
+      "fragranceSensitive"
+    ],
+    "skinConcerns": [
+      "blemishes",
+      "dryness"
+    ]
+  }
 }
