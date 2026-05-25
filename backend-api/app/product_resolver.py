@@ -25,6 +25,7 @@ from app.contracts import (
     ScanInput,
     ScanSource,
 )
+from app.mexico_nutrition import infer_mexico_nutrition_signals, mexico_signal_titles
 from app.product_resolution_semantics import ensure_product_resolution_semantics
 
 
@@ -116,6 +117,7 @@ class ProductResolver:
     def _resolve_identity(self, input: ScanInput) -> ResolverResult:
         off_step = _OpenFoodFactsIdentityStep(self._settings, self._get_json)
         dsld_step = _DSLDSupplementIdentityStep(self._settings, self._get_json)
+        mexico_seed_step = _MexicoSeedCatalogStep()
 
         if input.productTypeHint == ProductType.supplement:
             return dsld_step.resolve(input)
@@ -132,6 +134,11 @@ class ProductResolver:
             dsld_result = dsld_step.resolve(input)
             if not dsld_result.is_directional:
                 return dsld_result
+
+        if off_result.is_directional:
+            mexico_seed_result = mexico_seed_step.resolve(input)
+            if mexico_seed_result is not None:
+                return mexico_seed_result
 
         return off_result
 
@@ -151,16 +158,25 @@ class ProductResolver:
         with urlopen(request, timeout=self._settings.resolver_request_timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
 
-    def _post_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post_json(
+        self,
+        url: str,
+        payload: dict[str, Any],
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        headers: dict[str, str] = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": self._settings.open_food_facts_user_agent,
+        }
+        if extra_headers:
+            headers.update(extra_headers)
         request = Request(
             url,
             method="POST",
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "User-Agent": self._settings.open_food_facts_user_agent,
-            },
+            headers=headers,
         )
         with urlopen(request, timeout=self._settings.resolver_request_timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
@@ -240,6 +256,12 @@ class _ProductCandidateFactory:
             labels_tags=labels_tags,
             snapshot=snapshot,
         )
+        mexico_signals = infer_mexico_nutrition_signals(
+            text_parts=[name, brand, ingredients_text, " ".join(labels_tags), " ".join(categories_tags)],
+            snapshot=snapshot,
+        )
+        notes = [f"Source: Open Food Facts ({'directional' if is_directional else 'resolved'})."]
+        notes.extend(f"Mexico label signal: {title}." for title in mexico_signal_titles(mexico_signals))
         candidate = ProductCandidate(
             id=f"off:{code or hashlib.sha1(name.encode('utf-8')).hexdigest()[:12]}",
             name=name,
@@ -251,7 +273,7 @@ class _ProductCandidateFactory:
             claims=_claims_from_labels(labels_tags),
             tags=tags,
             alternativeIDs=[],
-            notes=[f"Source: Open Food Facts ({'directional' if is_directional else 'resolved'})."],
+            notes=notes,
             lookupTokens=_lookup_tokens(name, brand, ingredients_text, categories_tags),
             resolution=ProductResolution(
                 canonicalProductID=f"off:{code}" if code else None,
@@ -260,6 +282,7 @@ class _ProductCandidateFactory:
                 nutritionSnapshot=snapshot,
                 isDirectional=is_directional,
             ),
+            mexicoNutritionSignals=mexico_signals,
         )
         return ensure_product_resolution_semantics(candidate)
 
@@ -338,6 +361,12 @@ class _ProductCandidateFactory:
             labels_tags=[],
             snapshot=None,
         )
+        mexico_signals = infer_mexico_nutrition_signals(text_parts=[product_name, raw_text], snapshot=None)
+        notes = [
+            "No exact packaged-food match was found yet.",
+            "Use this read directionally and rescan when a clearer barcode or label is available.",
+        ]
+        notes.extend(f"Mexico label signal: {title}." for title in mexico_signal_titles(mexico_signals))
         resolution = ProductResolution(
             canonicalProductID=None,
             source=source,
@@ -356,12 +385,10 @@ class _ProductCandidateFactory:
             claims=[],
             tags=tags,
             alternativeIDs=[],
-            notes=[
-                "No exact packaged-food match was found yet.",
-                "Use this read directionally and rescan when a clearer barcode or label is available.",
-            ],
+            notes=notes,
             lookupTokens=_lookup_tokens(product_name, "Directional read", tag_text, []),
             resolution=resolution,
+            mexicoNutritionSignals=mexico_signals,
         )
         confidence = ConfidenceLevel.low if confidence_score < 0.6 else ConfidenceLevel.medium
         product = ensure_product_resolution_semantics(
@@ -378,6 +405,57 @@ class _ProductCandidateFactory:
             identity_source=source,
             fact_sources=(source,),
             fallback_reason=fallback_reason,
+        )
+
+
+class _MexicoSeedCatalogStep:
+    def __init__(self) -> None:
+        self._products = _mexico_seed_products()
+
+    def resolve(self, input: ScanInput) -> ResolverResult | None:
+        if input.productTypeHint not in {None, ProductType.food}:
+            return None
+
+        barcode = _normalize_barcode(input.barcode)
+        if barcode:
+            for product in self._products:
+                if product.barcode == barcode:
+                    return self._result(product, confidence=ConfidenceLevel.high, score=0.87)
+
+        raw_text = (input.rawText or "").strip()
+        if not raw_text:
+            return None
+
+        query_tokens = _meaningful_tokens(raw_text)
+        if len(query_tokens) < 2:
+            return None
+
+        scored = [
+            (_token_overlap(query_tokens, set(product.lookupTokens)), product)
+            for product in self._products
+        ]
+        scored.sort(key=lambda item: item[0], reverse=True)
+        top_score, top_product = scored[0]
+        if top_score < 0.34:
+            return None
+
+        confidence = ConfidenceLevel.medium if top_score < 0.62 else ConfidenceLevel.high
+        return self._result(top_product, confidence=confidence, score=max(0.62, min(0.88, top_score + 0.26)))
+
+    def _result(self, product: ProductCandidate, *, confidence: ConfidenceLevel, score: float) -> ResolverResult:
+        product = ensure_product_resolution_semantics(
+            product,
+            confidence=confidence,
+            identity_source=ProductResolutionSource.localCatalog,
+            fact_sources=(ProductResolutionSource.localCatalog,),
+        )
+        return ResolverResult(
+            product=product,
+            confidence=confidence,
+            resolution_confidence=score,
+            is_directional=False,
+            identity_source=ProductResolutionSource.localCatalog,
+            fact_sources=(ProductResolutionSource.localCatalog,),
         )
 
 
@@ -847,14 +925,22 @@ class _USDANutritionEnrichmentStep:
         )
 
     def _search_food(self, product: ProductCandidate, input: ScanInput) -> dict[str, Any] | None:
+        api_key = (self._settings.usda_api_key or "").strip()
+        if not api_key:
+            return None
         try:
+            # USDA FoodData Central accepts `X-Api-Key` as an alternative to
+            # the `api_key` query string. Keeping the key out of the URL
+            # prevents accidental disclosure through access logs, upstream
+            # retries, or exception messages that capture the full URL.
             payload = self._post_json(
-                f"{self._settings.usda_base_url}/foods/search?api_key={quote_plus(self._settings.usda_api_key or '')}",
+                f"{self._settings.usda_base_url}/foods/search",
                 {
                     "query": " ".join(part for part in [product.brand, product.name] if part).strip() or product.name,
                     "dataType": ["Branded"],
                     "pageSize": 5,
                 },
+                extra_headers={"X-Api-Key": api_key},
             )
         except (HTTPError, URLError, TimeoutError):
             return None
@@ -902,6 +988,146 @@ def _append_fact_source(
     if source in sources:
         return sources
     return (*sources, source)
+
+
+def _mexico_seed_products() -> list[ProductCandidate]:
+    def product(
+        *,
+        id: str,
+        name: str,
+        brand: str,
+        barcode: str | None,
+        headline: str,
+        ingredients: list[str],
+        claims: list[str],
+        tags: list[IngredientTag],
+        tokens: list[str],
+        snapshot: NutritionSnapshot,
+        alternatives: list[str] | None = None,
+    ) -> ProductCandidate:
+        signals = infer_mexico_nutrition_signals(
+            text_parts=[name, brand, " ".join(ingredients), " ".join(claims)],
+            snapshot=snapshot,
+        )
+        notes = ["Source: WellnessLens Mexico seed catalog."]
+        notes.extend(f"Mexico label signal: {title}." for title in mexico_signal_titles(signals))
+        return ProductCandidate(
+            id=f"mx:{id}",
+            name=name,
+            brand=brand,
+            productType=ProductType.food,
+            barcode=barcode,
+            headline=headline,
+            ingredients=[Ingredient(name=item) for item in ingredients],
+            claims=claims,
+            tags=tags,
+            alternativeIDs=alternatives or [],
+            notes=notes,
+            lookupTokens=sorted(set(_meaningful_tokens(" ".join([name, brand, *ingredients, *claims, *tokens])))),
+            resolution=ProductResolution(
+                canonicalProductID=f"mx:{id}",
+                source=ProductResolutionSource.localCatalog,
+                confidence=0.82,
+                nutritionSnapshot=snapshot,
+                isDirectional=False,
+            ),
+            mexicoNutritionSignals=signals,
+        )
+
+    return [
+        product(
+            id="yogurt-griego-natural",
+            name="Yogurt griego natural sin azucar",
+            brand="Catalogo Mexico",
+            barcode=None,
+            headline="Base practica de super con proteina alta y baja azucar.",
+            ingredients=["Leche descremada", "Cultivos lacticos"],
+            claims=["Alto en proteina", "Sin azucar anadida"],
+            tags=[IngredientTag.proteinDense, IngredientTag.probiotic],
+            tokens=["yogurt griego", "yoghurt griego", "natural", "sin azucar", "proteina"],
+            snapshot=NutritionSnapshot(
+                energy_kcal_per_100g=92,
+                protein_g_per_100g=10.5,
+                carbs_g_per_100g=4.0,
+                fat_g_per_100g=2.2,
+                sugars_g_per_100g=3.8,
+                fiber_g_per_100g=0.0,
+                sodium_mg_per_100g=58,
+                caffeine_mg_per_100g=None,
+                nova_group=3,
+            ),
+            alternatives=["mx:barra-avena-fibra"],
+        ),
+        product(
+            id="bebida-energetica-azucar",
+            name="Bebida energetica con azucar",
+            brand="Catalogo Mexico",
+            barcode=None,
+            headline="Impulso rapido con sellos que conviene tratar como ocasional.",
+            ingredients=["Agua carbonatada", "Azucar", "Cafeina", "Saborizantes"],
+            claims=["Exceso azucares", "Contiene cafeina", "Evitar en ninos"],
+            tags=[IngredientTag.sugarSpike, IngredientTag.stimulant, IngredientTag.ultraProcessed],
+            tokens=["bebida energetica", "energy drink", "azucar", "cafeina", "exceso azucares"],
+            snapshot=NutritionSnapshot(
+                energy_kcal_per_100g=52,
+                protein_g_per_100g=0,
+                carbs_g_per_100g=13,
+                fat_g_per_100g=0,
+                sugars_g_per_100g=13,
+                fiber_g_per_100g=0,
+                sodium_mg_per_100g=32,
+                caffeine_mg_per_100g=58,
+                nova_group=4,
+            ),
+            alternatives=["mx:yogurt-griego-natural", "mx:barra-avena-fibra"],
+        ),
+        product(
+            id="barra-avena-fibra",
+            name="Barra de avena con fibra",
+            brand="Catalogo Mexico",
+            barcode=None,
+            headline="Snack de paso con mejor soporte de fibra que una barra dulce comun.",
+            ingredients=["Avena", "Almendra", "Linaza", "Canela"],
+            claims=["Fuente de fibra"],
+            tags=[IngredientTag.fiberSupport],
+            tokens=["barra de avena", "avena", "fibra", "linaza", "snack"],
+            snapshot=NutritionSnapshot(
+                energy_kcal_per_100g=365,
+                protein_g_per_100g=7,
+                carbs_g_per_100g=45,
+                fat_g_per_100g=12,
+                sugars_g_per_100g=6,
+                fiber_g_per_100g=7,
+                sodium_mg_per_100g=120,
+                caffeine_mg_per_100g=None,
+                nova_group=3,
+            ),
+            alternatives=["mx:yogurt-griego-natural"],
+        ),
+        product(
+            id="agua-fresca-azucar",
+            name="Agua fresca endulzada",
+            brand="Catalogo Mexico",
+            barcode=None,
+            headline="Opcion comun de comida corrida, pero la carga de azucar puede pegar rapido.",
+            ingredients=["Agua", "Fruta", "Azucar"],
+            claims=["Exceso azucares"],
+            tags=[IngredientTag.sugarSpike],
+            tokens=["agua fresca", "jamaica", "horchata", "limonada", "azucar"],
+            snapshot=NutritionSnapshot(
+                energy_kcal_per_100g=48,
+                protein_g_per_100g=0,
+                carbs_g_per_100g=12,
+                fat_g_per_100g=0,
+                sugars_g_per_100g=11,
+                fiber_g_per_100g=0,
+                sodium_mg_per_100g=8,
+                caffeine_mg_per_100g=None,
+                nova_group=2,
+            ),
+            alternatives=["mx:yogurt-griego-natural"],
+        ),
+    ]
 
 
 def _normalize_barcode(value: Any) -> str:

@@ -2,6 +2,27 @@
 
 Estos PRDs están adaptados al estado real del repo después del milestone foundation-first.
 
+## Carril activo: WellnessLens Mexico
+
+### Estado
+En implementacion sobre la arquitectura existente, sin redisenar la app.
+
+### Objetivo
+Convertir WellnessLens en un scanner de decision rapida para Mexico: etiquetas, sellos NOM-051, productos comunes, menus y contexto personal.
+
+### Entregables actuales
+- `MexicoNutritionSignals` compartido entre backend e iOS
+- deteccion deterministica de sellos/frases NOM-051
+- catalogo semilla mexicano antes del fallback direccional
+- endpoint `POST /v1/nutrition/extract` en `agent-service`
+- UI compacta de senales Mexico en Analysis
+
+### Guardrails
+- Gemini/Vertex extrae y explica, pero el motor deterministico conserva autoridad para score, fit, watchouts y confianza
+- no borrar `DemoScanService`; ocultar copy demo/dev en producto
+- mantener `ScanAnalysis` / `AnalysisEnvelope`
+- no mezclar prompt de scan verdict con coach
+
 ## PRD 1. Scan Verdict Surface
 
 ### Estado
@@ -110,7 +131,7 @@ Formalizar el `Coach Agent` como servicio independiente que consuma `ScanVerdict
 ## PRD 4. Product Graph / Resolution Layer
 
 ### Estado
-En progreso en el repo real.
+Fundacion avanzada en el repo real; se sigue ampliando para Mexico launch.
 
 Ya implementado:
 - `WellnessLens/Domain/ProductGraph.swift` con `ProductReference` y `ProductGraphIndex`
@@ -120,12 +141,11 @@ Ya implementado:
 - capa compartida de `resolution_semantics` entre backend e iOS
 
 Todavia pendiente:
-- manual correction UX
-- richer confidence / provenance UI
 - expansion adicional de providers
+- aumentar cobertura del catalogo semilla mexicano con datos reales
 
 ### Objetivo
-Salir del modo demo de catálogo y resolución heurística.
+Salir del modo de catalogo chico y resolucion heuristica, priorizando cobertura practica para decisiones reales en Mexico.
 
 ### Contexto
 - ya existe foundation de identity / product graph
@@ -166,11 +186,12 @@ Salir del modo demo de catálogo y resolución heurística.
 ## PRD 5. Nutrient Intelligence Engine
 
 ### Objetivo
-Reemplazar el scoring por tags con un motor más serio basado en nutrientes/contexto.
+Reemplazar gradualmente el scoring por tags con un motor más serio basado en nutrientes/contexto.
 
 ### Contexto
 - hoy el fallback usa `AnalysisEngine` legacy
 - LILA v2 ya soporta estructura mucho más rica
+- el repo ya consume snapshots nutricionales de providers y ahora agrega senales Mexico/NOM-051 como capa auditable
 
 ### Entregables
 - engine vectorial mínimo con:

@@ -17,6 +17,7 @@ from app.contracts import (
     MemoryItem,
     ScanDecision,
     ScanEvent,
+    SubscriptionGrant,
     UserContext,
     UserProfile,
 )
@@ -42,6 +43,7 @@ class UserState:
     favorites: dict[str, FavoriteItem] = field(default_factory=dict)
     memory_items: dict[str, MemoryItem] = field(default_factory=dict)
     scan_decisions: dict[str, ScanDecision] = field(default_factory=dict)
+    subscription_grant: SubscriptionGrant | None = None
 
 
 class StateRepository(Protocol):
@@ -53,6 +55,9 @@ class StateRepository(Protocol):
     def save_favorite(self, install_id: str, favorite: FavoriteItem) -> None: ...
     def upsert_memory_items(self, install_id: str, memory_items: list[MemoryItem]) -> None: ...
     def sync_history(self, request: HistorySyncRequest) -> UserState: ...
+    def delete_state(self, install_id: str) -> None: ...
+    def save_subscription_grant(self, install_id: str, grant: SubscriptionGrant) -> None: ...
+    def get_subscription_grant(self, install_id: str) -> SubscriptionGrant | None: ...
 
 
 def _payload_equals(left, right) -> bool:
@@ -151,6 +156,19 @@ class InMemoryStateRepository:
             state = self._states[request.installID]
             return _merge_history_into_state(state, request)
 
+    def delete_state(self, install_id: str) -> None:
+        with self._lock:
+            self._states.pop(install_id, None)
+
+    def save_subscription_grant(self, install_id: str, grant: SubscriptionGrant) -> None:
+        with self._lock:
+            self._states[install_id].subscription_grant = grant
+
+    def get_subscription_grant(self, install_id: str) -> SubscriptionGrant | None:
+        with self._lock:
+            state = self._states.get(install_id)
+            return state.subscription_grant if state is not None else None
+
 
 class FirestoreStateRepository:
     def __init__(self) -> None:
@@ -229,6 +247,34 @@ class FirestoreStateRepository:
         for item in state.scan_decisions.values():
             root.collection("scan_decisions").document(item.id).set(item.model_dump(by_alias=True, mode="json"))
         return state
+
+    def delete_state(self, install_id: str) -> None:
+        root = self._root(install_id)
+        for name in (
+            "legacy_checkins",
+            "checkin_events",
+            "scan_events",
+            "favorites",
+            "memory_items",
+            "scan_decisions",
+        ):
+            for doc in root.collection(name).stream():
+                doc.reference.delete()
+        # Also clear the subscription_grant sub-document so accountDeletion
+        # leaves no trace on the server side.
+        root.collection("subscription").document("grant").delete()
+        root.delete()
+
+    def save_subscription_grant(self, install_id: str, grant: SubscriptionGrant) -> None:
+        self._root(install_id).collection("subscription").document("grant").set(
+            grant.model_dump(by_alias=True, mode="json")
+        )
+
+    def get_subscription_grant(self, install_id: str) -> SubscriptionGrant | None:
+        doc = self._root(install_id).collection("subscription").document("grant").get()
+        if not doc.exists:
+            return None
+        return SubscriptionGrant.model_validate(doc.to_dict())
 
 
 def build_repository(settings: Settings) -> StateRepository:

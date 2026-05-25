@@ -240,6 +240,26 @@ class ScanVerdictNutritionSnapshot(ContractModel):
     novaGroup: int | None = Field(default=None, alias="nova_group")
 
 
+class MexicoWarningLabel(str, Enum):
+    excessCalories = "excess_calories"
+    excessSugars = "excess_sugars"
+    excessSodium = "excess_sodium"
+    excessSaturatedFat = "excess_saturated_fat"
+    excessTransFat = "excess_trans_fat"
+
+
+class MexicoNutritionSignals(ContractModel):
+    warningLabels: list[MexicoWarningLabel] = Field(default_factory=list, alias="warning_labels")
+    containsCaffeineWarning: bool = Field(default=False, alias="contains_caffeine_warning")
+    containsSweetenerWarning: bool = Field(default=False, alias="contains_sweetener_warning")
+    detectedPhrases: list[str] = Field(default_factory=list, alias="detected_phrases")
+    source: str = "deterministic"
+
+    @property
+    def has_signal(self) -> bool:
+        return bool(self.warningLabels or self.containsCaffeineWarning or self.containsSweetenerWarning or self.detectedPhrases)
+
+
 class ScanVerdictResolvedProduct(ContractModel):
     productId: str | None = Field(default=None, alias="product_id")
     canonicalProductID: str | None = Field(default=None, alias="canonical_product_id")
@@ -250,6 +270,7 @@ class ScanVerdictResolvedProduct(ContractModel):
     confidence: float | None = Field(default=None, ge=0, le=1)
     ingredients: list[str] = Field(default_factory=list)
     nutritionSnapshot: ScanVerdictNutritionSnapshot | None = Field(default=None, alias="nutrition_snapshot")
+    mexicoNutritionSignals: MexicoNutritionSignals | None = Field(default=None, alias="mexico_nutrition_signals")
     isDirectional: bool = Field(default=False, alias="is_directional")
 
 
@@ -264,6 +285,36 @@ class ScanVerdictRequest(ContractModel):
 
 class ScanVerdictResponse(ContractModel):
     verdict: ScanVerdict
+
+
+class NutritionExtractionSource(str, Enum):
+    labelText = "label_text"
+    manualLabel = "manual_label"
+    menuText = "menu_text"
+    mealNote = "meal_note"
+
+
+class NutritionExtractionRequest(ContractModel):
+    source: NutritionExtractionSource
+    text: str = Field(min_length=1, max_length=8000)
+    locale: str = Field(default="es-MX", max_length=16)
+
+
+class NutritionExtractionResult(ContractModel):
+    productName: str | None = None
+    brand: str | None = None
+    warningLabels: list[MexicoWarningLabel] = Field(default_factory=list, alias="warning_labels")
+    containsCaffeineWarning: bool = Field(default=False, alias="contains_caffeine_warning")
+    containsSweetenerWarning: bool = Field(default=False, alias="contains_sweetener_warning")
+    ingredients: list[str] = Field(default_factory=list, max_length=40)
+    servingText: str | None = Field(default=None, alias="serving_text", max_length=160)
+    confidence: float = Field(ge=0, le=1)
+    notes: list[str] = Field(default_factory=list, max_length=8)
+    source: str = "deterministic-local"
+
+
+class NutritionExtractionResponse(ContractModel):
+    extraction: NutritionExtractionResult
 
 
 class CoachTone(str, Enum):

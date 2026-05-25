@@ -43,7 +43,7 @@ struct BackendAdminView: View {
                 runtimeRow(label: "Firebase", value: model.services.configuration.isFirebaseEnabled ? "Enabled" : "Disabled")
                 runtimeRow(label: "Firebase options plist", value: model.services.configuration.firebaseOptionsPlistName ?? "GoogleService-Info")
                 runtimeRow(label: "Firebase bootstrap", value: model.services.firebaseBootstrapState.title)
-                runtimeRow(label: "Demo scans", value: model.services.configuration.useDemoData ? "Enabled" : "Disabled")
+                runtimeRow(label: "Sample scans", value: model.services.configuration.useDemoData ? "Enabled" : "Disabled")
                 runtimeRow(label: "StoreKit", value: model.services.configuration.isStoreKitEnabled ? "Enabled" : "Disabled")
                 runtimeRow(
                     label: "App Check debug provider",
@@ -88,7 +88,7 @@ struct BackendAdminView: View {
                         flowPills(config.killSwitchRows)
                     }
                 } else {
-                    Text("No remote client config has been applied yet. The app is running on bundled defaults and local fallback.")
+                    Text("No remote client config has been applied yet. The app is running on bundled defaults and the local safety path.")
                         .font(WLTypography.body)
                         .foregroundStyle(WLPalette.inkSoft)
                 }
@@ -101,7 +101,7 @@ struct BackendAdminView: View {
             VStack(alignment: .leading, spacing: WLSpacing.m) {
                 WLSectionHeader(
                     title: "Backend surfaces",
-                    subtitle: "Each critical surface shows its last known state, detail, and fallback count.",
+                    subtitle: "Each critical surface shows its last known state, detail, and recovery count.",
                     systemImage: "waveform.path.ecg.rectangle"
                 )
 
@@ -130,7 +130,7 @@ struct BackendAdminView: View {
 
                         HStack(spacing: WLSpacing.s) {
                             WLPill(title: "Attempts \(status.attempts)", tone: .neutral)
-                            WLPill(title: "Fallbacks \(status.fallbackCount)", tone: status.fallbackCount == 0 ? .soft : .accent)
+                            WLPill(title: "Recoveries \(status.fallbackCount)", tone: status.fallbackCount == 0 ? .soft : .accent)
                             if let updatedAt = status.updatedAt {
                                 WLPill(title: updatedAt.formatted(date: .omitted, time: .shortened), tone: .soft)
                             }

@@ -161,10 +161,31 @@ struct SaveFavoriteItemRequest: Codable {
     let installID: String
 }
 
+/// Mirrors `backend-api/app/contracts.py::SubscriptionReportRequest`.
+///
+/// Sent after StoreKit 2 confirms a verified transaction so the backend can
+/// keep a server-side audit trail of entitlements. iOS remains the
+/// authoritative entitlement check until server-side signature verification
+/// lands; this is strictly an additive audit path.
+struct SubscriptionReportRequest: Codable {
+    let installID: String
+    let productID: String
+    let originalTransactionID: String
+    let transactionID: String
+    let purchasedAt: Date
+    let expiresAt: Date?
+    let revokedAt: Date?
+    let tier: String
+    let rawTransactionJWS: String?
+}
+
 protocol IdentityProviding: Sendable {
     func prepare() async
     func installID() async -> String
     func authorizationHeader() async -> String?
+    /// Revoke the current identity so that the next session starts fresh.
+    /// Must be safe to call even when no identity has been established yet.
+    func deleteAccount() async
 }
 
 protocol AppCheckTokenProviding: Sendable {
@@ -195,6 +216,14 @@ protocol WellnessBackendAPI: Sendable {
     func saveScanDecision(_ decision: ScanDecision) async throws
     func saveFavoriteItem(_ favorite: FavoriteItem) async throws
     func upsertMemoryItems(_ memoryItems: [MemoryItem]) async throws
+    /// Ask the backend to erase every persisted record for this install.
+    /// Implements App Store Review Guideline 5.1.1(v).
+    func deleteAccount() async throws
+    /// Report a verified StoreKit 2 transaction so the backend can keep an
+    /// audit trail of entitlements. Expected to be fire-and-forget: failures
+    /// must not prevent the user from getting their entitlement because iOS
+    /// StoreKit is the authoritative source of truth today.
+    func reportSubscription(_ report: SubscriptionReportRequest) async throws
 }
 
 enum BackendClientError: LocalizedError {
@@ -263,6 +292,10 @@ actor LocalInstallIdentityProvider: IdentityProviding {
     func authorizationHeader() async -> String? {
         nil
     }
+
+    func deleteAccount() async {
+        defaults.removeObject(forKey: key)
+    }
 }
 
 #if canImport(FirebaseAuth)
@@ -290,6 +323,14 @@ actor FirebaseIdentityProvider: IdentityProviding {
         } catch {
             return nil
         }
+    }
+
+    func deleteAccount() async {
+        if let currentUser = Auth.auth().currentUser {
+            _ = try? await currentUser.delete()
+        }
+        try? Auth.auth().signOut()
+        await fallback.deleteAccount()
     }
 }
 #endif
@@ -516,6 +557,22 @@ final class HTTPWellnessBackendAPI: WellnessBackendAPI, @unchecked Sendable {
         )
     }
 
+    func deleteAccount() async throws {
+        let _: EmptyResponse = try await send(path: "v1/profile", method: "DELETE")
+    }
+
+    func reportSubscription(_ report: SubscriptionReportRequest) async throws {
+        // The server returns the full `SubscriptionGrant` record, but the
+        // iOS side does not consume it yet (StoreKit remains authoritative).
+        // `EmptyResponse` is an empty decodable struct that accepts any JSON
+        // object regardless of its keys, so we drop the body cheaply.
+        let _: EmptyResponse = try await send(
+            path: "v1/subscriptions/report",
+            method: "POST",
+            body: report
+        )
+    }
+
     private func send<RequestBody: Encodable, ResponseBody: Decodable>(
         path: String,
         method: String,
@@ -626,9 +683,169 @@ final class CloudScanService: ScanService, @unchecked Sendable {
 final class StoreKitSubscriptionController: SubscriptionClient {
     private let configuration: RuntimeConfiguration
     private(set) var status: SubscriptionStatus = .free
+    private var cachedProducts: [String: Product] = [:]
+    private var productsLoadTask: Task<Void, Never>?
+    private var transactionListener: Task<Void, Never>?
+    /// Optional backend client. When set, verified transactions are reported
+    /// as a fire-and-forget audit trail. Never blocks entitlement delivery.
+    private let backendAPI: WellnessBackendAPI?
+    /// Optional identity provider so the backend report carries the same
+    /// install id that the rest of the API already uses.
+    private let identityProvider: IdentityProviding?
 
-    init(configuration: RuntimeConfiguration) {
+    init(
+        configuration: RuntimeConfiguration,
+        backendAPI: WellnessBackendAPI? = nil,
+        identityProvider: IdentityProviding? = nil
+    ) {
         self.configuration = configuration
+        self.backendAPI = backendAPI
+        self.identityProvider = identityProvider
+        // Start the long-running Transaction.updates listener so renewals,
+        // cancellations, refunds, and cross-device purchases are reflected
+        // while the app is open. Apple requires this for StoreKit 2.
+        transactionListener = Task { [weak self] in
+            for await update in Transaction.updates {
+                await self?.handle(transactionUpdate: update)
+            }
+        }
+
+        // Fire-and-forget product load so the paywall has localized prices
+        // without blocking UI.
+        productsLoadTask = Task { [weak self] in
+            await self?.reloadProducts()
+        }
+
+        // Seed status from any currently valid entitlements without forcing a
+        // full `AppStore.sync()` (that requires a user gesture / Apple ID).
+        Task { [weak self] in
+            await self?.reconcileCurrentEntitlements()
+        }
+    }
+
+    deinit {
+        transactionListener?.cancel()
+        productsLoadTask?.cancel()
+    }
+
+    private var productIDs: [String] {
+        [configuration.plusProductID, configuration.proProductID].compactMap { $0 }
+    }
+
+    private func tier(forProductID id: String) -> SubscriptionStatus? {
+        if id == configuration.proProductID { return .pro }
+        if id == configuration.plusProductID { return .plus }
+        return nil
+    }
+
+    private func productID(for target: SubscriptionStatus) -> String? {
+        switch target {
+        case .free: nil
+        case .plus: configuration.plusProductID
+        case .pro: configuration.proProductID
+        }
+    }
+
+    private func reloadProducts() async {
+        guard !productIDs.isEmpty else { return }
+        do {
+            let products = try await Product.products(for: productIDs)
+            cachedProducts = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
+        } catch {
+            // Products can fail to load offline or before App Store Connect
+            // approves the submission. The paywall falls back to demo copy.
+        }
+    }
+
+    private func handle(transactionUpdate: VerificationResult<Transaction>) async {
+        switch transactionUpdate {
+        case let .verified(transaction):
+            await apply(verifiedTransaction: transaction)
+            await transaction.finish()
+        case .unverified:
+            // Unverified updates are discarded without finishing; Apple will
+            // redeliver them if the signature actually becomes trusted later.
+            break
+        }
+    }
+
+    private func apply(verifiedTransaction transaction: Transaction) async {
+        guard let tier = tier(forProductID: transaction.productID) else { return }
+
+        // Emit a best-effort audit report to the backend regardless of the
+        // final status. Doing this before the local mutation lets renewals
+        // and revocations reach the backend even when the local status does
+        // not change (for example, when the user is already on the target
+        // tier).
+        await reportToBackendIfPossible(transaction: transaction, tier: tier)
+
+        if transaction.revocationDate != nil {
+            // The user was refunded or their family sharing was revoked.
+            // Drop the matching tier if it is currently granted.
+            if status == tier {
+                status = .free
+            }
+            return
+        }
+
+        if let expiration = transaction.expirationDate, expiration <= .now {
+            if status == tier {
+                status = .free
+            }
+            return
+        }
+
+        if tier.rank > status.rank {
+            status = tier
+        }
+    }
+
+    private func reportToBackendIfPossible(
+        transaction: Transaction,
+        tier: SubscriptionStatus
+    ) async {
+        guard let backendAPI, let identityProvider else { return }
+
+        let installID = await identityProvider.installID()
+        let report = SubscriptionReportRequest(
+            installID: installID,
+            productID: transaction.productID,
+            originalTransactionID: String(transaction.originalID),
+            transactionID: String(transaction.id),
+            purchasedAt: transaction.purchaseDate,
+            expiresAt: transaction.expirationDate,
+            revokedAt: transaction.revocationDate,
+            tier: tier.rawValue,
+            rawTransactionJWS: nil
+        )
+
+        // Fire-and-forget: this must never block entitlement delivery. The
+        // iOS client is still the authoritative entitlement source; the
+        // backend report is an audit trail.
+        do {
+            try await backendAPI.reportSubscription(report)
+        } catch {
+            // Intentionally swallowed. A durable retry queue lives in a
+            // follow-up slice once the grant also becomes authoritative.
+        }
+    }
+
+    private func reconcileCurrentEntitlements() async {
+        var highest: SubscriptionStatus = .free
+        for await entitlement in Transaction.currentEntitlements {
+            guard case let .verified(transaction) = entitlement,
+                  let tier = tier(forProductID: transaction.productID),
+                  transaction.revocationDate == nil else {
+                continue
+            }
+            if let expiration = transaction.expirationDate, expiration <= .now {
+                continue
+            }
+            if tier.rank > highest.rank {
+                highest = tier
+            }
+        }
+        status = highest
     }
 
     func purchase(_ target: SubscriptionStatus) async -> SubscriptionStatus {
@@ -636,16 +853,32 @@ final class StoreKitSubscriptionController: SubscriptionClient {
             return status
         }
 
+        let product: Product
+        if let cached = cachedProducts[productID] {
+            product = cached
+        } else {
+            do {
+                let products = try await Product.products(for: [productID])
+                guard let fetched = products.first else { return status }
+                cachedProducts[productID] = fetched
+                product = fetched
+            } catch {
+                return status
+            }
+        }
+
         do {
-            let products = try await Product.products(for: [productID])
-            guard let product = products.first else { return status }
             let result = try await product.purchase()
             switch result {
             case let .success(verification):
                 switch verification {
-                case .verified:
-                    status = target
+                case let .verified(transaction):
+                    await apply(verifiedTransaction: transaction)
+                    await transaction.finish()
                 case .unverified:
+                    // Apple instructs: do not grant access and do not finish
+                    // unverified transactions. They may become verified later
+                    // and arrive via Transaction.updates.
                     break
                 }
             case .userCancelled, .pending:
@@ -653,44 +886,95 @@ final class StoreKitSubscriptionController: SubscriptionClient {
             @unknown default:
                 break
             }
-            return status
         } catch {
-            return status
+            // Purchase failed (network, StoreKit sandbox not ready, etc.).
+            // Keep the previous status; the caller can retry.
         }
+        return status
     }
 
     func restore() async -> SubscriptionStatus {
         do {
             try await AppStore.sync()
         } catch {
-            return status
+            // If sync fails the current entitlements snapshot still reflects
+            // what Apple has on record, so keep going.
         }
-
-        var restored: SubscriptionStatus = .free
-
-        for await entitlement in Transaction.currentEntitlements {
-            guard case let .verified(transaction) = entitlement else { continue }
-            if transaction.productID == configuration.proProductID {
-                restored = .pro
-                break
-            }
-            if transaction.productID == configuration.plusProductID {
-                restored = .plus
-            }
-        }
-
-        status = restored
+        await reconcileCurrentEntitlements()
         return status
     }
 
-    private func productID(for status: SubscriptionStatus) -> String? {
-        switch status {
-        case .free:
-            nil
-        case .plus:
-            configuration.plusProductID
-        case .pro:
-            configuration.proProductID
+    func availablePlans() async -> [SubscriptionPlan] {
+        if cachedProducts.isEmpty {
+            await reloadProducts()
         }
+
+        let orderedTiers: [SubscriptionStatus] = [.plus, .pro]
+        return orderedTiers.compactMap { tier -> SubscriptionPlan? in
+            guard let id = productID(for: tier),
+                  let product = cachedProducts[id] else {
+                return nil
+            }
+            return Self.plan(for: tier, product: product)
+        }
+    }
+
+    private static func plan(for tier: SubscriptionStatus, product: Product) -> SubscriptionPlan {
+        let period = Self.periodCopy(for: product)
+        let offer = Self.introductoryOffer(for: product)
+        let renewal: String
+        if let offer {
+            renewal = "\(offer) Then \(product.displayPrice) \(period). Auto-renews until cancelled in Settings > Apple ID > Subscriptions. Payment is charged to your Apple ID."
+        } else {
+            renewal = "\(product.displayPrice) \(period). Auto-renews until cancelled in Settings > Apple ID > Subscriptions. Payment is charged to your Apple ID."
+        }
+        return SubscriptionPlan(
+            tier: tier,
+            productID: product.id,
+            displayPrice: product.displayPrice,
+            displayPeriod: period,
+            introductoryOffer: offer,
+            renewalDisclosure: renewal,
+            isDemo: false
+        )
+    }
+
+    private static func periodCopy(for product: Product) -> String {
+        guard let subscription = product.subscription else {
+            return ""
+        }
+        let unit: String
+        switch subscription.subscriptionPeriod.unit {
+        case .day: unit = subscription.subscriptionPeriod.value == 1 ? "day" : "\(subscription.subscriptionPeriod.value) days"
+        case .week: unit = subscription.subscriptionPeriod.value == 1 ? "week" : "\(subscription.subscriptionPeriod.value) weeks"
+        case .month: unit = subscription.subscriptionPeriod.value == 1 ? "month" : "\(subscription.subscriptionPeriod.value) months"
+        case .year: unit = subscription.subscriptionPeriod.value == 1 ? "year" : "\(subscription.subscriptionPeriod.value) years"
+        @unknown default: unit = "billing period"
+        }
+        return "per \(unit)"
+    }
+
+    private static func introductoryOffer(for product: Product) -> String? {
+        guard let intro = product.subscription?.introductoryOffer else { return nil }
+        let periodUnit: String
+        switch intro.period.unit {
+        case .day: periodUnit = intro.period.value == 1 ? "day" : "\(intro.period.value) days"
+        case .week: periodUnit = intro.period.value == 1 ? "week" : "\(intro.period.value) weeks"
+        case .month: periodUnit = intro.period.value == 1 ? "month" : "\(intro.period.value) months"
+        case .year: periodUnit = intro.period.value == 1 ? "year" : "\(intro.period.value) years"
+        @unknown default: periodUnit = "introductory period"
+        }
+        // `Product.SubscriptionOffer.PaymentMode` is a RawRepresentable struct
+        // rather than a closed enum, so compare values directly.
+        if intro.paymentMode == .freeTrial {
+            return "\(periodUnit) free trial."
+        }
+        if intro.paymentMode == .payAsYouGo {
+            return "Intro: \(intro.displayPrice) \(periodUnit)."
+        }
+        if intro.paymentMode == .payUpFront {
+            return "Intro: \(intro.displayPrice) for \(periodUnit)."
+        }
+        return nil
     }
 }

@@ -498,7 +498,7 @@ private struct CheckInWeeklyNarrativeCard: View {
                         tone: .soft
                     )
                 } else {
-                    Text("Preview: weekly narrative is ready, but the deeper protect/reduce plan unlocks with Plus.")
+                    Text("The weekly narrative is ready, and the deeper protect/reduce plan unlocks with Plus.")
                         .font(WLTypography.caption)
                         .foregroundStyle(WLPalette.inkSoft)
 

@@ -1,10 +1,10 @@
 {
+  "createdAt": 777778017.0,
   "id": "0f1c631f-df74-5d41-b4ef-3fc2ef5813bd",
   "kind": "staple",
-  "title": "Protein-forward breakfast",
-  "summary": "A stronger first anchor is helping steady the rest of the day.",
+  "lastReferencedAt": 777778017.0,
   "relatedProductID": "breakfast-anchor",
   "relatedProductName": "Balanced Protein Yogurt",
-  "createdAt": 777778017.0,
-  "lastReferencedAt": 777778017.0
+  "summary": "A stronger first anchor is helping steady the rest of the day.",
+  "title": "Protein-forward breakfast"
 }

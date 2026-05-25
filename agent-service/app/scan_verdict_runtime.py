@@ -35,6 +35,7 @@ from app.contracts import (
     ScanVerdictWatchout,
     ScanVerdictWatchoutSeverity,
 )
+from app.prompt_safety import sanitize_prompt_text
 
 DEFAULT_ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "scan_verdict"
 SYSTEM_PROMPT_FILE = "LILA_SystemPrompt.md"
@@ -158,7 +159,21 @@ def get_scan_verdict_assets(asset_dir: str | None = None) -> ScanVerdictRuntimeA
 
 
 def build_scan_verdict_task_prompt(request: ScanVerdictRequest) -> str:
-    structured_summary = request.structuredSummary.strip() if request.structuredSummary else "Sin structuredSummary adicional."
+    structured_summary = sanitize_prompt_text(
+        request.structuredSummary,
+        max_length=1500,
+        fallback="Sin structuredSummary adicional.",
+    )
+    user_context_summary = sanitize_prompt_text(
+        request.userContextSummary,
+        max_length=2000,
+        fallback="Sin contexto adicional.",
+    )
+    product_name = sanitize_prompt_text(
+        request.productName,
+        max_length=240,
+        fallback="(sin nombre de producto)",
+    )
     resolved_product_lines: list[str] = []
     if request.resolvedProduct:
         rp = request.resolvedProduct
@@ -198,10 +213,10 @@ def build_scan_verdict_task_prompt(request: ScanVerdictRequest) -> str:
             "Evalúa este scan usando el UserContext inyectado y responde solo con JSON válido.",
             "",
             "USER CONTEXT INJECTION",
-            request.userContextSummary.strip() or "Sin contexto adicional.",
+            user_context_summary,
             "",
             "TASK",
-            f"- productName: {request.productName}",
+            f"- productName: {product_name}",
             f"- source: {request.source}",
             f"- scanId: {request.scanId or 'null'}",
             f"- structuredSummary: {structured_summary}",

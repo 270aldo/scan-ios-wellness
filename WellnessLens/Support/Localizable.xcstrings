@@ -1,0 +1,216 @@
+{
+  "sourceLanguage" : "en",
+  "version" : "1.0",
+  "strings" : {
+    "Profile" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Profile" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Perfil" } }
+      }
+    },
+    "Home" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Home" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Inicio" } }
+      }
+    },
+    "Scan" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scan" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Escanear" } }
+      }
+    },
+    "Premium" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Premium" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Premium" } }
+      }
+    },
+    "Close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Cerrar" } }
+      }
+    },
+    "Cancel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Cancelar" } }
+      }
+    },
+    "Save" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Guardar" } }
+      }
+    },
+    "Edit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edit" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Editar" } }
+      }
+    },
+    "Unlock Plus" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unlock Plus" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Desbloquear Plus" } }
+      }
+    },
+    "Unlock Pro" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unlock Pro" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Desbloquear Pro" } }
+      }
+    },
+    "See Plus options" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "See Plus options" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Ver opciones Plus" } }
+      }
+    },
+    "See Pro options" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "See Pro options" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Ver opciones Pro" } }
+      }
+    },
+    "Restore purchases" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore purchases" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Restaurar compras" } }
+      }
+    },
+    "Terms of Use (EULA)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Terms of Use (EULA)" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Términos de uso (EULA)" } }
+      }
+    },
+    "Privacy Policy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Privacy Policy" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Aviso de privacidad" } }
+      }
+    },
+    "Subscriptions auto-renew until cancelled in Settings > Apple ID > Subscriptions at least 24 hours before the end of the current period. Payment is charged to your Apple ID. Any unused portion of a free trial is forfeited when you subscribe." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Subscriptions auto-renew until cancelled in Settings > Apple ID > Subscriptions at least 24 hours before the end of the current period. Payment is charged to your Apple ID. Any unused portion of a free trial is forfeited when you subscribe." } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Las suscripciones se renuevan automáticamente hasta que las canceles en Ajustes > ID de Apple > Suscripciones al menos 24 horas antes del final del periodo actual. El cargo se realiza a tu ID de Apple. Si tienes un periodo de prueba gratuito en curso, la parte no utilizada se pierde al suscribirte." } }
+      }
+    },
+    "Privacy and account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Privacy and account" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Privacidad y cuenta" } }
+      }
+    },
+    "Control what WellnessLens remembers about you." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Control what WellnessLens remembers about you." } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Controla qué recuerda WellnessLens sobre ti." } }
+      }
+    },
+    "Delete my account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete my account" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Eliminar mi cuenta" } }
+      }
+    },
+    "Deleting…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Deleting…" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Eliminando…" } }
+      }
+    },
+    "Delete account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete account" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Eliminar cuenta" } }
+      }
+    },
+    "Delete your account and all stored data?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete your account and all stored data?" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "¿Eliminar tu cuenta y todos los datos almacenados?" } }
+      }
+    },
+    "Deleting your account permanently removes your profile, scans, check-ins, memory items, favorites, routines, and any data that was synced to the backend. This cannot be undone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Deleting your account permanently removes your profile, scans, check-ins, memory items, favorites, routines, and any data that was synced to the backend. This cannot be undone." } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Eliminar tu cuenta borra de forma permanente tu perfil, escaneos, check-ins, recuerdos, favoritos, rutinas y cualquier dato sincronizado con el servidor. Esta acción no se puede deshacer." } }
+      }
+    },
+    "This permanently removes your profile, scans, check-ins, memory items, favorites, routines and HealthKit write-back history from this device and from the WellnessLens backend. You will be returned to onboarding with a fresh installation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes your profile, scans, check-ins, memory items, favorites, routines and HealthKit write-back history from this device and from the WellnessLens backend. You will be returned to onboarding with a fresh installation." } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Esta acción elimina de forma permanente tu perfil, escaneos, check-ins, recuerdos, favoritos, rutinas e historial escrito en Salud desde este dispositivo y desde el servidor de WellnessLens. Regresarás al onboarding con una instalación nueva." } }
+      }
+    },
+    "Allow AI processing for structured analysis" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow AI processing for structured analysis" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Permitir procesamiento con IA para análisis estructurado" } }
+      }
+    },
+    "Allow AI processing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow AI processing" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Permitir procesamiento con IA" } }
+      }
+    },
+    "Allow health data processing for cycle, recovery, and sleep context" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow health data processing for cycle, recovery, and sleep context" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Permitir procesamiento de datos de salud para contexto de ciclo, recuperación y sueño" } }
+      }
+    },
+    "Allow analytics" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow analytics" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Permitir análisis de uso" } }
+      }
+    },
+    "Allow notifications" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow notifications" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Permitir notificaciones" } }
+      }
+    },
+    "Offline mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Offline mode" } },
+        "es-MX" : { "stringUnit" : { "state" : "translated", "value" : "Modo sin conexión" } }
+      }
+    }
+  }
+}

@@ -7,6 +7,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from app.contracts import (
     CoachReply,
     CoachReplyRequest,
+    NutritionExtractionRequest,
+    NutritionExtractionResponse,
     ScanVerdictRequest,
     ScanVerdictResponse,
     StrategistReplyRequest,
@@ -100,6 +102,14 @@ async def scan_verdict(
     service: StrategistService = Depends(get_service),
 ) -> ScanVerdictResponse:
     return ScanVerdictResponse(verdict=service.verdict(request))
+
+
+@app.post("/v1/nutrition/extract", response_model=NutritionExtractionResponse, dependencies=[Depends(validate_client_context)])
+async def nutrition_extract(
+    request: NutritionExtractionRequest,
+    service: StrategistService = Depends(get_service),
+) -> NutritionExtractionResponse:
+    return NutritionExtractionResponse(extraction=service.nutrition_extraction(request))
 
 
 @app.post("/v1/coach/reply", response_model=CoachReply, dependencies=[Depends(validate_client_context)])

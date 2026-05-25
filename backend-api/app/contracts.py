@@ -170,6 +170,26 @@ class NutritionSnapshot(ContractModel):
     novaGroup: int | None = Field(default=None, alias="nova_group")
 
 
+class MexicoWarningLabel(str, Enum):
+    excessCalories = "excess_calories"
+    excessSugars = "excess_sugars"
+    excessSodium = "excess_sodium"
+    excessSaturatedFat = "excess_saturated_fat"
+    excessTransFat = "excess_trans_fat"
+
+
+class MexicoNutritionSignals(ContractModel):
+    warningLabels: list[MexicoWarningLabel] = Field(default_factory=list, alias="warning_labels")
+    containsCaffeineWarning: bool = Field(default=False, alias="contains_caffeine_warning")
+    containsSweetenerWarning: bool = Field(default=False, alias="contains_sweetener_warning")
+    detectedPhrases: list[str] = Field(default_factory=list, alias="detected_phrases")
+    source: str = "deterministic"
+
+    @property
+    def has_signal(self) -> bool:
+        return bool(self.warningLabels or self.containsCaffeineWarning or self.containsSweetenerWarning or self.detectedPhrases)
+
+
 class ProductResolution(ContractModel):
     canonicalProductID: str | None = Field(default=None, alias="canonical_product_id")
     source: ProductResolutionSource
@@ -193,6 +213,7 @@ class ProductCandidate(ContractModel):
     lookupTokens: list[str]
     resolution: ProductResolution | None = None
     resolutionSemantics: list[ProductResolutionSemantic] | None = Field(default=None, alias="resolution_semantics")
+    mexicoNutritionSignals: MexicoNutritionSignals | None = Field(default=None, alias="mexico_nutrition_signals")
 
 
 class LensScore(ContractModel):
@@ -819,6 +840,80 @@ class HistorySyncResponse(ContractModel):
 
 class EmptyResponse(ContractModel):
     ok: bool = True
+
+
+# --- Subscription receipt reporting --------------------------------------
+#
+# These contracts carry StoreKit 2 transaction metadata from the iOS client to
+# the backend so we have a server-side audit trail of who was granted what and
+# when. They deliberately do NOT make the backend the source of truth for
+# entitlements yet — iOS still trusts its local StoreKit 2 JWS verification.
+# The grant model is ready for a follow-up slice that adds App Store Server
+# API verification and uses the grant to authoritatively gate backend-only
+# premium features.
+
+
+class SubscriptionTier(str, Enum):
+    free = "free"
+    plus = "plus"
+    pro = "pro"
+
+
+class SubscriptionGrantState(str, Enum):
+    active = "active"
+    expired = "expired"
+    revoked = "revoked"
+    unknown = "unknown"
+
+
+class SubscriptionGrant(ContractModel):
+    installID: str
+    tier: SubscriptionTier
+    productID: str
+    originalTransactionID: str
+    transactionID: str
+    purchasedAt: AppleTimestamp
+    expiresAt: AppleTimestamp | None = None
+    revokedAt: AppleTimestamp | None = None
+    state: SubscriptionGrantState
+    rawTransactionJWS: str | None = Field(
+        default=None,
+        description=(
+            "Original StoreKit 2 JWS string the client forwarded. Stored for "
+            "future signature verification against Apple's x5c certificate "
+            "chain. Never returned to the client."
+        ),
+    )
+    updatedAt: AppleTimestamp
+
+
+class SubscriptionReportRequest(ContractModel):
+    installID: str
+    productID: str
+    originalTransactionID: str
+    transactionID: str
+    purchasedAt: AppleTimestamp
+    expiresAt: AppleTimestamp | None = None
+    revokedAt: AppleTimestamp | None = None
+    tier: SubscriptionTier
+    rawTransactionJWS: str | None = None
+
+
+class SubscriptionStatusResponse(ContractModel):
+    installID: str
+    grant: SubscriptionGrant | None = None
+
+
+class SubscriptionLifecycleNotificationRequest(ContractModel):
+    """App Store Server Notifications v2 webhook payload.
+
+    Apple signs the notification with a JWS whose payload is the
+    `responseBodyV2DecodedPayload`. We accept the raw signed payload and,
+    until full signature verification lands, log it for ops visibility and
+    no-op the entitlement path.
+    """
+
+    signedPayload: str
 
 
 def fixture_payload(data: ContractModel) -> dict[str, Any]:

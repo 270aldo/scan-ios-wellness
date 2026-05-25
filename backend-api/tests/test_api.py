@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.contracts import (
     ConfidenceLevel,
     Ingredient,
+    MexicoWarningLabel,
     ProductCandidate,
     ProductResolution,
     ProductResolutionSemantic,
@@ -823,6 +824,299 @@ def test_fixture_exports_match_expected_files():
         assert actual == expected
 
 
+def test_delete_profile_clears_state_and_is_idempotent():
+    install_id = "install-delete-test"
+    home_request = starter_home_request(install_id)
+    sync_request, _ = starter_history_sync_request()
+    sync_request.installID = install_id
+
+    profile_response = client.post(
+        "/v1/profile/sync", json=home_request.model_dump(mode="json")
+    )
+    assert profile_response.status_code == 200
+
+    history_response = client.post(
+        "/v1/history/sync", json=sync_request.model_dump(by_alias=True, mode="json")
+    )
+    assert history_response.status_code == 200
+    assert len(history_response.json()["scans"]) >= 1
+
+    services = app.state.backend_services
+    populated_state = services.repository.get_state(install_id)
+    assert populated_state.profile is not None
+    assert populated_state.scan_events
+
+    delete_response = client.delete(
+        "/v1/profile", headers={"X-Wellness-Install-ID": install_id}
+    )
+    assert delete_response.status_code == 200
+
+    wiped_state = services.repository.get_state(install_id)
+    assert wiped_state.profile is None
+    assert wiped_state.scan_events == {}
+    assert wiped_state.checkin_events == {}
+    assert wiped_state.favorites == {}
+    assert wiped_state.memory_items == {}
+    assert wiped_state.scan_decisions == {}
+
+    # Idempotent: deleting an already-empty profile still returns 200.
+    repeat_response = client.delete(
+        "/v1/profile", headers={"X-Wellness-Install-ID": install_id}
+    )
+    assert repeat_response.status_code == 200
+
+
+def test_delete_profile_requires_install_id_header():
+    response = client.delete("/v1/profile")
+    assert response.status_code == 400
+    assert "X-Wellness-Install-ID" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Subscription receipt endpoints
+# ---------------------------------------------------------------------------
+
+
+def _subscription_report_body(install_id: str, *, expires_offset: float = 600.0) -> dict:
+    from app.date_utils import apple_timestamp_now
+
+    now = apple_timestamp_now()
+    return {
+        "installID": install_id,
+        "productID": "com.aldoolivas.wellnesslens.plus",
+        "originalTransactionID": "1000000000000001",
+        "transactionID": "1000000000000001",
+        "purchasedAt": now - 5,
+        "expiresAt": now + expires_offset,
+        "revokedAt": None,
+        "tier": "plus",
+        "rawTransactionJWS": "fake.jws.payload",
+    }
+
+
+def test_subscription_report_persists_grant_and_returns_active_state():
+    body = _subscription_report_body("install-subs-active")
+
+    response = client.post("/v1/subscriptions/report", json=body)
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["installID"] == body["installID"]
+    assert payload["tier"] == "plus"
+    assert payload["state"] == "active"
+    assert payload["rawTransactionJWS"] == "fake.jws.payload"
+
+    status_response = client.get(
+        "/v1/subscriptions/status",
+        headers={"X-Wellness-Install-ID": body["installID"]},
+    )
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["grant"]["state"] == "active"
+    assert status_payload["grant"]["tier"] == "plus"
+
+
+def test_subscription_report_marks_expired_grant_when_expiration_is_past():
+    body = _subscription_report_body("install-subs-expired", expires_offset=-600.0)
+
+    response = client.post("/v1/subscriptions/report", json=body)
+    assert response.status_code == 200
+    assert response.json()["state"] == "expired"
+
+
+def test_subscription_report_marks_revoked_when_revocation_present():
+    from app.date_utils import apple_timestamp_now
+
+    body = _subscription_report_body("install-subs-revoked")
+    body["revokedAt"] = apple_timestamp_now() - 60
+
+    response = client.post("/v1/subscriptions/report", json=body)
+    assert response.status_code == 200
+    assert response.json()["state"] == "revoked"
+
+
+def test_subscription_status_requires_install_id_header():
+    response = client.get("/v1/subscriptions/status")
+    assert response.status_code == 400
+
+
+def test_subscription_status_returns_null_grant_when_nothing_stored():
+    response = client.get(
+        "/v1/subscriptions/status",
+        headers={"X-Wellness-Install-ID": "install-no-grant"},
+    )
+    assert response.status_code == 200
+    assert response.json()["grant"] is None
+
+
+def test_subscription_notification_accepts_signed_payload_and_is_idempotent():
+    body = {"signedPayload": "eyJhbGciOiJFUzI1NiJ9.FAKE.SIG"}
+    first = client.post("/v1/subscriptions/notification", json=body)
+    assert first.status_code == 200
+
+    # Re-entering with the same payload must be a no-op so Apple's retries are
+    # safe. Nothing is persisted yet so idempotence is trivially satisfied;
+    # the check enforces that nothing 4xx/5xx leaks out.
+    second = client.post("/v1/subscriptions/notification", json=body)
+    assert second.status_code == 200
+
+
+def test_delete_profile_also_clears_subscription_grant():
+    install_id = "install-delete-subscription"
+    report_body = _subscription_report_body(install_id)
+    client.post("/v1/subscriptions/report", json=report_body)
+
+    # Sanity: grant is present.
+    before = client.get(
+        "/v1/subscriptions/status",
+        headers={"X-Wellness-Install-ID": install_id},
+    )
+    assert before.json()["grant"] is not None
+
+    delete = client.delete(
+        "/v1/profile", headers={"X-Wellness-Install-ID": install_id}
+    )
+    assert delete.status_code == 200
+
+    after = client.get(
+        "/v1/subscriptions/status",
+        headers={"X-Wellness-Install-ID": install_id},
+    )
+    assert after.status_code == 200
+    assert after.json()["grant"] is None
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+
+def test_rate_limit_on_scan_analyze_returns_429_after_threshold(monkeypatch):
+    # Default limit for this route is 30/minute. Reset the limiter so previous
+    # tests don't pollute the bucket, then force a lower threshold to keep the
+    # test fast.
+    from app.main import limiter
+
+    limiter.reset()
+
+    sync_request, _ = starter_history_sync_request()
+    profile_request = starter_home_request(sync_request.installID)
+    services = app.state.backend_services or build_backend_services(Settings())
+    app.state.backend_services = services
+
+    product = make_provider_backed_product(ProductResolutionSource.openFoodFacts)
+    monkeypatch.setattr(
+        services.resolver, "resolve", lambda input: make_resolver_result(product), raising=False
+    )
+
+    body = {
+        "input": {
+            "sourceType": "manualBarcode",
+            "barcode": product.barcode,
+            "locale": "en_US",
+        },
+        "profile": profile_request.profile.model_dump(mode="json"),
+        "recentScans": [],
+        "recentCheckIns": [],
+        "installID": "install-rate-limit-test",
+    }
+    headers = {"X-Wellness-Install-ID": "install-rate-limit-test"}
+
+    # Drive traffic up to the limit. 30/minute is the configured ceiling.
+    successful = 0
+    for _ in range(35):
+        response = client.post("/v1/scan/analyze", json=body, headers=headers)
+        if response.status_code == 200:
+            successful += 1
+        elif response.status_code == 429:
+            break
+        else:
+            raise AssertionError(f"Unexpected status {response.status_code}: {response.text}")
+
+    assert successful == 30, f"Expected to reach the 30-request limit, got {successful}."
+
+    # One more call must be 429.
+    throttled = client.post("/v1/scan/analyze", json=body, headers=headers)
+    assert throttled.status_code == 429
+    assert "Rate limit exceeded" in throttled.json()["detail"]
+
+    limiter.reset()
+
+
+def test_healthz_is_exempt_from_rate_limiting():
+    from app.main import limiter
+
+    limiter.reset()
+
+    # Cap higher than the global default to prove exemption kicks in.
+    for _ in range(200):
+        response = client.get("/healthz")
+        assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# CORS hardening
+# ---------------------------------------------------------------------------
+
+
+def test_cors_is_off_by_default_so_browsers_cannot_call_the_api():
+    # When the whitelist is empty (default), CORSMiddleware is NOT installed,
+    # so preflight requests do not get an `Access-Control-Allow-Origin` header
+    # back. That keeps a malicious site from driving the API via the browser.
+    response = client.options(
+        "/v1/home",
+        headers={
+            "Origin": "https://attacker.example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert "access-control-allow-origin" not in {
+        name.lower() for name in response.headers.keys()
+    }
+
+
+def test_cors_allows_configured_origins_when_env_populated(monkeypatch):
+    monkeypatch.setenv(
+        "WELLNESSLENS_CORS_ALLOW_ORIGINS",
+        "https://wellnesslens.app,https://admin.wellnesslens.app",
+    )
+    get_settings.cache_clear()
+
+    # Re-instantiate the TestClient against a freshly-built FastAPI app so the
+    # CORS middleware is wired with the new setting.
+    import importlib
+
+    import app.main as main_module
+
+    importlib.reload(main_module)
+    fresh_client = TestClient(main_module.app)
+
+    try:
+        response = fresh_client.options(
+            "/v1/home",
+            headers={
+                "Origin": "https://wellnesslens.app",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert response.headers.get("access-control-allow-origin") == "https://wellnesslens.app"
+
+        blocked = fresh_client.options(
+            "/v1/home",
+            headers={
+                "Origin": "https://attacker.example.com",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        # Non-whitelisted origin: the header must not be echoed back, which
+        # makes the browser block the request client-side.
+        assert blocked.headers.get("access-control-allow-origin") != "https://attacker.example.com"
+    finally:
+        monkeypatch.delenv("WELLNESSLENS_CORS_ALLOW_ORIGINS", raising=False)
+        get_settings.cache_clear()
+        importlib.reload(main_module)
+
+
 def test_enforced_auth_rejects_missing_headers(monkeypatch):
     monkeypatch.setenv("WELLNESSLENS_FIREBASE_AUTH_ENABLED", "true")
     monkeypatch.setenv("WELLNESSLENS_APP_CHECK_ENFORCED", "true")
@@ -1031,6 +1325,56 @@ def test_product_resolver_label_search_falls_back_to_directional_without_exact_m
     assert result.fallback_reason in {"off_search_unranked", "off_search_low_confidence"}
 
 
+def test_product_resolver_mexico_seed_catalog_adds_nom_signals(monkeypatch):
+    resolver = ProductResolver(Settings())
+
+    monkeypatch.setattr(resolver, "_get_json", lambda url: {"products": []})
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.labelPhoto,
+            rawText="Bebida energetica con azucar EXCESO AZUCARES CONTIENE CAFEINA EVITAR EN NINOS",
+            productTypeHint=ProductType.food,
+            locale="es_MX",
+        )
+    )
+
+    assert result.is_directional is False
+    assert result.identity_source == ProductResolutionSource.localCatalog
+    assert result.product.mexicoNutritionSignals is not None
+    assert MexicoWarningLabel.excessSugars in result.product.mexicoNutritionSignals.warningLabels
+    assert result.product.mexicoNutritionSignals.containsCaffeineWarning is True
+
+    analysis = build_scan_analysis(
+        input=ScanInput(sourceType=ScanSource.labelPhoto, rawText="bebida energetica", locale="es_MX"),
+        user_context=starter_user_context(),
+        resolution=result,
+    )
+    assert any(reason.title == "Mexico label signal" for reason in analysis.topReasons)
+    assert any("Senales de etiqueta Mexico" in warning for warning in analysis.warnings)
+
+
+def test_product_resolver_partial_mexico_label_stays_directional_with_signals(monkeypatch):
+    resolver = ProductResolver(Settings())
+
+    monkeypatch.setattr(resolver, "_get_json", lambda url: {"products": []})
+
+    result = resolver.resolve(
+        ScanInput(
+            sourceType=ScanSource.labelPhoto,
+            rawText="Gomitas aciduladas EXCESO SODIO CONTIENE EDULCORANTES sucralosa",
+            productTypeHint=ProductType.food,
+            locale="es_MX",
+        )
+    )
+
+    assert result.is_directional is True
+    assert result.identity_source == ProductResolutionSource.agentInferred
+    assert result.product.mexicoNutritionSignals is not None
+    assert MexicoWarningLabel.excessSodium in result.product.mexicoNutritionSignals.warningLabels
+    assert result.product.mexicoNutritionSignals.containsSweetenerWarning is True
+
+
 def test_product_resolver_enriches_nutrients_with_usda_only_for_strong_match(monkeypatch):
     resolver = ProductResolver(Settings(usda_api_key="demo-usda-key"))
 
@@ -1055,10 +1399,13 @@ def test_product_resolver_enriches_nutrients_with_usda_only_for_strong_match(mon
             },
         },
     )
-    monkeypatch.setattr(
-        resolver,
-        "_post_json",
-        lambda url, payload: {
+    captured_requests: list[dict] = []
+
+    def _fake_post_json(url: str, payload: dict, *, extra_headers: dict | None = None) -> dict:
+        captured_requests.append(
+            {"url": url, "payload": payload, "extra_headers": extra_headers or {}}
+        )
+        return {
             "foods": [
                 {
                     "gtinUpc": "012345678905",
@@ -1075,8 +1422,9 @@ def test_product_resolver_enriches_nutrients_with_usda_only_for_strong_match(mon
                     ],
                 }
             ]
-        },
-    )
+        }
+
+    monkeypatch.setattr(resolver, "_post_json", _fake_post_json)
 
     result = resolver.resolve(
         ScanInput(
@@ -1101,6 +1449,19 @@ def test_product_resolver_enriches_nutrients_with_usda_only_for_strong_match(mon
         ProductResolutionSource.usdaFoodDataCentral,
     )
     assert "USDA FoodData Central" in " ".join(result.product.notes)
+
+    # R-6: the USDA api key must travel via the `X-Api-Key` header instead
+    # of the query string. Verify both directions so a future refactor can't
+    # silently regress the exposure.
+    assert captured_requests, "USDA POST should have been invoked for strong matches."
+    for call in captured_requests:
+        assert "api_key=" not in call["url"], (
+            "USDA api key must not appear in the request URL (seen in logs). "
+            f"URL was: {call['url']}"
+        )
+        assert call["extra_headers"].get("X-Api-Key") == "demo-usda-key", (
+            "USDA api key must be passed via the X-Api-Key header."
+        )
 
 
 def test_product_resolver_dsld_label_search_returns_provider_backed_supplement(monkeypatch):

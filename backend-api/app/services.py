@@ -38,6 +38,7 @@ from app.contracts import (
     MedicalSafety,
     MemoryItem,
     MemoryItemKind,
+    MexicoWarningLabel,
     OpenLoop,
     PatternContext,
     ProductCandidate,
@@ -60,6 +61,12 @@ from app.contracts import (
     ScanSource,
     StrategistNote,
     StructuredLensScores,
+    SubscriptionGrant,
+    SubscriptionGrantState,
+    SubscriptionLifecycleNotificationRequest,
+    SubscriptionReportRequest,
+    SubscriptionStatusResponse,
+    SubscriptionTier,
     SwapPriority,
     SwapSuggestion,
     TodayFocus,
@@ -74,6 +81,7 @@ from app.contracts import (
     fixture_payload,
 )
 from app.date_utils import apple_timestamp_now
+from app.mexico_nutrition import mexico_signal_titles
 from app.product_resolver import ProductResolver, ResolverResult
 from app.product_resolution_semantics import (
     ensure_product_resolution_semantics,
@@ -187,6 +195,71 @@ class BackendServices:
         state = self.repository.get_state(install_id)
         insights = build_weekly_insights(state)
         return WeeklyInsightsResponse(insights=insights)
+
+    # --- Subscription receipt audit trail -----------------------------
+    #
+    # The iOS client is still the authoritative source of entitlements
+    # (StoreKit 2 JWS is cryptographically verified on-device). What the
+    # backend stores here is an audit/receipts trail so ops, support, and
+    # a future server-authoritative grant flow can reason about purchases
+    # without parsing the device state. Full signature verification and
+    # App Store Server API cross-reference live in a follow-up slice.
+
+    def process_subscription_report(self, request: SubscriptionReportRequest) -> SubscriptionGrant:
+        now = apple_timestamp_now()
+        state = _derive_grant_state(request.expiresAt, request.revokedAt, now)
+        grant = SubscriptionGrant(
+            installID=request.installID,
+            tier=request.tier,
+            productID=request.productID,
+            originalTransactionID=request.originalTransactionID,
+            transactionID=request.transactionID,
+            purchasedAt=request.purchasedAt,
+            expiresAt=request.expiresAt,
+            revokedAt=request.revokedAt,
+            state=state,
+            rawTransactionJWS=request.rawTransactionJWS,
+            updatedAt=now,
+        )
+        self.repository.save_subscription_grant(request.installID, grant)
+        return grant
+
+    def get_subscription_status(self, install_id: str) -> SubscriptionStatusResponse:
+        grant = self.repository.get_subscription_grant(install_id)
+        return SubscriptionStatusResponse(installID=install_id, grant=grant)
+
+    def process_subscription_lifecycle_notification(
+        self, request: SubscriptionLifecycleNotificationRequest
+    ) -> EmptyResponse:
+        # App Store Server Notifications v2 always wrap the real payload in a
+        # JWS. Until the full verification layer lands (separate slice), we
+        # store nothing — we only log enough metadata to confirm Apple can
+        # reach the endpoint. Re-entering this function with the same payload
+        # must be idempotent by construction.
+        import logging
+
+        logging.getLogger(__name__).info(
+            "appstore_notification_received length=%d",
+            len(request.signedPayload),
+        )
+        return EmptyResponse()
+
+
+def _derive_grant_state(
+    expires_at: AppleTimestamp | None,
+    revoked_at: AppleTimestamp | None,
+    now: AppleTimestamp,
+) -> SubscriptionGrantState:
+    if revoked_at is not None:
+        return SubscriptionGrantState.revoked
+    if expires_at is None:
+        # StoreKit non-subscription purchases (e.g. lifetime unlocks) arrive
+        # without an expiration. Treat them as active until a future lifecycle
+        # notification says otherwise.
+        return SubscriptionGrantState.active
+    if expires_at > now:
+        return SubscriptionGrantState.active
+    return SubscriptionGrantState.expired
 
 
 def _product_type_for_input(input: ScanInput) -> ProductType:
@@ -465,10 +538,21 @@ class DerivedFeatures:
     sugars_g_per_100g: float | None
     caffeine_mg_per_100g: float | None
     nova_group: int | None
+    mexico_warning_labels: set[MexicoWarningLabel]
+    mexico_contains_caffeine_warning: bool
+    mexico_contains_sweetener_warning: bool
     conservative_inferred_mode: bool
 
     def contains(self, tag: IngredientTag) -> bool:
         return tag in self.effective_tags
+
+    @property
+    def has_mexico_signal(self) -> bool:
+        return bool(
+            self.mexico_warning_labels
+            or self.mexico_contains_caffeine_warning
+            or self.mexico_contains_sweetener_warning
+        )
 
 
 def build_lens_scores(
@@ -516,6 +600,8 @@ def derive_features(product: ProductCandidate, source: ScanSource) -> DerivedFea
     conservative_inferred_mode = should_use_conservative_inference(product, source)
     snapshot = None if conservative_inferred_mode else (product.resolution.nutritionSnapshot if product.resolution else None)
     joined_text = searchable_text(product)
+    mexico_signals = product.mexicoNutritionSignals
+    mexico_warning_labels = set(mexico_signals.warningLabels if mexico_signals else [])
     effective_tags = {
         tag for tag in product.tags
         if product.productType != ProductType.food or tag not in CORE_FOOD_TAGS
@@ -529,8 +615,20 @@ def derive_features(product: ProductCandidate, source: ScanSource) -> DerivedFea
             sugars_g_per_100g=snapshot.sugarsGPer100g if snapshot else None,
             caffeine_mg_per_100g=snapshot.caffeineMgPer100g if snapshot else None,
             nova_group=snapshot.novaGroup if snapshot else None,
+            mexico_warning_labels=mexico_warning_labels,
+            mexico_contains_caffeine_warning=bool(mexico_signals and mexico_signals.containsCaffeineWarning),
+            mexico_contains_sweetener_warning=bool(mexico_signals and mexico_signals.containsSweetenerWarning),
             conservative_inferred_mode=conservative_inferred_mode,
         )
+
+    if MexicoWarningLabel.excessSugars in mexico_warning_labels:
+        effective_tags.add(IngredientTag.sugarSpike)
+    if MexicoWarningLabel.excessCalories in mexico_warning_labels:
+        effective_tags.add(IngredientTag.ultraProcessed)
+    if mexico_signals and mexico_signals.containsCaffeineWarning:
+        effective_tags.add(IngredientTag.stimulant)
+    if mexico_signals and mexico_signals.containsSweetenerWarning:
+        effective_tags.add(IngredientTag.sugarAlcohol)
 
     if has_protein_support(snapshot, product, joined_text):
         effective_tags.add(IngredientTag.proteinDense)
@@ -554,6 +652,9 @@ def derive_features(product: ProductCandidate, source: ScanSource) -> DerivedFea
         sugars_g_per_100g=snapshot.sugarsGPer100g if snapshot else None,
         caffeine_mg_per_100g=snapshot.caffeineMgPer100g if snapshot else None,
         nova_group=snapshot.novaGroup if snapshot else None,
+        mexico_warning_labels=mexico_warning_labels,
+        mexico_contains_caffeine_warning=bool(mexico_signals and mexico_signals.containsCaffeineWarning),
+        mexico_contains_sweetener_warning=bool(mexico_signals and mexico_signals.containsSweetenerWarning),
         conservative_inferred_mode=conservative_inferred_mode,
     )
 
@@ -777,6 +878,20 @@ def build_reasons(
                 impact=ReasonImpact.positive,
             )
         )
+    if features.has_mexico_signal:
+        signal_titles = mexico_signal_titles(product.mexicoNutritionSignals)
+        reasons.append(
+            ReasonItem(
+                id=_stable_id("reason", "mexico-label-signal"),
+                title="Mexico label signal",
+                detail=(
+                    "Etiqueta mexicana detectada: "
+                    + ", ".join(signal_titles[:3])
+                    + ". La lectura lo usa como contexto de wellness, no como diagnostico."
+                ),
+                impact=ReasonImpact.caution,
+            )
+        )
     if scan_context and scan_context.isInAnabolicWindow and features.contains(IngredientTag.proteinDense):
         reasons.append(
             ReasonItem(
@@ -833,6 +948,9 @@ def build_warnings(
         warnings.append("No exact packaged-food match yet. Treat this as directional guidance until you rescan a clearer barcode or label.")
     if features.contains(IngredientTag.sugarSpike):
         warnings.append("Higher sugar or heavier-processing cues may soften the fit.")
+    if features.has_mexico_signal:
+        titles = mexico_signal_titles(product.mexicoNutritionSignals)
+        warnings.append(f"Senales de etiqueta Mexico detectadas: {', '.join(titles[:3])}. Conviene leer porcion y frecuencia.")
     if scan_context and has_short_sleep(scan_context) and features.contains(IngredientTag.stimulant):
         warnings.append("Short sleep raises the bar for caffeine-forward products to feel steady.")
     if scan_context and scan_context.cyclePhase == "luteal" and features.contains(IngredientTag.sugarSpike):

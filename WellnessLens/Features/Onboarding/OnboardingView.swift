@@ -274,6 +274,9 @@ struct OnboardingFlowView: View {
                     Toggle("Allow AI processing for structured analysis", isOn: $draft.formData.aiProcessingConsent)
                         .tint(WLPalette.tint)
 
+                    Toggle("Allow health data processing for cycle, recovery, and sleep context", isOn: $draft.formData.healthDataProcessingConsent)
+                        .tint(WLPalette.tint)
+
                     Toggle("Allow analytics that do not include private notes", isOn: $draft.formData.analyticsConsent)
                         .tint(WLPalette.tint)
 
@@ -782,6 +785,11 @@ struct OnboardingFlowView: View {
                 label: "AI processing",
                 value: draft.formData.aiProcessingConsent ? "On" : "Off",
                 tone: draft.formData.aiProcessingConsent ? .accent : .soft
+            ),
+            SummaryStatus(
+                label: "Health context",
+                value: draft.formData.healthDataProcessingConsent ? "On" : "Off",
+                tone: draft.formData.healthDataProcessingConsent ? .accent : .soft
             ),
             SummaryStatus(
                 label: "Analytics",

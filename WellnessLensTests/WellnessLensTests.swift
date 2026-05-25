@@ -21,6 +21,7 @@ final class WellnessLensTests: XCTestCase {
 
     private final class InMemoryStore: AppDataStore {
         var snapshot: StoredAppState
+        private(set) var resetCallCount = 0
 
         init(snapshot: StoredAppState = .fresh()) {
             self.snapshot = snapshot
@@ -32,6 +33,11 @@ final class WellnessLensTests: XCTestCase {
 
         func save(_ state: StoredAppState) {
             snapshot = state
+        }
+
+        func reset() {
+            resetCallCount += 1
+            snapshot = .fresh()
         }
     }
 
@@ -156,9 +162,46 @@ final class WellnessLensTests: XCTestCase {
         }
     }
 
+    private actor CountingCoachAgent: CoachAgentServing {
+        private let reply: CoachReply
+        private var callCount = 0
+
+        init(reply: CoachReply) {
+            self.reply = reply
+        }
+
+        func generateReply(for request: CoachAgentRequest) async -> CoachReply {
+            callCount += 1
+            return reply
+        }
+
+        func recordedCallCount() -> Int {
+            callCount
+        }
+    }
+
+    private actor CountingScanVerdictAgent: ScanVerdictServing {
+        private let verdict: LILADomain.ScanVerdict
+        private var callCount = 0
+
+        init(verdict: LILADomain.ScanVerdict) {
+            self.verdict = verdict
+        }
+
+        func generateVerdict(for request: ScanVerdictRequest) async -> LILADomain.ScanVerdict {
+            callCount += 1
+            return verdict
+        }
+
+        func recordedCallCount() -> Int {
+            callCount
+        }
+    }
+
     private actor StubIdentityProvider: IdentityProviding {
         let authorization: String?
         let installIDValue: String
+        private var deleteCallCount = 0
 
         init(authorization: String? = nil, installIDValue: String = "install-test") {
             self.authorization = authorization
@@ -173,6 +216,14 @@ final class WellnessLensTests: XCTestCase {
 
         func authorizationHeader() async -> String? {
             authorization
+        }
+
+        func deleteAccount() async {
+            deleteCallCount += 1
+        }
+
+        func recordedDeleteCount() -> Int {
+            deleteCallCount
         }
     }
 
@@ -393,6 +444,22 @@ final class WellnessLensTests: XCTestCase {
         func saveFavoriteItem(_ favorite: FavoriteItem) async throws {}
 
         func upsertMemoryItems(_ memoryItems: [MemoryItem]) async throws {}
+
+        var deleteAccountResult: Result<Void, Error> = .success(())
+        private(set) var deleteAccountCalls = 0
+
+        func deleteAccount() async throws {
+            deleteAccountCalls += 1
+            try deleteAccountResult.get()
+        }
+
+        var reportSubscriptionResult: Result<Void, Error> = .success(())
+        private(set) var reportSubscriptionCalls: [SubscriptionReportRequest] = []
+
+        func reportSubscription(_ report: SubscriptionReportRequest) async throws {
+            reportSubscriptionCalls.append(report)
+            try reportSubscriptionResult.get()
+        }
     }
 
     private func makeAnalysis(
@@ -938,7 +1005,26 @@ final class WellnessLensTests: XCTestCase {
 
     @MainActor
     func testSendStrategistMessageUsesCoachReplyAndPreservesStructuredPayload() async {
-        let store = InMemoryStore()
+        var snapshot = StoredAppState.fresh()
+        snapshot.userProfile = UserProfile(
+            userContext: .starter,
+            frictions: UserProfile.starter.frictions,
+            guidanceStyle: UserProfile.starter.guidanceStyle,
+            eatingRhythm: UserProfile.starter.eatingRhythm,
+            supplementStyle: UserProfile.starter.supplementStyle,
+            memoryEnabled: UserProfile.starter.memoryEnabled,
+            ageRange: UserProfile.starter.ageRange,
+            restaurantFrequency: UserProfile.starter.restaurantFrequency,
+            nutritionPriorities: UserProfile.starter.nutritionPriorities,
+            consentFlags: ConsentFlags(
+                aiProcessing: true,
+                analytics: false,
+                notifications: false,
+                healthDataProcessing: true
+            ),
+            createdAt: .now
+        )
+        let store = InMemoryStore(snapshot: snapshot)
         let coachReply = makeCoachReply(
             message: "Esta es la respuesta principal.",
             followUpQuestion: "¿Quieres que lo revisemos mañana?",
@@ -1016,6 +1102,52 @@ final class WellnessLensTests: XCTestCase {
     }
 
     @MainActor
+    func testSendStrategistMessageUsesLocalCoachWhenAIProcessingConsentIsOff() async {
+        let remoteCoach = CountingCoachAgent(reply: makeCoachReply(message: "REMOTE-COACH-SHOULD-NOT-APPEAR"))
+        var snapshot = StoredAppState.fresh()
+        snapshot.userProfile = UserProfile(
+            userContext: .starter,
+            frictions: UserProfile.starter.frictions,
+            guidanceStyle: UserProfile.starter.guidanceStyle,
+            eatingRhythm: UserProfile.starter.eatingRhythm,
+            supplementStyle: UserProfile.starter.supplementStyle,
+            memoryEnabled: UserProfile.starter.memoryEnabled,
+            ageRange: UserProfile.starter.ageRange,
+            restaurantFrequency: UserProfile.starter.restaurantFrequency,
+            nutritionPriorities: UserProfile.starter.nutritionPriorities,
+            consentFlags: ConsentFlags(
+                aiProcessing: false,
+                analytics: false,
+                notifications: false,
+                healthDataProcessing: false
+            ),
+            createdAt: .now
+        )
+        let store = InMemoryStore(snapshot: snapshot)
+        let model = AppModel(
+            services: makeServices(
+                store: store,
+                coachAgent: remoteCoach
+            )
+        )
+
+        let initialMessages = model.conversationThread(for: .home).messages.count
+        model.sendStrategistMessage("Hola", entryPoint: .home)
+        await waitForConversationMessageCount(
+            initialMessages + 2,
+            in: model,
+            entryPoint: .home
+        )
+
+        let coachCallCount = await remoteCoach.recordedCallCount()
+        XCTAssertEqual(coachCallCount, 0)
+        XCTAssertNotEqual(
+            model.conversationThread(for: .home).messages.last?.text,
+            "REMOTE-COACH-SHOULD-NOT-APPEAR"
+        )
+    }
+
+    @MainActor
     private func makeServices(
         store: InMemoryStore = InMemoryStore(),
         subscriptionStatus: SubscriptionStatus = .free,
@@ -1024,7 +1156,8 @@ final class WellnessLensTests: XCTestCase {
         backendAPI: WellnessBackendAPI? = nil,
         healthKitService: HealthKitServicing = NoopHealthKitService(),
         scanVerdictAgent: ScanVerdictServing = DeterministicScanVerdictAgent(),
-        coachAgent: any CoachAgentServing = DeterministicCoachAgent()
+        coachAgent: any CoachAgentServing = DeterministicCoachAgent(),
+        identityProvider: IdentityProviding? = nil
     ) -> AppServices {
         store.snapshot.subscriptionStatus = subscriptionStatus
 
@@ -1046,7 +1179,7 @@ final class WellnessLensTests: XCTestCase {
             subscription: DemoSubscriptionController(status: subscriptionStatus),
             labelOCRService: LabelOCRService(),
             backendAPI: backendAPI,
-            identityProvider: LocalInstallIdentityProvider(),
+            identityProvider: identityProvider ?? LocalInstallIdentityProvider(),
             scanVerdictAgent: scanVerdictAgent,
             coachAgent: coachAgent,
             healthKitService: healthKitService
@@ -1481,6 +1614,8 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(decoded.schemaVersion, 7)
         XCTAssertEqual(decoded.onboardingDraft?.currentStep, .consent)
         XCTAssertEqual(decoded.onboardingDraft?.formData, .starter)
+        XCTAssertFalse(decoded.onboardingDraft?.formData.aiProcessingConsent ?? true)
+        XCTAssertFalse(decoded.onboardingDraft?.formData.healthDataProcessingConsent ?? true)
         XCTAssertEqual(decoded.onboardingDraft?.createdAt, createdAt)
         XCTAssertEqual(decoded.onboardingDraft?.lastUpdatedAt, updatedAt)
     }
@@ -1546,6 +1681,13 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertNil(decoded.onboardingDraft)
     }
 
+    func testUserProfileMigratedDefaultsSensitiveConsentOff() {
+        let profile = UserProfile.migrated(from: .starter)
+
+        XCTAssertFalse(profile.consentFlags.aiProcessing)
+        XCTAssertFalse(profile.consentFlags.healthDataProcessing)
+    }
+
     @MainActor
     func testAppModelOnboardingDraftPersistsAndCompletesToRequestedDestination() async throws {
         let store = InMemoryStore()
@@ -1565,7 +1707,8 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(model.onboardingDraft?.currentStep, .priorities)
         XCTAssertEqual(store.snapshot.onboardingDraft?.currentStep, .priorities)
 
-        let completionDraft = try XCTUnwrap(model.onboardingDraft)
+        var completionDraft = try XCTUnwrap(model.onboardingDraft)
+        completionDraft.formData.healthDataProcessingConsent = false
         model.completeOnboarding(using: completionDraft, exitDestination: .scan)
 
         XCTAssertTrue(model.hasCompletedOnboarding)
@@ -1576,10 +1719,12 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertNotNil(model.firstWeekPlan)
         XCTAssertFalse(model.memoryItems.isEmpty)
         XCTAssertEqual(model.consentRecords.last?.flags, model.userProfile.consentFlags)
+        XCTAssertFalse(model.userProfile.consentFlags.healthDataProcessing)
 
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertEqual(backend.completedOnboardingCalls, 1)
         XCTAssertEqual(backend.completedOnboardingProfile?.userContext.goals, [.steadyEnergy])
+        XCTAssertFalse(backend.completedOnboardingProfile?.consentFlags.healthDataProcessing ?? true)
         XCTAssertFalse(backend.completedOnboardingGoals.isEmpty)
         XCTAssertNotNil(backend.completedOnboardingPlan)
     }
@@ -1711,7 +1856,7 @@ final class WellnessLensTests: XCTestCase {
     func testPantryPresentationCopySwitchesFromLockedToUnlockedLanguage() {
         XCTAssertEqual(
             PantryPresentationCopy.supportingMessage(isUnlocked: false, hasSuggestion: false),
-            "Preview only. Pantry actions and suggestions unlock with Pro."
+            "Pantry actions and suggestions unlock with Pro."
         )
         XCTAssertEqual(
             PantryPresentationCopy.supportingMessage(isUnlocked: true, hasSuggestion: false),
@@ -3073,9 +3218,29 @@ final class WellnessLensTests: XCTestCase {
         backend.onAnalyzeStructuredScan = { _, _, _, _, _ in
             await healthKit.mark(.structuredAnalyze)
         }
+        var snapshot = StoredAppState.fresh()
+        snapshot.userProfile = UserProfile(
+            userContext: .starter,
+            frictions: UserProfile.starter.frictions,
+            guidanceStyle: UserProfile.starter.guidanceStyle,
+            eatingRhythm: UserProfile.starter.eatingRhythm,
+            supplementStyle: UserProfile.starter.supplementStyle,
+            memoryEnabled: UserProfile.starter.memoryEnabled,
+            ageRange: UserProfile.starter.ageRange,
+            restaurantFrequency: UserProfile.starter.restaurantFrequency,
+            nutritionPriorities: UserProfile.starter.nutritionPriorities,
+            consentFlags: ConsentFlags(
+                aiProcessing: true,
+                analytics: false,
+                notifications: false,
+                healthDataProcessing: true
+            ),
+            createdAt: .now
+        )
 
         let model = AppModel(
             services: makeServices(
+                store: InMemoryStore(snapshot: snapshot),
                 scanService: scanService,
                 backendAPI: backend,
                 healthKitService: healthKit
@@ -3094,6 +3259,124 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertEqual(expectedContext.isInAnabolicWindow, true)
         XCTAssertEqual(expectedContext.hasShortSleep, true)
         XCTAssertEqual(expectedContext.hasRecoveryStrain, true)
+    }
+
+    @MainActor
+    func testAppModelSkipsConfiguredScanVerdictAgentWhenAIProcessingConsentIsOff() async throws {
+        let remoteVerdict = makeVerdict()
+        let remoteAgent = CountingScanVerdictAgent(verdict: remoteVerdict)
+        var snapshot = StoredAppState.fresh()
+        snapshot.userProfile = UserProfile(
+            userContext: .starter,
+            frictions: UserProfile.starter.frictions,
+            guidanceStyle: UserProfile.starter.guidanceStyle,
+            eatingRhythm: UserProfile.starter.eatingRhythm,
+            supplementStyle: UserProfile.starter.supplementStyle,
+            memoryEnabled: UserProfile.starter.memoryEnabled,
+            ageRange: UserProfile.starter.ageRange,
+            restaurantFrequency: UserProfile.starter.restaurantFrequency,
+            nutritionPriorities: UserProfile.starter.nutritionPriorities,
+            consentFlags: ConsentFlags(
+                aiProcessing: false,
+                analytics: false,
+                notifications: false,
+                healthDataProcessing: false
+            ),
+            createdAt: .now
+        )
+        let store = InMemoryStore(snapshot: snapshot)
+        let model = AppModel(
+            services: makeServices(
+                store: store,
+                scanService: StubScanService(analysis: makeRemoteReadyAnalysis()),
+                scanVerdictAgent: remoteAgent
+            )
+        )
+
+        await model.analyzeBarcode("850000001")
+
+        let scanVerdictCallCount = await remoteAgent.recordedCallCount()
+        XCTAssertEqual(scanVerdictCallCount, 0)
+        XCTAssertNotEqual(model.latestVerdict?.headline, remoteVerdict.headline)
+    }
+
+    @MainActor
+    func testAppModelLegacySnapshotWithoutProfileDefaultsSensitiveConsentOffAndSkipsRemoteScanVerdict() async throws {
+        let remoteVerdict = makeVerdict()
+        let remoteAgent = CountingScanVerdictAgent(verdict: remoteVerdict)
+        var snapshot = StoredAppState.fresh()
+        snapshot.userProfile = nil
+        snapshot.userContext = .starter
+        let store = InMemoryStore(snapshot: snapshot)
+        let model = AppModel(
+            services: makeServices(
+                store: store,
+                scanService: StubScanService(analysis: makeRemoteReadyAnalysis()),
+                scanVerdictAgent: remoteAgent
+            )
+        )
+
+        XCTAssertFalse(model.userProfile.consentFlags.aiProcessing)
+        XCTAssertFalse(model.userProfile.consentFlags.healthDataProcessing)
+        XCTAssertFalse(model.onboardingDraft?.formData.aiProcessingConsent ?? true)
+        XCTAssertFalse(model.onboardingDraft?.formData.healthDataProcessingConsent ?? true)
+
+        await model.analyzeBarcode("850000001")
+
+        let scanVerdictCallCount = await remoteAgent.recordedCallCount()
+        XCTAssertEqual(scanVerdictCallCount, 0)
+        XCTAssertNotEqual(model.latestVerdict?.headline, remoteVerdict.headline)
+    }
+
+    @MainActor
+    func testAppModelSkipsBiometricsWhenHealthProcessingConsentIsOff() async throws {
+        let biometrics = BiometricsSnapshot(
+            capturedAt: .now,
+            cycleState: .init(lastPeriodStart: .now, source: .manualEntry),
+            trainingLoad: .init(workoutsCount: 2, activeEnergyBurnedKcal: 430, durationMinutes: 90, lastWorkoutEndedAt: .now),
+            sleepHours: 7.2,
+            hrvMilliseconds: 41,
+            restingHeartRate: 57,
+            wristTemperatureDeltaCelsius: nil
+        )
+        let healthKit = SequencedHealthKitService(snapshot: biometrics)
+        let legacyAnalysis = makeAnalysis(barcode: "850000001")
+        let scanService = CapturingScanService(analysis: legacyAnalysis) { _, _, _ in
+            await healthKit.mark(.scanAnalyze)
+        }
+        var snapshot = StoredAppState.fresh()
+        snapshot.userProfile = UserProfile(
+            userContext: .starter,
+            frictions: UserProfile.starter.frictions,
+            guidanceStyle: UserProfile.starter.guidanceStyle,
+            eatingRhythm: UserProfile.starter.eatingRhythm,
+            supplementStyle: UserProfile.starter.supplementStyle,
+            memoryEnabled: UserProfile.starter.memoryEnabled,
+            ageRange: UserProfile.starter.ageRange,
+            restaurantFrequency: UserProfile.starter.restaurantFrequency,
+            nutritionPriorities: UserProfile.starter.nutritionPriorities,
+            consentFlags: ConsentFlags(
+                aiProcessing: true,
+                analytics: false,
+                notifications: false,
+                healthDataProcessing: false
+            ),
+            createdAt: .now
+        )
+        let store = InMemoryStore(snapshot: snapshot)
+        let model = AppModel(
+            services: makeServices(
+                store: store,
+                scanService: scanService,
+                healthKitService: healthKit
+            )
+        )
+
+        await model.analyzeBarcode("850000001")
+
+        let recordedHealthSteps = await healthKit.recordedSteps()
+        XCTAssertEqual(recordedHealthSteps, [.scanAnalyze])
+        XCTAssertNil(scanService.receivedScanContexts.first ?? nil)
     }
 
     @MainActor
@@ -3162,7 +3445,7 @@ final class WellnessLensTests: XCTestCase {
         XCTAssertFalse(model.visiblePantryItems.contains(where: { $0.dedupeKey == pantryItem.dedupeKey }))
     }
 
-    func testPantrySurfacePlanUsesUnlockPreviewWhenLocked() {
+    func testPantrySurfacePlanUsesUnlockCopyWhenLocked() {
         let plan = PantrySurfacePlan.build(
             isUnlocked: false,
             itemCount: 2,
@@ -3170,7 +3453,7 @@ final class WellnessLensTests: XCTestCase {
             hasOpenableAnchor: true
         )
 
-        XCTAssertEqual(plan.badgeTitle, "Pro preview")
+        XCTAssertEqual(plan.badgeTitle, "Pro access")
         XCTAssertEqual(plan.primaryActionTitle, "Unlock pantry")
         XCTAssertEqual(plan.secondaryActionTitle, "Open scan")
     }
@@ -3298,5 +3581,231 @@ final class WellnessLensTests: XCTestCase {
 
         let favorite = try XCTUnwrap(model.favoriteItems.first)
         XCTAssertEqual(favorite.scanEventID, event.id)
+    }
+
+    @MainActor
+    func testDeleteAccountCallsBackendIdentityResetAndReturnsToOnboarding() async throws {
+        var snapshot = StoredAppState.fresh()
+        snapshot.hasCompletedOnboarding = true
+        snapshot.userProfile = UserProfile.starter
+        snapshot.favoriteItems = [
+            FavoriteItem(
+                id: "fav-1",
+                scanEventID: "scan-1",
+                createdAt: .now,
+                title: "Sample favorite",
+                summary: "Kept before account deletion."
+            )
+        ]
+        snapshot.memoryItems = [
+            MemoryItem(
+                kind: .staple,
+                title: "Breakfast staple",
+                summary: "Remembered habit.",
+                relatedProductID: "product-1",
+                relatedProductName: "Sample",
+                createdAt: .now,
+                lastReferencedAt: .now
+            )
+        ]
+        let store = InMemoryStore(snapshot: snapshot)
+        let backend = MockBackendAPI(structuredAnalysisResult: .failure(MockBackendAPI.MockError.structuredUnavailable))
+        let identity = StubIdentityProvider(authorization: "Bearer token", installIDValue: "install-delete")
+        let model = AppModel(
+            services: makeServices(
+                store: store,
+                backendAPI: backend,
+                identityProvider: identity
+            )
+        )
+
+        XCTAssertTrue(model.hasCompletedOnboarding)
+        XCTAssertFalse(model.favoriteItems.isEmpty)
+        XCTAssertFalse(model.memoryItems.isEmpty)
+
+        let succeeded = await model.deleteAccount()
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(backend.deleteAccountCalls, 1)
+        let identityDeleteCount = await identity.recordedDeleteCount()
+        XCTAssertEqual(identityDeleteCount, 1)
+        XCTAssertEqual(store.resetCallCount, 1)
+
+        XCTAssertFalse(model.hasCompletedOnboarding)
+        XCTAssertNotNil(model.onboardingDraft)
+        XCTAssertTrue(model.favoriteItems.isEmpty)
+        XCTAssertTrue(model.memoryItems.isEmpty)
+        XCTAssertTrue(model.scanEvents.isEmpty)
+        XCTAssertTrue(model.scanVerdicts.isEmpty)
+        XCTAssertTrue(model.conversationThreads.isEmpty)
+        XCTAssertEqual(model.subscriptionStatus, .free)
+        XCTAssertNil(model.activePaywall)
+        XCTAssertEqual(store.snapshot.hasCompletedOnboarding, false)
+        XCTAssertTrue(store.snapshot.favoriteItems.isEmpty)
+    }
+
+    @MainActor
+    func testDeleteAccountStillResetsLocalStateWhenBackendFails() async {
+        var snapshot = StoredAppState.fresh()
+        snapshot.hasCompletedOnboarding = true
+        snapshot.userProfile = UserProfile.starter
+        let store = InMemoryStore(snapshot: snapshot)
+        let backend = MockBackendAPI(structuredAnalysisResult: .failure(MockBackendAPI.MockError.structuredUnavailable))
+        backend.deleteAccountResult = .failure(MockBackendAPI.MockError.structuredUnavailable)
+        let identity = StubIdentityProvider(installIDValue: "install-delete-fail")
+        let model = AppModel(
+            services: makeServices(
+                store: store,
+                backendAPI: backend,
+                identityProvider: identity
+            )
+        )
+
+        let succeeded = await model.deleteAccount()
+
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(backend.deleteAccountCalls, 1)
+        let identityDeleteCount = await identity.recordedDeleteCount()
+        XCTAssertEqual(identityDeleteCount, 1, "Identity delete must still run even if backend call fails.")
+        XCTAssertEqual(store.resetCallCount, 1, "Local store must be reset even if backend call fails.")
+        XCTAssertFalse(model.hasCompletedOnboarding)
+    }
+
+    @MainActor
+    func testPresentUpgradePaywallOpensSheetInsteadOfPurchasing() async {
+        let store = InMemoryStore()
+        let model = AppModel(services: makeServices(store: store))
+        XCTAssertNil(model.activePaywall)
+
+        model.presentUpgradePaywall(targetTier: .pro)
+
+        let context = try? XCTUnwrap(model.activePaywall)
+        XCTAssertEqual(context?.targetTier, .pro)
+        XCTAssertEqual(context?.surface, .profile)
+        // Nothing was purchased yet; the purchase only happens after the user
+        // confirms inside the sheet.
+        XCTAssertEqual(model.subscriptionStatus, .free)
+    }
+
+    @MainActor
+    func testPresentUpgradePaywallIsNoopWhenUserAlreadyAtOrAboveTier() async {
+        var snapshot = StoredAppState.fresh()
+        snapshot.subscriptionStatus = .pro
+        let store = InMemoryStore(snapshot: snapshot)
+        let model = AppModel(services: makeServices(store: store, subscriptionStatus: .pro))
+
+        model.presentUpgradePaywall(targetTier: .plus)
+
+        XCTAssertNil(model.activePaywall)
+    }
+
+    @MainActor
+    func testReportSubscriptionFireAndForgetReachesBackendWithoutBlockingEntitlement() async throws {
+        let backend = MockBackendAPI(structuredAnalysisResult: .failure(MockBackendAPI.MockError.structuredUnavailable))
+        // Force the backend report to fail so we can assert that failures do
+        // not throw out of the fire-and-forget path.
+        struct SandboxError: Error {}
+        backend.reportSubscriptionResult = .failure(SandboxError())
+
+        let report = SubscriptionReportRequest(
+            installID: "install-report-test",
+            productID: "com.aldoolivas.wellnesslens.plus",
+            originalTransactionID: "1000000000000007",
+            transactionID: "1000000000000007",
+            purchasedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            expiresAt: Date(timeIntervalSince1970: 1_730_000_000),
+            revokedAt: nil,
+            tier: "plus",
+            rawTransactionJWS: nil
+        )
+
+        // The call itself is throwing, but the higher-level StoreKit handler
+        // calls it in a `do { try ... } catch { }` wrapper. Verify the
+        // contract by calling and asserting the backend saw the payload even
+        // on failure.
+        do {
+            try await backend.reportSubscription(report)
+            XCTFail("MockBackendAPI configured to fail must surface the error here.")
+        } catch is SandboxError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+
+        XCTAssertEqual(backend.reportSubscriptionCalls.count, 1)
+        let captured = try XCTUnwrap(backend.reportSubscriptionCalls.first)
+        XCTAssertEqual(captured.installID, "install-report-test")
+        XCTAssertEqual(captured.tier, "plus")
+        XCTAssertEqual(captured.originalTransactionID, "1000000000000007")
+        XCTAssertNil(captured.revokedAt)
+    }
+
+    @MainActor
+    func testLocalizableStringsCatalogShipsEnglishAndMexicanSpanish() throws {
+        // The String Catalog is bundled as `Localizable.xcstrings` but Xcode
+        // compiles it into `.lproj/Localizable.strings` per locale. Verify
+        // both locales round-trip so a regression (e.g. deleting the catalog,
+        // forgetting to add it to Copy Bundle Resources) fails fast.
+        let mainBundle = Bundle.main
+
+        // Declared supported locales must include both en and es-MX.
+        let supported = Set(mainBundle.localizations)
+        XCTAssertTrue(supported.contains("en"), "English locale must be declared in the bundle.")
+        XCTAssertTrue(
+            supported.contains("es-MX") || supported.contains("es_MX"),
+            "es-MX locale must be declared in the bundle."
+        )
+
+        // Spot check that a high-visibility key round-trips in both locales.
+        let englishBundle = try XCTUnwrap(
+            mainBundle.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:))
+        )
+        let mexicanBundle = try XCTUnwrap(
+            mainBundle.path(forResource: "es-MX", ofType: "lproj").flatMap(Bundle.init(path:))
+                ?? mainBundle.path(forResource: "es_MX", ofType: "lproj").flatMap(Bundle.init(path:))
+        )
+
+        let englishDelete = englishBundle.localizedString(
+            forKey: "Delete my account", value: nil, table: nil
+        )
+        let mexicanDelete = mexicanBundle.localizedString(
+            forKey: "Delete my account", value: nil, table: nil
+        )
+
+        XCTAssertEqual(englishDelete, "Delete my account")
+        XCTAssertEqual(mexicanDelete, "Eliminar mi cuenta")
+    }
+
+    @MainActor
+    func testDemoSubscriptionControllerExposesSimulatedPlansForPaywallDisclosure() async {
+        let controller = DemoSubscriptionController()
+        let plans = await controller.availablePlans()
+        XCTAssertEqual(plans.count, 2)
+        XCTAssertTrue(plans.allSatisfy { $0.isDemo })
+        XCTAssertTrue(plans.contains(where: { $0.tier == .plus }))
+        XCTAssertTrue(plans.contains(where: { $0.tier == .pro }))
+        for plan in plans {
+            XCTAssertFalse(plan.renewalDisclosure.isEmpty, "Every demo plan must still render renewal copy so the disclosure surface is never blank.")
+        }
+    }
+
+    @MainActor
+    func testDeleteAccountResetsIdentityEvenWithoutBackend() async {
+        let store = InMemoryStore()
+        let identity = StubIdentityProvider(installIDValue: "install-offline-delete")
+        let model = AppModel(
+            services: makeServices(
+                store: store,
+                backendAPI: nil,
+                identityProvider: identity
+            )
+        )
+
+        let succeeded = await model.deleteAccount()
+
+        XCTAssertTrue(succeeded, "Offline deletion path must report success when there is no backend to call.")
+        let identityDeleteCount = await identity.recordedDeleteCount()
+        XCTAssertEqual(identityDeleteCount, 1)
+        XCTAssertEqual(store.resetCallCount, 1)
     }
 }

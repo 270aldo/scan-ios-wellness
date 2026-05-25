@@ -37,8 +37,8 @@ struct HomeView: View {
 
             if model.isUsingLocalHomeFallback {
                 HomeFallbackStateCard(
-                    title: "Showing the local daily fallback",
-                    summary: "Home is using the deterministic local brief while the remote refresh catches up. Your goals, plan, gating, and saved memory are still applied."
+                    title: "Showing on-device daily guidance",
+                    summary: "Home is using on-device guidance right now. Your goals, plan, and saved memory are still applied."
                 )
             }
 
@@ -270,7 +270,7 @@ private struct HomePantrySection: View {
                 }
 
                 WLUtilityButton(
-                    title: isUnlocked ? "Open pantry" : "Preview pantry",
+                    title: isUnlocked ? "Open pantry" : "See pantry",
                     systemImage: isUnlocked ? "arrow.up.right.circle" : "shippingbox"
                 ) {
                     openPantry()
@@ -518,7 +518,7 @@ private struct HomeFallbackStateCard: View {
     var body: some View {
         WLCompactCard {
             VStack(alignment: .leading, spacing: WLSpacing.s) {
-                WLStatusBadge(title: "Fallback active", systemImage: "icloud.slash", tone: .caution)
+                WLStatusBadge(title: "Offline mode", systemImage: "icloud.slash", tone: .caution)
 
                 Text(title)
                     .font(WLTypography.bodyEmphasis)

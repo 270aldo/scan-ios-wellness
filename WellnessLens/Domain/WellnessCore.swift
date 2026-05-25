@@ -318,6 +318,62 @@ struct NutritionSnapshot: Codable, Hashable {
     }
 }
 
+enum MexicoWarningLabel: String, Codable, CaseIterable, Hashable {
+    case excessCalories = "excess_calories"
+    case excessSugars = "excess_sugars"
+    case excessSodium = "excess_sodium"
+    case excessSaturatedFat = "excess_saturated_fat"
+    case excessTransFat = "excess_trans_fat"
+
+    var title: String {
+        switch self {
+        case .excessCalories: "Exceso calorias"
+        case .excessSugars: "Exceso azucares"
+        case .excessSodium: "Exceso sodio"
+        case .excessSaturatedFat: "Exceso grasas saturadas"
+        case .excessTransFat: "Exceso grasas trans"
+        }
+    }
+}
+
+struct MexicoNutritionSignals: Codable, Hashable {
+    var warningLabels: [MexicoWarningLabel]
+    var containsCaffeineWarning: Bool
+    var containsSweetenerWarning: Bool
+    var detectedPhrases: [String]
+    var source: String
+
+    enum CodingKeys: String, CodingKey {
+        case warningLabels = "warning_labels"
+        case containsCaffeineWarning = "contains_caffeine_warning"
+        case containsSweetenerWarning = "contains_sweetener_warning"
+        case detectedPhrases = "detected_phrases"
+        case source
+    }
+
+    var hasSignal: Bool {
+        !warningLabels.isEmpty
+            || containsCaffeineWarning
+            || containsSweetenerWarning
+            || !detectedPhrases.isEmpty
+    }
+
+    var titles: [String] {
+        var titles = warningLabels.map(\.title)
+        if containsCaffeineWarning {
+            titles.append("Contiene cafeina")
+        }
+        if containsSweetenerWarning {
+            titles.append("Contiene edulcorantes")
+        }
+        var result: [String] = []
+        for title in titles where !result.contains(title) {
+            result.append(title)
+        }
+        return result
+    }
+}
+
 struct ProductResolution: Codable, Hashable {
     var canonicalProductID: String?
     var source: ProductResolutionSource
@@ -349,6 +405,7 @@ struct ProductCandidate: Codable, Hashable, Identifiable {
     var lookupTokens: [String]
     var resolution: ProductResolution? = nil
     var resolutionSemantics: [ProductResolutionSemantic]? = nil
+    var mexicoNutritionSignals: MexicoNutritionSignals? = nil
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -365,6 +422,7 @@ struct ProductCandidate: Codable, Hashable, Identifiable {
         case lookupTokens
         case resolution
         case resolutionSemantics = "resolution_semantics"
+        case mexicoNutritionSignals = "mexico_nutrition_signals"
     }
 }
 
@@ -605,6 +663,100 @@ enum SampleCatalog {
                     novaGroup: 4
                 ),
                 isDirectional: false
+            ),
+            mexicoNutritionSignals: MexicoNutritionSignals(
+                warningLabels: [.excessSugars],
+                containsCaffeineWarning: true,
+                containsSweetenerWarning: false,
+                detectedPhrases: ["Exceso azucares", "Contiene cafeina"],
+                source: "deterministic"
+            )
+        ),
+        ProductCandidate(
+            id: "mx-yogurt-griego-natural",
+            name: "Yogurt griego natural sin azucar",
+            brand: "Catalogo Mexico",
+            productType: .food,
+            barcode: nil,
+            headline: "Base practica de super con proteina alta y baja azucar.",
+            ingredients: ["Leche descremada", "Cultivos lacticos"].map(Ingredient.init),
+            claims: ["Alto en proteina", "Sin azucar anadida"],
+            tags: [.proteinDense, .probiotic],
+            alternativeIDs: ["gut-calm-oat-bar"],
+            notes: ["Source: WellnessLens Mexico seed catalog."],
+            lookupTokens: [
+                "yogurt griego",
+                "yoghurt griego",
+                "natural",
+                "sin azucar",
+                "proteina",
+                "super",
+            ],
+            resolution: ProductResolution(
+                canonicalProductID: "mx:yogurt-griego-natural",
+                source: .localCatalog,
+                confidence: 0.82,
+                nutritionSnapshot: NutritionSnapshot(
+                    energyKcalPer100g: 92,
+                    proteinGPer100g: 10.5,
+                    carbsGPer100g: 4,
+                    fatGPer100g: 2.2,
+                    sugarsGPer100g: 3.8,
+                    fiberGPer100g: 0,
+                    sodiumMgPer100g: 58,
+                    caffeineMgPer100g: nil,
+                    novaGroup: 3
+                ),
+                isDirectional: false
+            )
+        ),
+        ProductCandidate(
+            id: "mx-bebida-energetica-azucar",
+            name: "Bebida energetica con azucar",
+            brand: "Catalogo Mexico",
+            productType: .food,
+            barcode: nil,
+            headline: "Impulso rapido con sellos que conviene tratar como ocasional.",
+            ingredients: ["Agua carbonatada", "Azucar", "Cafeina", "Saborizantes"].map(Ingredient.init),
+            claims: ["Exceso azucares", "Contiene cafeina"],
+            tags: [.sugarSpike, .stimulant, .ultraProcessed],
+            alternativeIDs: ["mx-yogurt-griego-natural", "gut-calm-oat-bar"],
+            notes: [
+                "Source: WellnessLens Mexico seed catalog.",
+                "Mexico label signal: Exceso azucares.",
+                "Mexico label signal: Contiene cafeina.",
+            ],
+            lookupTokens: [
+                "bebida energetica",
+                "energy drink",
+                "azucar",
+                "cafeina",
+                "exceso azucares",
+                "oxxo",
+            ],
+            resolution: ProductResolution(
+                canonicalProductID: "mx:bebida-energetica-azucar",
+                source: .localCatalog,
+                confidence: 0.82,
+                nutritionSnapshot: NutritionSnapshot(
+                    energyKcalPer100g: 52,
+                    proteinGPer100g: 0,
+                    carbsGPer100g: 13,
+                    fatGPer100g: 0,
+                    sugarsGPer100g: 13,
+                    fiberGPer100g: 0,
+                    sodiumMgPer100g: 32,
+                    caffeineMgPer100g: 58,
+                    novaGroup: 4
+                ),
+                isDirectional: false
+            ),
+            mexicoNutritionSignals: MexicoNutritionSignals(
+                warningLabels: [.excessSugars],
+                containsCaffeineWarning: true,
+                containsSweetenerWarning: false,
+                detectedPhrases: ["Exceso azucares", "Contiene cafeina"],
+                source: "deterministic"
             )
         ),
         ProductCandidate(
@@ -921,10 +1073,19 @@ struct AnalysisEngine {
         var sugarsGPer100g: Double?
         var caffeineMgPer100g: Double?
         var novaGroup: Int?
+        var mexicoWarningLabels: Set<MexicoWarningLabel>
+        var mexicoContainsCaffeineWarning: Bool
+        var mexicoContainsSweetenerWarning: Bool
         var conservativeInferredMode: Bool
 
         func contains(_ tag: IngredientTag) -> Bool {
             effectiveTags.contains(tag)
+        }
+
+        var hasMexicoSignal: Bool {
+            !mexicoWarningLabels.isEmpty
+                || mexicoContainsCaffeineWarning
+                || mexicoContainsSweetenerWarning
         }
     }
 
@@ -1035,6 +1196,8 @@ struct AnalysisEngine {
         let conservativeInferredMode = shouldUseConservativeInference(for: product, source: source)
         let snapshot = conservativeInferredMode ? nil : product.resolution?.nutritionSnapshot
         let joinedText = searchableText(for: product)
+        let mexicoSignals = product.mexicoNutritionSignals
+        let mexicoWarningLabels = Set(mexicoSignals?.warningLabels ?? [])
 
         var effectiveTags = Set(product.tags.filter { product.productType != .food || !Self.nutrientDrivenFoodTags.contains($0) })
 
@@ -1046,8 +1209,24 @@ struct AnalysisEngine {
                 sugarsGPer100g: snapshot?.sugarsGPer100g,
                 caffeineMgPer100g: snapshot?.caffeineMgPer100g,
                 novaGroup: snapshot?.novaGroup,
+                mexicoWarningLabels: mexicoWarningLabels,
+                mexicoContainsCaffeineWarning: mexicoSignals?.containsCaffeineWarning ?? false,
+                mexicoContainsSweetenerWarning: mexicoSignals?.containsSweetenerWarning ?? false,
                 conservativeInferredMode: conservativeInferredMode
             )
+        }
+
+        if mexicoWarningLabels.contains(.excessSugars) {
+            effectiveTags.insert(.sugarSpike)
+        }
+        if mexicoWarningLabels.contains(.excessCalories) {
+            effectiveTags.insert(.ultraProcessed)
+        }
+        if mexicoSignals?.containsCaffeineWarning == true {
+            effectiveTags.insert(.stimulant)
+        }
+        if mexicoSignals?.containsSweetenerWarning == true {
+            effectiveTags.insert(.sugarAlcohol)
         }
 
         if hasProteinSupport(snapshot: snapshot, product: product, joinedText: joinedText) {
@@ -1079,6 +1258,9 @@ struct AnalysisEngine {
             sugarsGPer100g: snapshot?.sugarsGPer100g,
             caffeineMgPer100g: snapshot?.caffeineMgPer100g,
             novaGroup: snapshot?.novaGroup,
+            mexicoWarningLabels: mexicoWarningLabels,
+            mexicoContainsCaffeineWarning: mexicoSignals?.containsCaffeineWarning ?? false,
+            mexicoContainsSweetenerWarning: mexicoSignals?.containsSweetenerWarning ?? false,
             conservativeInferredMode: conservativeInferredMode
         )
     }
@@ -1293,6 +1475,16 @@ struct AnalysisEngine {
         if features.contains(.probiotic) {
             reasons.append(ReasonItem(title: "Gut-friendly signal", detail: "Live cultures or probiotic support can help a calmer digestion profile.", impact: .positive))
         }
+        if features.hasMexicoSignal {
+            let titles = product.mexicoNutritionSignals?.titles ?? []
+            reasons.append(
+                ReasonItem(
+                    title: "Etiqueta Mexico",
+                    detail: "Detectamos \(titles.prefix(3).joined(separator: ", ")). La lectura lo usa como contexto de wellness, no como diagnostico.",
+                    impact: .caution
+                )
+            )
+        }
         if features.contains(.niacinamide) || features.contains(.peptide) || features.contains(.hyaluronicAcid) {
             reasons.append(ReasonItem(title: "Barrier and glow support", detail: "The topical actives here line up well with glow and barrier goals.", impact: .positive))
         }
@@ -1370,6 +1562,9 @@ struct AnalysisEngine {
         }
         if scanContext?.cyclePhase == .luteal && features.contains(.sugarSpike) {
             warnings.append("In a luteal-phase context, higher sugar can feel less stable than the label alone suggests.")
+        }
+        if features.hasMexicoSignal, let signals = product.mexicoNutritionSignals {
+            warnings.append("Senales de etiqueta Mexico detectadas: \(signals.titles.prefix(3).joined(separator: ", ")). Conviene leer porcion y frecuencia.")
         }
         if scanContext?.hasRecoveryStrain == true && features.contains(.ultraProcessed) {
             warnings.append("Recovery looks more taxed today, so heavier processing may soften the fit further.")

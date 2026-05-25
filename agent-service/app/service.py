@@ -10,6 +10,8 @@ from app.contracts import (
     AdvicePriority,
     CoachReply,
     CoachReplyRequest,
+    NutritionExtractionRequest,
+    NutritionExtractionResult,
     ScanVerdict,
     ScanVerdictConfidence,
     ScanVerdictRequest,
@@ -25,12 +27,19 @@ from app.coach_runtime import (
     build_local_coach_reply,
     get_coach_assets,
 )
+from app.nutrition_extraction import (
+    EXTRACTION_SYSTEM_PROMPT,
+    build_local_nutrition_extraction,
+    build_nutrition_extraction_task_prompt,
+    parse_nutrition_extraction_payload_text,
+)
 from app.scan_verdict_runtime import ScanVerdictRuntimeAssets
 from app.scan_verdict_runtime import (
     ScanVerdictSchemaValidationError,
     build_local_scan_verdict,
     build_scan_verdict_task_prompt,
     get_scan_verdict_assets,
+    _normalize_vertex_json_schema,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,6 +123,15 @@ class StrategistService:
                     provider_failure=str(exc),
                 )
         return build_local_coach_reply(request, assets=assets)
+
+    def nutrition_extraction(self, request: NutritionExtractionRequest) -> NutritionExtractionResult:
+        if self.settings.provider == "vertex":
+            try:
+                return self._vertex_nutrition_extraction(request)
+            except Exception as exc:
+                logger.warning("nutrition extraction provider failed; falling back to local extractor: %s", exc)
+                return build_local_nutrition_extraction(request, provider_failure=str(exc))
+        return build_local_nutrition_extraction(request)
 
     def _local_reply(self, request: StrategistReplyRequest) -> StrategistReply:
         cards = [
@@ -245,3 +263,44 @@ class StrategistService:
         except CoachSchemaValidationError as exc:
             raise RuntimeError(f"vertex coach payload failed schema validation: {exc}") from exc
         return CoachReply.model_validate(payload)
+
+    def _vertex_nutrition_extraction(self, request: NutritionExtractionRequest) -> NutritionExtractionResult:
+        if not self.settings.vertex_project:
+            raise RuntimeError("WELLNESSLENS_AGENT_VERTEX_PROJECT is not configured")
+
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError as exc:
+            raise RuntimeError("google-genai is not installed") from exc
+
+        client = genai.Client(
+            vertexai=True,
+            project=self.settings.vertex_project,
+            location=self.settings.vertex_location,
+            http_options=types.HttpOptions(apiVersion="v1"),
+        )
+        response = client.models.generate_content(
+            model=self.settings.vertex_model,
+            contents=build_nutrition_extraction_task_prompt(request),
+            config=types.GenerateContentConfig(
+                systemInstruction=EXTRACTION_SYSTEM_PROMPT,
+                responseMimeType="application/json",
+                responseJsonSchema=_normalize_vertex_json_schema(NutritionExtractionResult.model_json_schema()),
+                temperature=0.1,
+                maxOutputTokens=1024,
+                seed=self.settings.vertex_seed,
+            ),
+        )
+        if isinstance(getattr(response, "parsed", None), dict):
+            payload = response.parsed.get("extraction", response.parsed)
+            result = NutritionExtractionResult.model_validate(payload)
+            result.source = f"vertex:{self.settings.vertex_model}"
+            return result
+
+        response_text = (getattr(response, "text", "") or "").strip()
+        if not response_text:
+            raise RuntimeError("vertex returned an empty extraction response")
+        result = parse_nutrition_extraction_payload_text(response_text)
+        result.source = f"vertex:{self.settings.vertex_model}"
+        return result

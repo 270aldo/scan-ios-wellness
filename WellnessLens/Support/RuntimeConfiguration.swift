@@ -11,6 +11,8 @@ struct RuntimeConfiguration {
     let useAppCheckDebugProvider: Bool
     let plusProductID: String?
     let proProductID: String?
+    let termsOfUseURL: URL?
+    let privacyPolicyURL: URL?
 
     init(
         backendBaseURL: URL?,
@@ -22,7 +24,9 @@ struct RuntimeConfiguration {
         useDemoData: Bool,
         useAppCheckDebugProvider: Bool,
         plusProductID: String?,
-        proProductID: String?
+        proProductID: String?,
+        termsOfUseURL: URL? = nil,
+        privacyPolicyURL: URL? = nil
     ) {
         self.backendBaseURL = backendBaseURL
         self.agentServiceBaseURL = agentServiceBaseURL
@@ -34,6 +38,8 @@ struct RuntimeConfiguration {
         self.useAppCheckDebugProvider = useAppCheckDebugProvider
         self.plusProductID = plusProductID
         self.proProductID = proProductID
+        self.termsOfUseURL = termsOfUseURL
+        self.privacyPolicyURL = privacyPolicyURL
     }
 
     static func load(bundle: Bundle = .main) -> RuntimeConfiguration {
@@ -72,7 +78,9 @@ struct RuntimeConfiguration {
             useDemoData: boolValue("WLUseDemoData", default: true),
             useAppCheckDebugProvider: boolValue("WLUseAppCheckDebugProvider", default: false),
             plusProductID: stringValue("WLPlusProductID"),
-            proProductID: stringValue("WLProProductID")
+            proProductID: stringValue("WLProProductID"),
+            termsOfUseURL: stringValue("WLTermsOfUseURL").flatMap(URL.init(string:)),
+            privacyPolicyURL: stringValue("WLPrivacyPolicyURL").flatMap(URL.init(string:))
         )
     }
 

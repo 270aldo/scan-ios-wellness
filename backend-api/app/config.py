@@ -27,10 +27,19 @@ class Settings(BaseSettings):
     resolver_cache_ttl_seconds: int = 900
     resolver_cache_max_entries: int = 256
     resolver_request_timeout_seconds: int = 5
+    # Comma-separated origins allowed to call the HTTP API from a browser.
+    # Default is empty, which blocks every browser caller. Populate via
+    # `WELLNESSLENS_CORS_ALLOW_ORIGINS` (e.g. "https://wellnesslens.app,https://admin.wellnesslens.app")
+    # when a web surface actually ships.
+    cors_allow_origins: str = ""
 
     @property
     def persistence_mode(self) -> str:
         return "firestore" if self.use_firestore else "in_memory"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allow_origins.split(",") if origin.strip()]
 
 
 @lru_cache(maxsize=1)

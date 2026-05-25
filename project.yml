@@ -26,6 +26,9 @@ targets:
       path: WellnessLens/Support/Info.plist
       properties:
         CFBundleDisplayName: WellnessLens
+        CFBundleLocalizations:
+          - en
+          - es-MX
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - wellnesslens
@@ -46,6 +49,8 @@ targets:
         WLUseAppCheckDebugProvider: $(WL_USE_APP_CHECK_DEBUG_PROVIDER)
         WLPlusProductID: $(WL_PLUS_PRODUCT_ID)
         WLProProductID: $(WL_PRO_PRODUCT_ID)
+        WLTermsOfUseURL: $(WL_TERMS_OF_USE_URL)
+        WLPrivacyPolicyURL: $(WL_PRIVACY_POLICY_URL)
     configFiles:
       Debug: Config/WellnessLens-Debug.xcconfig
       Staging: Config/WellnessLens-Staging.xcconfig

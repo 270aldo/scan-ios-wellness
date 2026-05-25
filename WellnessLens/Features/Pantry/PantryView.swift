@@ -17,9 +17,9 @@ struct PantrySurfacePlan {
     ) -> PantrySurfacePlan {
         if !isUnlocked {
             return PantrySurfacePlan(
-                badgeTitle: "Pro preview",
+                badgeTitle: "Pro access",
                 headline: "Keep your strongest repeat choices visible before convenience wins.",
-                summary: "Pantry turns supportive reads into anchors you can actually reuse. Preview stays deterministic; save, prune, and suggestion actions unlock with Pro.",
+                summary: "Pantry turns supportive reads into anchors you can actually reuse. The on-device read stays available here; save, prune, and suggestion actions unlock with Pro.",
                 primaryActionTitle: "Unlock pantry",
                 primaryActionSystemImage: "sparkles",
                 secondaryActionTitle: "Open scan",
@@ -215,12 +215,12 @@ struct PantryView: View {
             WLCompactCard {
                 VStack(alignment: .leading, spacing: WLSpacing.s) {
                     WLSectionHeader(
-                        title: isUnlocked ? "Next pantry move" : "Preview mode",
+                        title: isUnlocked ? "Next pantry move" : "Pantry overview",
                         subtitle: isUnlocked
                             ? (visibleItems.isEmpty
                                 ? "The first few stronger repeats will turn Pantry into a real shortcut."
                                 : "Suggestions sharpen as repeats, routines, and body signals start agreeing.")
-                            : "Preview the saved anchors now. Unlock Pro when you want Pantry to become active.",
+                            : "See the saved anchors now. Unlock Pro when you want Pantry to become active.",
                         systemImage: isUnlocked ? "sparkles" : "lock"
                     )
 
@@ -240,10 +240,10 @@ struct PantryView: View {
     private var anchorsSection: some View {
         VStack(alignment: .leading, spacing: WLSpacing.m) {
             WLSectionHeader(
-                title: isUnlocked ? "Protected anchors" : "Preview anchors",
+                title: isUnlocked ? "Protected anchors" : "Saved anchors",
                 subtitle: isUnlocked
                     ? "These are the defaults you want visible before a noisy day decides for you."
-                    : "Preview shows what the deterministic engine already thinks is worth keeping close.",
+                    : "This shows what the on-device read already thinks is worth keeping close.",
                 systemImage: "shippingbox"
             )
 
@@ -404,7 +404,7 @@ private struct PantryAnchorCard: View {
                     if isInRoutine {
                         WLPill(title: "In routine", tone: .accent)
                     } else if !isUnlocked {
-                        WLPill(title: "Preview", tone: .soft)
+                        WLPill(title: "Limited", tone: .soft)
                     }
 
                     Spacer()
