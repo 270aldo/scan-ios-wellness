@@ -271,16 +271,16 @@ struct OnboardingFlowView: View {
                     Toggle("Use memory to remember what helps, what hurts, and what you already decided", isOn: $draft.formData.memoryEnabled)
                         .tint(WLPalette.tint)
 
-                    Toggle("Allow AI processing for structured analysis", isOn: $draft.formData.aiProcessingConsent)
+                    Toggle("Permitir procesamiento con IA para análisis y respuestas personalizadas (Vertex AI / Gemini). Puedo desactivarlo en cualquier momento.", isOn: $draft.formData.aiProcessingConsent)
                         .tint(WLPalette.tint)
 
-                    Toggle("Allow health data processing for cycle, recovery, and sleep context", isOn: $draft.formData.healthDataProcessingConsent)
+                    Toggle("Permitir uso de datos de ciclo, sueño, HRV, frecuencia cardíaca y temperatura para personalizar mis guías. Solo salen del dispositivo si activo el procesamiento con IA.", isOn: $draft.formData.healthDataProcessingConsent)
                         .tint(WLPalette.tint)
 
-                    Toggle("Allow analytics that do not include private notes", isOn: $draft.formData.analyticsConsent)
+                    Toggle("Permitir analíticas que no incluyan mis notas privadas", isOn: $draft.formData.analyticsConsent)
                         .tint(WLPalette.tint)
 
-                    Toggle("Enable notifications later for the Daily Brief", isOn: $draft.formData.notificationsConsent)
+                    Toggle("Activar notificaciones para el Daily Brief", isOn: $draft.formData.notificationsConsent)
                         .tint(WLPalette.tint)
 
                     optionalDetailCard(

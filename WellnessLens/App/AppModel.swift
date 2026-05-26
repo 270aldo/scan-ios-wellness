@@ -1857,6 +1857,13 @@ final class AppModel {
             return
         }
 
+        // Respect user consent for remote AI/personalization processing
+        guard canUseRemoteAI else {
+            remoteInsights = []
+            updateBackendStatus(.insights, state: .fallback, detail: "AI processing is off. Using on-device insights generation.")
+            return
+        }
+
         updateBackendStatus(.insights, state: .syncPending, detail: "Refreshing weekly insights.", incrementAttempt: true)
         do {
             remoteInsights = try await backendAPI.getWeeklyInsights(userContext: userContext)
@@ -1891,6 +1898,14 @@ final class AppModel {
                 incrementAttempt: true,
                 incrementFallback: true
             )
+            return
+        }
+
+        // Respect user consent for remote personalization (home payload uses profile context)
+        guard canUseRemoteAI else {
+            remoteHomePayload = nil
+            remoteHomePayloadV2 = nil
+            updateBackendStatus(.home, state: .fallback, detail: "AI processing is off. Using local home composition.")
             return
         }
 
@@ -2525,10 +2540,14 @@ final class AppModel {
     }
 
     private func upsertConsentRecord(_ record: ConsentRecord) {
-        if let index = consentRecords.firstIndex(where: { $0.policyVersion == record.policyVersion }) {
-            consentRecords[index] = record
-        } else {
-            consentRecords.insert(record, at: 0)
+        // Improved for better auditability (LFPDPPP 2025 traceability)
+        // We now append a new record on every consent change instead of replacing.
+        // This creates a basic history of consent decisions over time.
+        consentRecords.insert(record, at: 0)
+
+        // Keep the list bounded
+        if consentRecords.count > 50 {
+            consentRecords = Array(consentRecords.prefix(50))
         }
     }
 

@@ -208,6 +208,14 @@ def build_scan_verdict_task_prompt(request: ScanVerdictRequest) -> str:
                     ]
                 )
             )
+
+        # Explicit Mexico NOM-051 signals (regulatory information, not value judgment)
+        if rp.mexicoNutritionSignals:
+            m = rp.mexicoNutritionSignals
+            labels = [label.value for label in m.warningLabels] if m.warningLabels else []
+            mexico_line = f"- mexicoNOM051Signals: warningLabels={labels}, caffeineWarning={m.containsCaffeineWarning}, sweetenerWarning={m.containsSweetenerWarning}, source={m.source}"
+            resolved_product_lines.append(mexico_line)
+            resolved_product_lines.append("- NOTE: These are official Mexican front-of-pack labeling signals (NOM-051). Frame them as regulatory facts only. Never use them to make moral or health-superiority claims about the whole product.")
     return "\n".join(
         [
             "Evalúa este scan usando el UserContext inyectado y responde solo con JSON válido.",

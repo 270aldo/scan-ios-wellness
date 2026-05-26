@@ -9,6 +9,7 @@ struct ProfileView: View {
     @State private var showBackendAdmin = false
     @State private var showDeleteAccountConfirmation = false
     @State private var isDeletingAccount = false
+    @State private var showConsentSettings = false   // New for dedicated consent screen (Phase B)
 
     var body: some View {
         WLScreen {
@@ -30,6 +31,9 @@ struct ProfileView: View {
                 profile: model.userProfile,
                 onSave: { model.updateUserProfile($0) }
             )
+        }
+        .sheet(isPresented: $showConsentSettings) {
+            ConsentSettingsView()
         }
         .sheet(item: $strategistEntryPoint) { entryPoint in
             StrategistChatView(entryPoint: entryPoint)
@@ -102,6 +106,23 @@ struct ProfileView: View {
                 profileRow(label: "Diet style", value: model.userContext.dietStyle.title)
                 profileRow(label: "Life stage", value: model.userContext.lifeStage.title)
                 profileRow(label: "Memory", value: model.userProfile.memoryEnabled ? "Enabled" : "Limited")
+
+                // Consent status indicator (Phase A)
+                if !model.userProfile.consentFlags.aiProcessing || !model.userProfile.consentFlags.healthDataProcessing {
+                    HStack(spacing: WLSpacing.xs) {
+                        Image(systemName: "exclamationmark.shield")
+                            .foregroundStyle(WLPalette.warning)
+                        Text("Modo local activo — Menor personalización por privacidad")
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                    }
+                    .padding(.top, 4)
+                }
+
+                // Dedicated entry point to consent management (start of Phase B / option C)
+                WLUtilityButton(title: "Privacidad y Consentimientos", systemImage: "hand.raised") {
+                    showConsentSettings = true
+                }
 
                 WLActionGroup {
                     WLPrimaryButton(title: "Open strategist", systemImage: "message") {
@@ -450,13 +471,20 @@ private struct ProfileStrategistEditor: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var formData: StrategistProfileFormData
+    @State private var showWithdrawalConfirmation = false
 
     private let columns = [GridItem(.adaptive(minimum: 148), spacing: WLSpacing.s)]
     private let createdAt: Date
 
+    // Store original consent values to detect withdrawal (important for LFPDPPP 2025)
+    private let originalAiProcessing: Bool
+    private let originalHealthDataProcessing: Bool
+
     init(profile: UserProfile, onSave: @escaping (UserProfile) -> Void) {
         self.onSave = onSave
         self.createdAt = profile.createdAt
+        self.originalAiProcessing = profile.consentFlags.aiProcessing
+        self.originalHealthDataProcessing = profile.consentFlags.healthDataProcessing
         _formData = State(initialValue: StrategistProfileFormData(profile: profile))
     }
 
@@ -537,16 +565,37 @@ private struct ProfileStrategistEditor: View {
                         Toggle("Use cycle-aware framing when relevant", isOn: $formData.optInCycleAware)
                             .tint(WLPalette.tint)
 
-                        Toggle("Allow AI processing", isOn: $formData.aiProcessingConsent)
+                        // Consent section - improved withdrawal messaging (Phase A)
+                        Text("Al desactivar el procesamiento con IA o el uso de datos de salud, la app pasará a modo local. Las guías serán menos personalizadas, pero tus datos no saldrán del dispositivo.")
+                            .font(WLTypography.caption)
+                            .foregroundStyle(WLPalette.inkSoft)
+                            .padding(.top, 8)
+
+                        Toggle("Permitir procesamiento con IA para análisis y respuestas personalizadas", isOn: $formData.aiProcessingConsent)
                             .tint(WLPalette.tint)
 
-                        Toggle("Allow health data processing for cycle, recovery, and sleep context", isOn: $formData.healthDataProcessingConsent)
+                        Toggle("Permitir uso de datos de salud (ciclo, sueño, HRV, etc.) para personalizar guías", isOn: $formData.healthDataProcessingConsent)
                             .tint(WLPalette.tint)
 
-                        Toggle("Allow analytics", isOn: $formData.analyticsConsent)
+                        // Immediate feedback when turning off critical consents (Phase A improvement)
+                        if !formData.aiProcessingConsent && originalAiProcessing {
+                            Text("⚠️ El procesamiento con IA se desactivará al guardar. Los veredictos y el coach pasarán a modo local.")
+                                .font(WLTypography.caption)
+                                .foregroundStyle(WLPalette.warning)
+                                .padding(.top, 4)
+                        }
+
+                        if !formData.healthDataProcessingConsent && originalHealthDataProcessing {
+                            Text("⚠️ El uso de datos de salud se desactivará al guardar. Las guías ya no usarán tu ciclo, sueño ni HRV.")
+                                .font(WLTypography.caption)
+                                .foregroundStyle(WLPalette.warning)
+                                .padding(.top, 4)
+                        }
+
+                        Toggle("Permitir analíticas", isOn: $formData.analyticsConsent)
                             .tint(WLPalette.tint)
 
-                        Toggle("Allow notifications", isOn: $formData.notificationsConsent)
+                        Toggle("Permitir notificaciones", isOn: $formData.notificationsConsent)
                             .tint(WLPalette.tint)
                     }
                 }
@@ -590,12 +639,35 @@ private struct ProfileStrategistEditor: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Save") {
-                        onSave(formData.makeProfile(createdAt: createdAt))
-                        dismiss()
+                        let newAi = formData.aiProcessingConsent
+                        let newHealth = formData.healthDataProcessingConsent
+
+                        let turningOffAI = originalAiProcessing && !newAi
+                        let turningOffHealth = originalHealthDataProcessing && !newHealth
+
+                        if turningOffAI || turningOffHealth {
+                            showWithdrawalConfirmation = true
+                        } else {
+                            onSave(formData.makeProfile(createdAt: createdAt))
+                            dismiss()
+                        }
                     }
                     .font(WLTypography.captionStrong)
                     .disabled(formData.goals.isEmpty)
                 }
+            }
+            .confirmationDialog(
+                "Vas a desactivar el procesamiento con IA",
+                isPresented: $showWithdrawalConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Confirmar y guardar cambios", role: .destructive) {
+                    onSave(formData.makeProfile(createdAt: createdAt))
+                    dismiss()
+                }
+                Button("Cancelar", role: .cancel) { }
+            } message: {
+                Text("Si confirmas, a partir de ahora los veredictos de escaneo y las respuestas del coach se generarán solo en tu dispositivo (sin usar IA remota).\n\nEsto reduce la personalización, pero aumenta tu privacidad. Puedes reactivar esta opción cuando quieras desde tu perfil.")
             }
         }
     }

@@ -28,3 +28,11 @@
 ## Operational Guardrails
 - Keep debug providers off in production.
 - Log moderation and safety-guard applications with non-sensitive payloads only.
+
+## Mexico-Specific Guardrails (NOM-051 + COFEPRIS)
+
+- Las señales de "Exceso de ..." (calorías, azúcares, sodio, grasas saturadas, grasas trans) son **información regulatoria oficial** según la NOM-051. Se comunican como datos, no como juicios de valor sobre el producto completo.
+- Nunca se usa el lenguaje de sellos NOM-051 para recomendar o desaconsejar el consumo del producto en su totalidad.
+- En contextos de embarazo, postparto, perimenopausia y menopausia se mantiene el estándar más alto de humildad epistémica y derivación a profesionales de la salud.
+- Todo el lenguaje de veredictos, razones y watchouts debe seguir la guía `MEXICO_CLAIMS_GUIDE.md` (tabla Safe / Gray / Red).
+- El posicionamiento general del producto en México es: **herramienta de información y apoyo a la toma de decisiones personales de bienestar**, nunca como fuente de consejo médico, nutricional clínico o terapéutico.
